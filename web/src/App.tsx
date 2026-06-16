@@ -47,9 +47,9 @@ function Sidebar() {
             end={n.end}
             className={({ isActive }) =>
               cx(
-                'flex items-center gap-2.5 px-2.5 rounded-md text-sm font-medium transition-colors',
+                't-body flex items-center gap-2.5 px-2.5 rounded-md font-medium transition-colors',
                 isActive
-                  ? 'bg-surface2 text-text'
+                  ? 'bg-accent-soft text-accent'
                   : 'text-muted hover:text-text hover:bg-surface2',
               )
             }
@@ -73,15 +73,15 @@ function ThemeSwitcher() {
   const active = THEMES.find((t) => t.id === theme)
   return (
     <div className="flex items-center gap-2">
-      <div className="hidden md:flex items-center gap-1 p-1 rounded-md bg-surface2 border border-border">
+      <div className="hidden md:flex items-center gap-0.5 p-1 rounded-md bg-surface2 border border-border">
         {THEMES.map((t) => (
           <button
             key={t.id}
             onClick={() => setTheme(t.id)}
             title={t.blurb}
             className={cx(
-              'px-2.5 py-1 rounded-sm text-xs font-medium transition-colors',
-              theme === t.id ? 'bg-surface text-text shadow-sm' : 'text-muted hover:text-text',
+              'px-2 py-1 rounded-sm text-xs font-medium transition-colors whitespace-nowrap',
+              theme === t.id ? 'bg-accent text-accent-fg shadow-sm' : 'text-muted hover:text-text',
             )}
           >
             {t.name}
@@ -95,9 +95,7 @@ function ThemeSwitcher() {
       >
         {mode === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
       </button>
-      <div className="hidden lg:block text-xs text-muted w-28 leading-tight">
-        {active?.blurb}
-      </div>
+      <div className="hidden xl:block t-caption text-muted w-32 leading-tight">{active?.blurb}</div>
     </div>
   )
 }

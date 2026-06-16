@@ -45,8 +45,8 @@ export function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <Card className="p-5 lg:col-span-2">
           <div className="flex items-baseline justify-between mb-4">
-            <h2 className="font-semibold text-text">Revenue by order</h2>
-            <span className="text-xs text-muted">{customers.length} customers · {products.length} products</span>
+            <h2 className="t-h2 text-text">Revenue by order</h2>
+            <span className="t-caption text-muted">{customers.length} customers · {products.length} products</span>
           </div>
           <div className="flex items-end gap-3 h-40">
             {bars.map((o) => (
@@ -58,23 +58,23 @@ export function Dashboard() {
                     title={fmtMoney(orderTotal(o))}
                   />
                 </div>
-                <span className="text-[11px] text-muted font-mono">{o.ref.replace('S000', '#')}</span>
+                <span className="t-mono text-muted">{o.ref.replace('S000', '#')}</span>
               </div>
             ))}
           </div>
         </Card>
 
         <Card className="p-5">
-          <h2 className="font-semibold text-text mb-4">Pipeline</h2>
+          <h2 className="t-h2 text-text mb-4">Pipeline</h2>
           <div className="space-y-3">
             {(['draft', 'sent', 'done', 'cancel'] as const).map((st) => {
               const n = orders.filter((o) => o.state === st).length
               const pct = (n / orders.length) * 100
               return (
                 <div key={st}>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-muted capitalize">{st}</span>
-                    <span className="text-text font-mono">{n}</span>
+                  <div className="flex justify-between mb-1">
+                    <span className="t-caption text-muted capitalize">{st}</span>
+                    <span className="t-mono text-text">{n}</span>
                   </div>
                   <div className="h-1.5 rounded-full bg-surface2 overflow-hidden">
                     <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
@@ -86,7 +86,7 @@ export function Dashboard() {
         </Card>
       </div>
 
-      <h2 className="font-semibold text-text mb-3">Recent orders</h2>
+      <h2 className="t-h2 text-text mb-3">Recent orders</h2>
       <DataTable columns={cols} rows={recent} rowKey={(o) => o.id} onRowClick={(o) => nav(`/orders/${o.id}`)} />
     </div>
   )

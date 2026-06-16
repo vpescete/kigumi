@@ -59,18 +59,18 @@ export function OrderDetail() {
 
       {/* Detail / inlined line items */}
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-semibold text-text">Order lines</h2>
+        <h2 className="t-h2 text-text">Order lines</h2>
         <Button variant="ghost" icon={<Plus size={16} />}>Add a line</Button>
       </div>
 
       <Card className="overflow-hidden">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="border-b border-border text-[11px] uppercase tracking-wide text-muted">
-              <th className="text-left font-semibold px-4 py-2.5">Product</th>
-              <th className="text-right font-semibold px-4 py-2.5 w-20">Qty</th>
-              <th className="text-right font-semibold px-4 py-2.5 w-32">Unit price</th>
-              <th className="text-right font-semibold px-4 py-2.5 w-32">Subtotal</th>
+            <tr className="border-b border-border text-muted">
+              <th className="t-label text-left px-4 py-2.5">Product</th>
+              <th className="t-label text-right px-4 py-2.5 w-20">Qty</th>
+              <th className="t-label text-right px-4 py-2.5 w-32">Unit price</th>
+              <th className="t-label text-right px-4 py-2.5 w-32">Subtotal</th>
             </tr>
           </thead>
           <tbody>
@@ -80,12 +80,10 @@ export function OrderDetail() {
                 className="border-b border-border last:border-0 hover:bg-surface2"
                 style={{ height: 'var(--density-row)' }}
               >
-                <td className="px-4 text-text font-medium">{l.product}</td>
-                <td className="px-4 text-right font-mono tabular-nums text-muted">{l.qty}</td>
-                <td className="px-4 text-right font-mono tabular-nums text-muted">{fmtMoney(l.price)}</td>
-                <td className="px-4 text-right font-mono tabular-nums text-text font-medium">
-                  {fmtMoney(lineSubtotal(l))}
-                </td>
+                <td className="px-4 t-body text-text font-medium">{l.product}</td>
+                <td className="px-4 text-right t-mono text-muted">{l.qty}</td>
+                <td className="px-4 text-right t-mono text-muted">{fmtMoney(l.price)}</td>
+                <td className="px-4 text-right t-mono text-text font-medium">{fmtMoney(lineSubtotal(l))}</td>
               </tr>
             ))}
           </tbody>
@@ -93,11 +91,11 @@ export function OrderDetail() {
 
         {/* Totals footer — amount_total is the aggregate compute over the inlined lines */}
         <div className="flex justify-end border-t border-border bg-surface2 px-4 py-4">
-          <div className="w-64 space-y-2 text-sm">
+          <div className="w-64 space-y-2">
             <Row label="Untaxed" value={fmtMoney(subtotal)} />
             <Row label="Tax (22%)" value={fmtMoney(tax)} muted />
             <div className="border-t border-border pt-2 flex justify-between items-baseline">
-              <span className="font-semibold text-text">Total</span>
+              <span className="t-body font-semibold text-text">Total</span>
               <span className="font-mono tabular-nums text-lg font-semibold text-accent">
                 {fmtMoney(total)}
               </span>
@@ -122,11 +120,11 @@ function Field({
 }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wide text-muted mb-1.5">{label}</div>
+      <div className="t-label text-muted mb-1.5">{label}</div>
       <div
         className={
+          (mono ? 't-mono ' : 't-subtitle ') +
           'font-medium ' +
-          (mono ? 'font-mono tabular-nums ' : '') +
           (accent ? 'text-accent' : 'text-text')
         }
       >
@@ -139,8 +137,8 @@ function Field({
 function Row({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
   return (
     <div className="flex justify-between">
-      <span className="text-muted">{label}</span>
-      <span className={'font-mono tabular-nums ' + (muted ? 'text-muted' : 'text-text')}>{value}</span>
+      <span className="t-body text-muted">{label}</span>
+      <span className={'t-mono ' + (muted ? 'text-muted' : 'text-text')}>{value}</span>
     </div>
   )
 }

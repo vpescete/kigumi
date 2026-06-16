@@ -1,14 +1,19 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 
-export type ThemeName = 'linear' | 'stripe' | 'notion'
+export type ThemeName = 'graphite' | 'editorial' | 'swiss' | 'humanist' | 'monotech'
 export type Mode = 'light' | 'dark'
 
-/** The three design systems, with their natural default mode and a one-line character. */
+/** The five design systems, with their natural default mode and a one-line character. */
 export const THEMES: { id: ThemeName; name: string; blurb: string; defaultMode: Mode }[] = [
-  { id: 'linear', name: 'Linear', blurb: 'Dark · dense · keyboard-first', defaultMode: 'dark' },
-  { id: 'stripe', name: 'Stripe', blurb: 'Light · airy · refined', defaultMode: 'light' },
-  { id: 'notion', name: 'Notion', blurb: 'Light · soft · approachable', defaultMode: 'light' },
+  { id: 'graphite', name: 'Graphite', blurb: 'Dark dev-console · cyan · dense', defaultMode: 'dark' },
+  { id: 'editorial', name: 'Editorial', blurb: 'Warm serif · terracotta · airy', defaultMode: 'light' },
+  { id: 'swiss', name: 'Swiss', blurb: 'Bold grid · signal red · flat', defaultMode: 'light' },
+  { id: 'humanist', name: 'Verdigris', blurb: 'Friendly · emerald · rounded', defaultMode: 'light' },
+  { id: 'monotech', name: 'Mono-Tech', blurb: 'Ops console · amber · mono', defaultMode: 'dark' },
 ]
+
+const IDS = THEMES.map((t) => t.id)
+const isTheme = (v: string | null): v is ThemeName => !!v && (IDS as string[]).includes(v)
 
 type Ctx = {
   theme: ThemeName
@@ -19,10 +24,15 @@ type Ctx = {
 const ThemeCtx = createContext<Ctx | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeName>(
-    () => (localStorage.getItem('msh-theme') as ThemeName) || 'linear',
-  )
-  const [mode, setMode] = useState<Mode>(() => (localStorage.getItem('msh-mode') as Mode) || 'dark')
+  // Validate persisted values — a theme id from an earlier build would leave the app uncolored.
+  const [theme, setThemeState] = useState<ThemeName>(() => {
+    const saved = localStorage.getItem('msh-theme')
+    return isTheme(saved) ? saved : 'graphite'
+  })
+  const [mode, setMode] = useState<Mode>(() => {
+    const saved = localStorage.getItem('msh-mode')
+    return saved === 'light' || saved === 'dark' ? saved : 'dark'
+  })
 
   useEffect(() => {
     const el = document.documentElement

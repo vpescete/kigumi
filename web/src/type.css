@@ -1,0 +1,42 @@
+/* ── TYPE SCALE ───────────────────────────────────────────────────────────────
+   Per-role typographic classes. Each design system sets the role variables
+   (--t-<role> shorthand + --tr-<role> tracking + --tt-<role> transform) on its
+   [data-theme] block, so the SAME markup gets a different type system per theme —
+   different fonts for display vs body vs labels vs numbers, not just colors.
+   Fallbacks keep text sane before a theme defines its scale.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.t-display {
+  font: var(--t-display, 600 30px/1.1 var(--font-display, var(--font-sans)));
+  letter-spacing: var(--tr-display, -0.02em);
+}
+.t-h1 {
+  font: var(--t-h1, 600 22px/1.2 var(--font-display, var(--font-sans)));
+  letter-spacing: var(--tr-h1, -0.015em);
+}
+.t-h2 {
+  font: var(--t-h2, 600 16px/1.3 var(--font-display, var(--font-sans)));
+  letter-spacing: var(--tr-h2, -0.01em);
+}
+.t-subtitle {
+  font: var(--t-subtitle, 400 15px/1.5 var(--font-body, var(--font-sans)));
+  letter-spacing: var(--tr-subtitle, 0);
+}
+.t-body {
+  font: var(--t-body, 400 14px/1.5 var(--font-body, var(--font-sans)));
+  letter-spacing: var(--tr-body, 0);
+}
+.t-label {
+  font: var(--t-label, 600 11px/1.4 var(--font-body, var(--font-sans)));
+  letter-spacing: var(--tr-label, 0.06em);
+  text-transform: var(--tt-label, uppercase);
+}
+.t-caption {
+  font: var(--t-caption, 400 12px/1.4 var(--font-body, var(--font-sans)));
+  letter-spacing: var(--tr-caption, 0);
+}
+.t-mono {
+  font: var(--t-mono, 500 13px/1.4 var(--font-mono));
+  letter-spacing: var(--tr-mono, 0);
+  font-variant-numeric: tabular-nums;
+}

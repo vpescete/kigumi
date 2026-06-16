@@ -17,6 +17,7 @@ export default {
           DEFAULT: 'var(--color-accent)',
           fg: 'var(--color-accent-fg)',
           hover: 'var(--color-accent-hover)',
+          soft: 'var(--color-accent-soft)',
         },
         success: { DEFAULT: 'var(--color-success)', bg: 'var(--color-success-bg)' },
         warning: { DEFAULT: 'var(--color-warning)', bg: 'var(--color-warning-bg)' },

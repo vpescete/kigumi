@@ -96,8 +96,8 @@ export function PageHeader({
   return (
     <div className="flex items-start justify-between gap-4 mb-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-text">{title}</h1>
-        {subtitle && <p className="text-muted mt-1">{subtitle}</p>}
+        <h1 className="t-h1 text-text">{title}</h1>
+        {subtitle && <p className="t-subtitle text-muted mt-1.5">{subtitle}</p>}
       </div>
       {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
     </div>
@@ -133,7 +133,7 @@ export function DataTable<T>({
                 key={i}
                 style={{ width: c.width }}
                 className={cx(
-                  'px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted',
+                  't-label px-4 py-2.5 text-muted',
                   c.align === 'right' ? 'text-right' : 'text-left',
                 )}
               >
@@ -159,7 +159,7 @@ export function DataTable<T>({
                   className={cx(
                     'px-4',
                     c.align === 'right' ? 'text-right' : 'text-left',
-                    c.mono && 'font-mono tabular-nums',
+                    c.mono ? 't-mono' : 't-body',
                   )}
                 >
                   {c.render(row)}
@@ -188,16 +188,12 @@ export function Stat({
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between">
-        <span className="text-muted text-sm">{label}</span>
+        <span className="t-caption text-muted">{label}</span>
         {icon && <span className="text-muted">{icon}</span>}
       </div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight text-text font-mono tabular-nums">
-        {value}
-      </div>
+      <div className="mt-2 t-display text-text">{value}</div>
       {delta && (
-        <div
-          className={cx('mt-1 text-xs font-medium', delta.dir === 'up' ? 'text-success' : 'text-danger')}
-        >
+        <div className={cx('mt-1.5 t-caption font-medium', delta.dir === 'up' ? 'text-success' : 'text-danger')}>
           {delta.dir === 'up' ? '▲' : '▼'} {delta.text}
         </div>
       )}
