@@ -247,6 +247,7 @@ meshble/
 │   ├── meshble-core/          # Registry, ORM traits, Ctx, RecordSet, domini AST
 │   ├── meshble-macros/        # proc-macro: #[model], #[field], #[extend], #[action]
 │   ├── meshble-schema/        # ResolvedModel → DDL, OpenAPI, GraphQL, UI-contract
+│   ├── meshble-db/            # persistenza Postgres (sqlx): DDL + query parametrizzate dal Domain
 │   ├── meshble-server/        # Tokio + axum: monta REST/GraphQL dal Registry
 │   └── meshble/               # facade: prelude, re-export
 ├── modules/
@@ -278,6 +279,9 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
    `invisible_when`/`readonly_when` sono nel contratto-UI come **AST JSON portabile**
    (`Domain::to_json`), validate contro il modello — stesso domain che il server compila in SQL.
 5. **OpenAPI/GraphQL + generazione SDK**.
-6. **Persistenza reale (sqlx) + migrazioni generate**.
+6. **Persistenza reale (sqlx) + migrazioni generate**. 🟡 In corso: `meshble-db` (crate
+   separato, backend pluggable — il core resta headless) esegue il DDL generato e le query con
+   `WHERE` compilato dal `Domain` e **parametrizzato**, provato end-to-end contro Postgres reale
+   (incl. test anti-injection a runtime). ⬅ restano le **migrazioni versionate** (schema+dati).
 
 Il punto 1 è nel codice del workspace; il resto sono fasi successive da validare una alla volta.

@@ -1,0 +1,15 @@
+[package]
+name = "meshble-db"
+description = "Postgres persistence: run generated DDL and execute domain-compiled parameterized queries"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meshble-core = { workspace = true }
+meshble-schema = { workspace = true }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
