@@ -1,13 +1,13 @@
-//! Catalogo dei moduli: i modelli e le estensioni si AUTO-REGISTRANO via `inventory`,
-//! e il resolver li fonde senza wiring manuale.
+//! Module catalog: models and extensions AUTO-REGISTER via `inventory`,
+//! and the resolver merges them with no manual wiring.
 //!
-//! È l'equivalente dell'`_inherit` di Odoo, ma a build/link time e con confini netti:
-//! le estensioni sono dati separati, fusi con check dei conflitti (`resolve`), non un
-//! monkey-patch che muta una classe a runtime.
+//! It is the equivalent of Odoo's `_inherit`, but at build/link time and with clean
+//! boundaries: extensions are separate data, merged with conflict checks (`resolve`), not a
+//! monkey-patch that mutates a class at runtime.
 
 use crate::{resolve, validate_depends, FieldDef, ModelDescriptor, ResolvedModel};
 
-/// Registrazione di un modello base (emessa da `#[model]`).
+/// Registration of a base model (emitted by `#[model]`).
 pub struct ModelRegistration {
     pub name: &'static str,
     pub module: &'static str,
@@ -15,7 +15,7 @@ pub struct ModelRegistration {
 }
 inventory::collect!(ModelRegistration);
 
-/// Registrazione di un'estensione di campi (emessa da `#[extend]`).
+/// Registration of a field extension (emitted by `#[extend]`).
 pub struct FieldExtension {
     pub target: &'static str,
     pub module: &'static str,
@@ -23,19 +23,19 @@ pub struct FieldExtension {
 }
 inventory::collect!(FieldExtension);
 
-/// Risolve un modello dal CATALOGO: base registrata + tutte le estensioni auto-registrate,
-/// fuse (con check dei conflitti) e validate. Nessun wiring: i moduli si auto-registrano.
+/// Resolves a model from the CATALOG: registered base + all auto-registered extensions,
+/// merged (with conflict checks) and validated. No wiring: modules auto-register.
 pub fn resolve_registered(model: &str) -> Result<ResolvedModel, String> {
     let base = inventory::iter::<ModelRegistration>
         .into_iter()
         .find(|r| r.name == model)
-        .ok_or_else(|| format!("modello '{model}' non registrato nel catalogo"))?;
+        .ok_or_else(|| format!("model '{model}' not registered in the catalog"))?;
 
     let mut exts: Vec<&'static FieldExtension> = inventory::iter::<FieldExtension>
         .into_iter()
         .filter(|e| e.target == model)
         .collect();
-    exts.sort_by_key(|e| e.module); // ordine deterministico tra moduli
+    exts.sort_by_key(|e| e.module); // deterministic ordering across modules
 
     let ext_fields: Vec<&'static [FieldDef]> = exts.iter().map(|e| (e.fields)()).collect();
     let m = resolve((base.descriptor)(), &ext_fields)?;

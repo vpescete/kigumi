@@ -1,30 +1,30 @@
-//! Versioning dei moduli — l'equivalente del `__manifest__.py` di Odoo, ma con
-//! range di versione VERIFICATI (Odoo dichiara `depends` senza alcun vincolo di versione).
+//! Module versioning — the equivalent of Odoo's `__manifest__.py`, but with
+//! VERIFIED version ranges (Odoo declares `depends` without any version constraint).
 //!
-//! Scelte chiave (vedi `docs/VERSIONING.md`):
-//! - Il framework usa SemVer (Cargo-native).
-//! - Ogni modulo ha versione propria + un range di compatibilità col framework
-//!   (NO accoppiamento lockstep stile Odoo "19.0.1.0.0").
-//! - Le dipendenze tra moduli hanno range SemVer → risoluzione verificabile.
+//! Key choices (see `docs/VERSIONING.md`):
+//! - The framework uses SemVer (Cargo-native).
+//! - Every module has its own version + a compatibility range with the framework
+//!   (NO Odoo-style lockstep coupling like "19.0.1.0.0").
+//! - Dependencies between modules have SemVer ranges → verifiable resolution.
 
 use semver::{Version, VersionReq};
 
-/// Dipendenza verso un altro modulo, con vincolo di versione SemVer (es. "^1.2").
+/// Dependency on another module, with a SemVer version constraint (e.g. "^1.2").
 #[derive(Clone, Copy, Debug)]
 pub struct ModuleDep {
     pub name: &'static str,
     pub req: &'static str,
 }
 
-/// Manifest di un modulo. Dato dichiarativo, validato a build/install time.
+/// Manifest of a module. Declarative data, validated at build/install time.
 #[derive(Clone, Copy, Debug)]
 pub struct ModuleManifest {
     pub name: &'static str,
-    /// SemVer del modulo, es. "1.0.0".
+    /// SemVer of the module, e.g. "1.0.0".
     pub version: &'static str,
-    /// Range di compatibilità col framework, es. ">=0.1, <0.2".
+    /// Compatibility range with the framework, e.g. ">=0.1, <0.2".
     pub framework: &'static str,
-    /// Dipendenze verso altri moduli, con range di versione.
+    /// Dependencies on other modules, with version ranges.
     pub depends: &'static [ModuleDep],
     pub summary: &'static str,
 }
@@ -36,8 +36,8 @@ pub enum ResolutionError {
     Incompatible { module: String, needs: String, found: String },
 }
 
-/// Verifica che `manifest` sia compatibile con la versione del framework fornita.
-/// È il controllo che Odoo NON fa: lì un modulo "19.0" gira (o si rompe) su qualsiasi 19.x.
+/// Verifies that `manifest` is compatible with the provided framework version.
+/// This is the check Odoo does NOT do: there a "19.0" module runs (or breaks) on any 19.x.
 pub fn check_compat(
     manifest: &ModuleManifest,
     framework_version: &str,
@@ -45,9 +45,9 @@ pub fn check_compat(
     let fw = Version::parse(framework_version)
         .map_err(|e| ResolutionError::BadVersion(format!("framework: {e}")))?;
     let _ = Version::parse(manifest.version)
-        .map_err(|e| ResolutionError::BadVersion(format!("modulo {}: {e}", manifest.name)))?;
+        .map_err(|e| ResolutionError::BadVersion(format!("module {}: {e}", manifest.name)))?;
     let req = VersionReq::parse(manifest.framework)
-        .map_err(|e| ResolutionError::BadRequirement(format!("modulo {}: {e}", manifest.name)))?;
+        .map_err(|e| ResolutionError::BadRequirement(format!("module {}: {e}", manifest.name)))?;
     if !req.matches(&fw) {
         return Err(ResolutionError::Incompatible {
             module: manifest.name.to_string(),
@@ -77,10 +77,10 @@ mod tests {
 
     #[test]
     fn incompatible_framework_rejected() {
-        // 0.2.0 esce dal range ">=0.1, <0.2" → errore, mentre Odoo lo lascerebbe passare.
+        // 0.2.0 falls outside the range ">=0.1, <0.2" → error, whereas Odoo would let it pass.
         match check_compat(&M, "0.2.0") {
             Err(ResolutionError::Incompatible { .. }) => {}
-            other => panic!("atteso Incompatible, ottenuto {other:?}"),
+            other => panic!("expected Incompatible, got {other:?}"),
         }
     }
 }

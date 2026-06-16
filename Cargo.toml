@@ -2,9 +2,9 @@
 resolver = "2"
 members = ["crates/*", "modules/*"]
 
-# Versione del FRAMEWORK (SemVer, pre-1.0). Tutti i crate del core la condividono.
-# I MODULI hanno versione propria e dichiarano un range di compatibilità col framework.
-# Vedi docs/VERSIONING.md.
+# FRAMEWORK version (SemVer, pre-1.0). All core crates share it.
+# MODULES have their own version and declare a compatibility range with the framework.
+# See docs/VERSIONING.md.
 [workspace.package]
 version = "0.1.0"
 edition = "2021"

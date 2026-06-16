@@ -1,12 +1,12 @@
-//! Macro del framework. Fase 2: `#[model]` genera il `ModelDescriptor` statico + `impl Model`
-//! da una struct annotata, eliminando i descrittori scritti a mano.
+//! Framework macros. Phase 2: `#[model]` generates the static `ModelDescriptor` + `impl Model`
+//! from an annotated struct, eliminating hand-written descriptors.
 //!
-//! La struct in input è un DSL dichiarativo: i suoi "tipi" di campo (`Text`, `Many2one`, …)
-//! sono parole chiave che la macro mappa su `FieldKind`; la struct originale viene SOSTITUITA
-//! da un marker type (`pub struct SaleOrder;`) su cui l'utente può scrivere i metodi.
+//! The input struct is a declarative DSL: its field "types" (`Text`, `Many2one`, …)
+//! are keywords that the macro maps onto `FieldKind`; the original struct is REPLACED
+//! by a marker type (`pub struct SaleOrder;`) on which the user can write methods.
 //!
-//! Il codice generato usa path assoluti `::meshble::prelude::…`, quindi i moduli devono
-//! dipendere dal crate facade `meshble` (è già la convenzione del workspace).
+//! The generated code uses absolute paths `::meshble::prelude::…`, so modules must
+//! depend on the `meshble` facade crate (this is already the workspace convention).
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -32,15 +32,15 @@ pub fn model(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
     let model_name = meta_str(args, "name")
-        .ok_or_else(|| err(&input.ident, "#[model] richiede `name = \"...\"`"))?;
+        .ok_or_else(|| err(&input.ident, "#[model] requires `name = \"...\"`"))?;
     let table = meta_str(args, "table").unwrap_or_else(|| model_name.replace('.', "_"));
 
     let fields = match &input.data {
         Data::Struct(s) => match &s.fields {
             Fields::Named(n) => &n.named,
-            _ => return Err(err(&input.ident, "#[model] richiede una struct con campi nominati")),
+            _ => return Err(err(&input.ident, "#[model] requires a struct with named fields")),
         },
-        _ => return Err(err(&input.ident, "#[model] si applica solo a una struct")),
+        _ => return Err(err(&input.ident, "#[model] only applies to a struct")),
     };
 
     let mut field_toks: Vec<TokenStream2> = Vec::new();
@@ -65,7 +65,7 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
             }
         }
 
-        // Auto-registrazione nel catalogo: niente wiring manuale.
+        // Auto-registration in the catalog: no manual wiring.
         ::meshble::inventory::submit! {
             ::meshble::prelude::ModelRegistration {
                 name: #model_name,
@@ -76,8 +76,8 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
     })
 }
 
-/// `#[extend("sale.order")]` — aggiunge campi a un modello definito altrove.
-/// Le estensioni si auto-registrano e vengono fuse da `resolve_registered`.
+/// `#[extend("sale.order")]` — adds fields to a model defined elsewhere.
+/// Extensions auto-register and are merged by `resolve_registered`.
 #[proc_macro_attribute]
 pub fn extend(attr: TokenStream, item: TokenStream) -> TokenStream {
     let target = parse_macro_input!(attr as LitStr);
@@ -92,9 +92,9 @@ fn expand_extend(target: &LitStr, input: &DeriveInput) -> syn::Result<TokenStrea
     let fields = match &input.data {
         Data::Struct(s) => match &s.fields {
             Fields::Named(n) => &n.named,
-            _ => return Err(err(&input.ident, "#[extend] richiede una struct con campi nominati")),
+            _ => return Err(err(&input.ident, "#[extend] requires a struct with named fields")),
         },
-        _ => return Err(err(&input.ident, "#[extend] si applica solo a una struct")),
+        _ => return Err(err(&input.ident, "#[extend] only applies to a struct")),
     };
 
     let mut field_toks: Vec<TokenStream2> = Vec::new();
@@ -129,10 +129,10 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
     let fname = f
         .ident
         .as_ref()
-        .ok_or_else(|| err(f, "campo senza nome"))?
+        .ok_or_else(|| err(f, "field without a name"))?
         .to_string();
 
-    // Raccogli i meta di #[field(...)].
+    // Collect the meta items from #[field(...)].
     let mut metas: Vec<Meta> = Vec::new();
     for a in &f.attrs {
         if a.path().is_ident("field") {
@@ -141,10 +141,10 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
         }
     }
 
-    // Il "tipo" del campo nel DSL → variante FieldKind.
+    // The field "type" in the DSL → FieldKind variant.
     let kind_name = match &f.ty {
         Type::Path(tp) => tp.path.segments.last().unwrap().ident.to_string(),
-        _ => return Err(err(&f.ty, "tipo di campo non riconosciuto")),
+        _ => return Err(err(&f.ty, "unrecognized field type")),
     };
 
     let kind = match kind_name.as_str() {
@@ -160,7 +160,7 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
         }
         "Selection" => {
             let sel = meta_str(&metas, "selection")
-                .ok_or_else(|| err(&f.ty, "Selection richiede `selection = \"k:Label,...\"`"))?;
+                .ok_or_else(|| err(&f.ty, "Selection requires `selection = \"k:Label,...\"`"))?;
             let pairs: Vec<TokenStream2> = sel
                 .split(',')
                 .filter(|p| !p.trim().is_empty())
@@ -175,20 +175,20 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
         }
         "Many2one" => {
             let target = meta_str(&metas, "target")
-                .ok_or_else(|| err(&f.ty, "Many2one richiede `target = \"model.name\"`"))?;
+                .ok_or_else(|| err(&f.ty, "Many2one requires `target = \"model.name\"`"))?;
             quote! { ::meshble::prelude::FieldKind::Many2one { target: #target } }
         }
         "One2many" => {
             let target = meta_str(&metas, "target")
-                .ok_or_else(|| err(&f.ty, "One2many richiede `target = \"...\"`"))?;
+                .ok_or_else(|| err(&f.ty, "One2many requires `target = \"...\"`"))?;
             let inverse = meta_str(&metas, "inverse")
-                .ok_or_else(|| err(&f.ty, "One2many richiede `inverse = \"...\"`"))?;
+                .ok_or_else(|| err(&f.ty, "One2many requires `inverse = \"...\"`"))?;
             quote! { ::meshble::prelude::FieldKind::One2many { target: #target, inverse: #inverse } }
         }
         other => {
             return Err(err(
                 &f.ty,
-                &format!("tipo di campo sconosciuto: `{other}` (usa Text/Integer/Decimal/Bool/Selection/Many2one/One2many)"),
+                &format!("unknown field type: `{other}` (use Text/Integer/Decimal/Bool/Selection/Many2one/One2many)"),
             ))
         }
     };
@@ -196,7 +196,7 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
     let label = meta_str(&metas, "label").unwrap_or_else(|| fname.clone());
     let required = meta_flag(&metas, "required");
     let compute = meta_str(&metas, "compute");
-    // stored: one2many mai; computed solo con `store`; altrimenti sì.
+    // stored: never for one2many; computed only with `store`; otherwise yes.
     let stored = if kind_name == "One2many" {
         false
     } else if compute.is_some() {

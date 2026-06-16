@@ -1,10 +1,10 @@
-//! Facade del framework Meshble. I moduli applicativi dipendono solo da questo crate.
+//! Facade for the Meshble framework. Application modules depend only on this crate.
 
-// Re-export di inventory così le macro possono emettere `::meshble::inventory::submit!`
-// senza che ogni modulo debba aggiungere la dipendenza.
+// Re-export of inventory so that macros can emit `::meshble::inventory::submit!`
+// without every module having to add the dependency.
 pub use meshble_core::inventory;
 
-/// Tutto ciò che serve per definire un modulo: `use meshble::prelude::*;`
+/// Everything needed to define a module: `use meshble::prelude::*;`
 pub mod prelude {
     pub use meshble_core::{
         check_compat, resolve, resolve_registered, validate_depends, FieldDef, FieldExtension,

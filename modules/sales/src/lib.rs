@@ -1,20 +1,20 @@
-//! Modulo applicativo `sales`: `sale.order` + estensione `sale_margin`.
-//! Definito a mano nel walking skeleton; alla fase 2 sarà `#[model]` / `#[extend]`.
+//! Application module `sales`: `sale.order` + `sale_margin` extension.
+//! Defined by hand in the walking skeleton; in phase 2 it will be `#[model]` / `#[extend]`.
 
 use meshble::prelude::*;
 
-/// Manifest del modulo: versione propria + range di compatibilità col framework.
-/// Equivalente del `__manifest__.py` di Odoo, ma con versioni verificabili.
+/// Module manifest: its own version + compatibility range with the framework.
+/// Equivalent to Odoo's `__manifest__.py`, but with verifiable versions.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "sales",
     version: "1.0.0",
     framework: ">=0.1, <0.2",
     depends: &[ModuleDep { name: "base", req: "^0.1" }],
-    summary: "Gestione ordini di vendita",
+    summary: "Sales order management",
 };
 
-/// La "base" di sale.order — ora dichiarata con `#[model]` (fase 2).
-/// La macro genera `ModelDescriptor` + `impl Model`; i "tipi" dei campi sono il DSL.
+/// The "base" of sale.order — now declared with `#[model]` (phase 2).
+/// The macro generates `ModelDescriptor` + `impl Model`; the field "types" are the DSL.
 #[model(name = "sale.order", table = "sale_order")]
 pub struct SaleOrder {
     #[field(label = "Order Reference", required)]
@@ -36,17 +36,17 @@ pub struct SaleOrder {
     amount_total: Decimal,
 }
 
-/// Estensione `sale_margin`: aggiunge `margin` via `#[extend]`, SENZA toccare la base.
-/// Si auto-registra nel catalogo (fase 3) — nessun wiring in `resolved_sale_order`.
+/// `sale_margin` extension: adds `margin` via `#[extend]`, WITHOUT touching the base.
+/// It auto-registers in the catalog (phase 3) — no wiring in `resolved_sale_order`.
 #[extend("sale.order")]
 pub struct SaleMargin {
     #[field(label = "Margin", compute = "compute_margin", depends = "amount_total", currency = "currency_id", store)]
     margin: Decimal,
 }
 
-/// Risolve il modello completo del modulo dal catalogo (base + estensioni auto-registrate).
+/// Resolves the module's complete model from the catalog (base + auto-registered extensions).
 pub fn resolved_sale_order() -> ResolvedModel {
-    resolve_registered("sale.order").expect("risoluzione sale.order")
+    resolve_registered("sale.order").expect("sale.order resolution")
 }
 
 #[cfg(test)]
@@ -54,37 +54,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn manifest_compatibile_col_framework() {
-        // Il framework dichiara FRAMEWORK_VERSION (0.1.0); il modulo accetta ">=0.1, <0.2".
+    fn manifest_compatible_with_framework() {
+        // The framework declares FRAMEWORK_VERSION (0.1.0); the module accepts ">=0.1, <0.2".
         assert!(check_compat(&MANIFEST, FRAMEWORK_VERSION).is_ok());
     }
 
     #[test]
-    fn estensione_margin_fusa() {
+    fn margin_extension_merged() {
         let m = resolved_sale_order();
         assert_eq!(m.fields.len(), SaleOrder::descriptor().fields.len() + 1);
         assert!(m.fields.iter().any(|f| f.name == "margin"));
     }
 
     #[test]
-    fn macro_genera_descrittore_corretto() {
-        // La macro deve produrre lo STESSO descrittore della versione scritta a mano.
+    fn macro_generates_correct_descriptor() {
+        // The macro must produce the SAME descriptor as the hand-written version.
         let d = SaleOrder::descriptor();
         assert_eq!(d.name, "sale.order");
         assert_eq!(d.fields.len(), 6);
         let total = d.fields.iter().find(|f| f.name == "amount_total").unwrap();
-        assert!(total.stored, "computed con `store` deve essere stored");
+        assert!(total.stored, "computed with `store` must be stored");
         assert_eq!(total.compute, Some("compute_amount"));
         assert_eq!(total.depends, &["line_ids.price_subtotal"]);
         let lines = d.fields.iter().find(|f| f.name == "line_ids").unwrap();
-        assert!(!lines.has_column(), "one2many non ha colonna");
+        assert!(!lines.has_column(), "one2many has no column");
     }
 
     #[test]
-    fn ddl_e_ui_generati() {
+    fn ddl_and_ui_generated() {
         let m = resolved_sale_order();
         let ddl = to_ddl(&m);
-        assert!(!ddl.contains("line_ids"), "one2many non ha colonna");
+        assert!(!ddl.contains("line_ids"), "one2many has no column");
         assert!(ddl.contains("partner_id bigint REFERENCES res_partner(id) NOT NULL"));
         assert!(to_ui_contract(&m).contains("\"widget\": \"monetary\""));
     }
