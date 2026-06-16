@@ -12,14 +12,15 @@ pub use auth_store::UserRow;
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
-    check_access, record_rule_domain, Acl, Ctx, Domain, DomainError, FieldDef, FieldKind, Operation,
-    RecordRule, ResolvedModel, Value,
+    check_access, compute_stored, computed_fields, record_rule_domain, Acl, Ctx, Domain, DomainError,
+    FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
 };
 use meshble_schema::to_ddl;
 use serde_json::{Map, Value as Json};
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use sqlx::query::{Query, QueryScalar};
 use sqlx::{PgPool, Postgres, Row};
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub enum DbError {
@@ -188,15 +189,20 @@ impl Db {
         if cols.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
         }
-        let names: Vec<&str> = cols.iter().map(|(c, _)| *c).collect();
-        let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${i}")).collect();
+        // Run the compute engine: stored computed fields are derived from the record and inserted.
+        let mut record: BTreeMap<String, Value> =
+            cols.into_iter().map(|(c, v)| (c.to_string(), v)).collect();
+        compute_stored(model, &mut record);
+
+        let (names, vals): (Vec<&str>, Vec<Value>) =
+            record.iter().map(|(k, v)| (k.as_str(), v.clone())).unzip();
+        let placeholders: Vec<String> = (1..=names.len()).map(|i| format!("${i}")).collect();
         let sql = format!(
             "INSERT INTO {} ({}) VALUES ({}) RETURNING id",
             model.table,
             names.join(", "),
             placeholders.join(", ")
         );
-        let vals: Vec<Value> = cols.iter().map(|(_, v)| v.clone()).collect();
 
         let mut tx = self.pool.begin().await?;
         let mut q = sqlx::query_scalar::<Postgres, i64>(&sql);
@@ -241,10 +247,30 @@ impl Db {
         if cols.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
         }
+        // Recompute stored computed fields from the merged record (current row + this update).
+        let computed = computed_fields(model);
+        let mut set_pairs: Vec<(String, Value)> =
+            cols.iter().map(|(c, v)| (c.to_string(), v.clone())).collect();
+        if !computed.is_empty() {
+            let mut record = match self.read_record(model, id).await? {
+                Some(r) => r,
+                None => return Ok(0), // no such row
+            };
+            for (c, v) in &cols {
+                record.insert(c.to_string(), v.clone());
+            }
+            compute_stored(model, &mut record);
+            for name in &computed {
+                if let Some(v) = record.get(*name) {
+                    set_pairs.push((name.to_string(), v.clone()));
+                }
+            }
+        }
+
         let set: Vec<String> =
-            cols.iter().enumerate().map(|(i, (c, _))| format!("{} = ${}", c, i + 1)).collect();
-        let id_ph = cols.len() + 1;
-        let mut params: Vec<Value> = cols.iter().map(|(_, v)| v.clone()).collect();
+            set_pairs.iter().enumerate().map(|(i, (c, _))| format!("{} = ${}", c, i + 1)).collect();
+        let id_ph = set_pairs.len() + 1;
+        let mut params: Vec<Value> = set_pairs.iter().map(|(_, v)| v.clone()).collect();
         params.push(Value::Int(id));
         let where_sql = match record_rule_domain(Operation::Write, model.name, ctx, rules) {
             Some(rule) => format!("id = ${id_ph} AND {}", rule.compile_into(model, &mut params)?),
@@ -256,6 +282,17 @@ impl Db {
             q = bind_query(q, v);
         }
         Ok(q.execute(&self.pool).await?.rows_affected())
+    }
+
+    /// Reads a row's stored field values into a typed map (for recompute on update).
+    async fn read_record(
+        &self,
+        model: &ResolvedModel,
+        id: i64,
+    ) -> Result<Option<BTreeMap<String, Value>>, DbError> {
+        let sql = format!("SELECT {} FROM {} WHERE id = $1", select_columns(model), model.table);
+        let row = sqlx::query(&sql).bind(id).fetch_optional(&self.pool).await?;
+        Ok(row.map(|r| record_to_values(model, &r)))
     }
 
     /// Deletes row `id`, enforcing ACL Delete and the Delete record rule. Returns rows deleted.
@@ -382,6 +419,33 @@ fn select_columns(model: &ResolvedModel) -> String {
         }
     }
     cols.join(", ")
+}
+
+/// Converts a database row into a typed `Value` map keyed by field name (for the compute engine).
+fn record_to_values(model: &ResolvedModel, row: &PgRow) -> BTreeMap<String, Value> {
+    let mut m = BTreeMap::new();
+    for f in &model.fields {
+        if !f.has_column() {
+            continue;
+        }
+        let v = match &f.kind {
+            FieldKind::Text | FieldKind::Selection(_) => {
+                row.try_get::<Option<String>, _>(f.name).ok().flatten().map(Value::Str).unwrap_or(Value::Null)
+            }
+            FieldKind::Integer | FieldKind::Many2one { .. } => {
+                row.try_get::<Option<i64>, _>(f.name).ok().flatten().map(Value::Int).unwrap_or(Value::Null)
+            }
+            FieldKind::Decimal { .. } => {
+                row.try_get::<Option<f64>, _>(f.name).ok().flatten().map(Value::Float).unwrap_or(Value::Null)
+            }
+            FieldKind::Bool => {
+                row.try_get::<Option<bool>, _>(f.name).ok().flatten().map(Value::Bool).unwrap_or(Value::Null)
+            }
+            FieldKind::One2many { .. } => continue,
+        };
+        m.insert(f.name.to_string(), v);
+    }
+    m
 }
 
 /// Converts a database row into a JSON object keyed by field name, decoding each column per its
