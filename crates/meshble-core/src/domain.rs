@@ -162,8 +162,19 @@ impl Domain {
     /// Validates the domain against `model` and compiles it to parameterized SQL.
     pub fn compile(&self, model: &ResolvedModel) -> Result<Sql, DomainError> {
         let mut params = Vec::new();
-        let where_clause = self.emit(model, &mut params)?;
+        let where_clause = self.compile_into(model, &mut params)?;
         Ok(Sql { where_clause, params })
+    }
+
+    /// Compiles the domain, APPENDING its bound parameters to `params` and numbering placeholders
+    /// to continue after whatever is already there. Lets a caller embed the WHERE after other
+    /// parameters (e.g. an UPDATE's SET values + id) without placeholder collisions.
+    pub fn compile_into(
+        &self,
+        model: &ResolvedModel,
+        params: &mut Vec<Value>,
+    ) -> Result<String, DomainError> {
+        self.emit(model, params)
     }
 
     fn emit(&self, model: &ResolvedModel, params: &mut Vec<Value>) -> Result<String, DomainError> {

@@ -15,6 +15,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use serde_json::Value as Json2;
 use meshble_core::{Acl, Ctx, RecordRule, ResolvedModel};
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
@@ -53,7 +54,8 @@ pub fn router_with_data(
     rules: &'static [RecordRule],
 ) -> Router {
     base_router()
-        .route("/api/:name", get(list_handler))
+        .route("/api/:name", get(list_handler).post(create_handler))
+        .route("/api/:name/:id", axum::routing::patch(update_handler).delete(delete_handler))
         .with_state(AppState {
             models: Arc::new(models),
             data: Some(DataBackend { db: Arc::new(db), acls, rules }),
@@ -79,6 +81,28 @@ fn dev_identity_from_headers(headers: &HeaderMap) -> Ctx {
 
 fn json_response(body: String) -> Response {
     ([("content-type", "application/json")], body).into_response()
+}
+
+fn json_status(status: StatusCode, body: String) -> Response {
+    (status, [("content-type", "application/json")], body).into_response()
+}
+
+/// Resolves the model for a path name, or a 404 response.
+fn resolve_model<'a>(state: &'a AppState, name: &str) -> Result<&'a ResolvedModel, Response> {
+    state
+        .models
+        .iter()
+        .find(|m| m.name == name)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("unknown model: {name}")).into_response())
+}
+
+/// Maps a write DbError to an HTTP response (opaque 500, never leaking schema/SQL on the 500 path).
+fn write_error(context: &str, e: DbError) -> Response {
+    match e {
+        DbError::AccessDenied { .. } => (StatusCode::FORBIDDEN, "access denied").into_response(),
+        DbError::BadInput(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
+        other => internal_error(context, other),
+    }
 }
 
 async fn openapi_handler(State(state): State<AppState>) -> Response {
@@ -124,6 +148,74 @@ async fn list_handler(
             (StatusCode::FORBIDDEN, "access denied").into_response()
         }
         Err(e) => internal_error("data", e),
+    }
+}
+
+fn body_object(body: &Json2) -> Result<&serde_json::Map<String, Json2>, Response> {
+    body.as_object()
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "body must be a JSON object").into_response())
+}
+
+async fn create_handler(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<Json2>,
+) -> Response {
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = dev_identity_from_headers(&headers);
+    let obj = match body_object(&body) {
+        Ok(o) => o,
+        Err(r) => return r,
+    };
+    match backend.db.insert_secured(model, &ctx, backend.acls, backend.rules, obj).await {
+        Ok(id) => json_status(StatusCode::CREATED, format!("{{\"id\": {id}}}")),
+        Err(e) => write_error("create", e),
+    }
+}
+
+async fn update_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+    Json(body): Json<Json2>,
+) -> Response {
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = dev_identity_from_headers(&headers);
+    let obj = match body_object(&body) {
+        Ok(o) => o,
+        Err(r) => return r,
+    };
+    match backend.db.update_secured(model, &ctx, backend.acls, backend.rules, id, obj).await {
+        Ok(0) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
+        Ok(n) => json_status(StatusCode::OK, format!("{{\"updated\": {n}}}")),
+        Err(e) => write_error("update", e),
+    }
+}
+
+async fn delete_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = dev_identity_from_headers(&headers);
+    match backend.db.delete_secured(model, &ctx, backend.acls, backend.rules, id).await {
+        Ok(0) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
+        Ok(n) => json_status(StatusCode::OK, format!("{{\"deleted\": {n}}}")),
+        Err(e) => write_error("delete", e),
     }
 }
 

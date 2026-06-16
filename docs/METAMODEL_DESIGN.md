@@ -281,8 +281,11 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
 5. **OpenAPI/GraphQL + generazione SDK**. 🟡 In corso: proiezione **OpenAPI 3.1**
    (`meshble_schema::openapi`) generata dal catalogo modelli (schemas + paths) → spec consumabile
    da chiunque, SDK via `openapi-generator`. Server headless `meshble-server` (axum):
-   `GET /openapi.json`, `/api/models`, `/api/{model}/view` (contratto-UI), testato via oneshot.
-   ⬅ restano i data-endpoint con auth (riusano `*_secured` di `meshble-db`) e GraphQL.
+   metadata (`/openapi.json`, `/api/models`, `/api/{m}/view`) **+ CRUD dati sicuro**
+   (`GET/POST/PATCH/DELETE /api/{m}[/{id}]`): ogni operazione passa per ACL + record rules
+   (`*_secured` di `meshble-db`), input validato a confine (required/option/kind), errori
+   403/400/404/500-opaco. Indurito da audit (null-bypass su required). ⬅ restano **auth vera**
+   (oggi identità-da-header dev) e **GraphQL**.
 6. **Persistenza reale (sqlx) + migrazioni generate**. ✅ Fatto: `meshble-db` (crate separato,
    backend pluggable — il core resta headless) esegue il DDL generato e le query con `WHERE`
    compilato dal `Domain` e **parametrizzato** (anti-injection provato a runtime), con read

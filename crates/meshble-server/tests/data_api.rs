@@ -92,3 +92,102 @@ async fn secured_data_endpoint_enforces_rules() {
 
     seed.drop_table(&m).await.unwrap();
 }
+
+static WRITE_MODEL: ModelDescriptor = ModelDescriptor {
+    name: "widget",
+    table: "widget_write_test",
+    fields: &[
+        FieldDef {
+            name: "name", label: "Name", kind: FieldKind::Text,
+            required: true, stored: true, compute: None, depends: &[],
+        },
+        FieldDef {
+            name: "active", label: "Active", kind: FieldKind::Bool,
+            required: false, stored: true, compute: None, depends: &[],
+        },
+    ],
+};
+
+static WRITE_ACLS: &[Acl] = &[Acl {
+    model: "widget", group: "u", read: true, write: true, create: true, delete: true,
+}];
+static WRITE_RULES: &[RecordRule] = &[
+    RecordRule { model: "widget", groups: &["u"], ops: &[Operation::Write], domain: active_only },
+    RecordRule { model: "widget", groups: &["u"], ops: &[Operation::Delete], domain: active_only },
+];
+
+async fn req(app: Router, method: &str, uri: &str, groups: Option<&str>, body: Option<&str>) -> (StatusCode, String) {
+    let mut b = Request::builder().method(method).uri(uri);
+    if let Some(g) = groups {
+        b = b.header("x-user-id", "1").header("x-user-groups", g);
+    }
+    let body = match body {
+        Some(s) => {
+            b = b.header("content-type", "application/json");
+            Body::from(s.to_string())
+        }
+        None => Body::empty(),
+    };
+    let resp = app.oneshot(b.body(body).unwrap()).await.unwrap();
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    (status, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+fn id_of(body: &str) -> i64 {
+    serde_json::from_str::<serde_json::Value>(body).unwrap()["id"].as_i64().unwrap()
+}
+
+#[tokio::test]
+async fn write_path_enforces_acl_and_rules() {
+    let url = match std::env::var("DATABASE_URL") {
+        Ok(u) => u,
+        Err(_) => {
+            eprintln!("skipping: DATABASE_URL not set");
+            return;
+        }
+    };
+    let seed = Db::connect(&url).await.unwrap();
+    let m = resolve(&WRITE_MODEL, &[]).unwrap();
+    seed.drop_table(&m).await.unwrap();
+    seed.create_table(&m).await.unwrap();
+
+    let app_db = Db::connect(&url).await.unwrap();
+    let app = router_with_data(vec![resolve(&WRITE_MODEL, &[]).unwrap()], app_db, WRITE_ACLS, WRITE_RULES);
+
+    // Create (group "u" has Create) → 201.
+    let (s, body) = req(app.clone(), "POST", "/api/widget", Some("u"), Some(r#"{"name":"keep","active":true}"#)).await;
+    assert_eq!(s, StatusCode::CREATED);
+    let id_active = id_of(&body);
+    let (s, body) = req(app.clone(), "POST", "/api/widget", Some("u"), Some(r#"{"name":"gone","active":false}"#)).await;
+    assert_eq!(s, StatusCode::CREATED);
+    let id_inactive = id_of(&body);
+
+    // Create without an ACL group → 403.
+    let (s, _) = req(app.clone(), "POST", "/api/widget", None, Some(r#"{"name":"x","active":true}"#)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // Unknown field → 400 (input validation at the boundary).
+    let (s, _) = req(app.clone(), "POST", "/api/widget", Some("u"), Some(r#"{"nope":1}"#)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // Update the active row (write rule active=true matches) → 200 updated 1.
+    let (s, body) = req(app.clone(), "PATCH", &format!("/api/widget/{id_active}"), Some("u"), Some(r#"{"name":"kept"}"#)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(body.contains("\"updated\": 1"));
+
+    // Update the inactive row → 404 (write rule excludes it; no rows match).
+    let (s, _) = req(app.clone(), "PATCH", &format!("/api/widget/{id_inactive}"), Some("u"), Some(r#"{"name":"y"}"#)).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // Delete the inactive row → 404 (delete rule excludes it).
+    let (s, _) = req(app.clone(), "DELETE", &format!("/api/widget/{id_inactive}"), Some("u"), None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // Delete the active row → 200 deleted 1.
+    let (s, body) = req(app.clone(), "DELETE", &format!("/api/widget/{id_active}"), Some("u"), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(body.contains("\"deleted\": 1"));
+
+    seed.drop_table(&m).await.unwrap();
+}

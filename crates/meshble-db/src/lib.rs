@@ -10,13 +10,13 @@ mod migration;
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
-    check_access, record_rule_domain, Acl, Ctx, Domain, DomainError, FieldKind, Operation,
+    check_access, record_rule_domain, Acl, Ctx, Domain, DomainError, FieldDef, FieldKind, Operation,
     RecordRule, ResolvedModel, Value,
 };
 use meshble_schema::to_ddl;
 use serde_json::{Map, Value as Json};
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
-use sqlx::query::QueryScalar;
+use sqlx::query::{Query, QueryScalar};
 use sqlx::{PgPool, Postgres, Row};
 
 #[derive(Debug)]
@@ -27,6 +27,8 @@ pub enum DbError {
     AccessDenied { model: String, operation: &'static str },
     /// A migration problem (e.g. an unparseable version).
     Migration(String),
+    /// Invalid write input (unknown/non-writable field, or a value incompatible with its kind).
+    BadInput(String),
 }
 
 impl From<sqlx::Error> for DbError {
@@ -166,6 +168,201 @@ impl Db {
             (None, None) => Domain::True,
         })
     }
+
+    /// Inserts a row from validated `values`, enforcing ACL Create. If a Create record rule
+    /// applies, the new row must satisfy it or the insert is rolled back. Returns the new id.
+    pub async fn insert_secured(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        values: &Map<String, Json>,
+    ) -> Result<i64, DbError> {
+        if !check_access(Operation::Create, model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "create" });
+        }
+        let cols = validate_write_values(model, values, true)?;
+        if cols.is_empty() {
+            return Err(DbError::BadInput("no values provided".to_string()));
+        }
+        let names: Vec<&str> = cols.iter().map(|(c, _)| *c).collect();
+        let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${i}")).collect();
+        let sql = format!(
+            "INSERT INTO {} ({}) VALUES ({}) RETURNING id",
+            model.table,
+            names.join(", "),
+            placeholders.join(", ")
+        );
+        let vals: Vec<Value> = cols.iter().map(|(_, v)| v.clone()).collect();
+
+        let mut tx = self.pool.begin().await?;
+        let mut q = sqlx::query_scalar::<Postgres, i64>(&sql);
+        q = bind_all(q, &vals);
+        let id: i64 = q.fetch_one(&mut *tx).await?;
+
+        if let Some(rule) = record_rule_domain(Operation::Create, model.name, ctx, rules) {
+            let mut params: Vec<Value> = vec![Value::Int(id)];
+            let where_sql = rule.compile_into(model, &mut params)?;
+            let check = format!("SELECT 1 FROM {} WHERE id = $1 AND {}", model.table, where_sql);
+            let mut cq = sqlx::query(&check);
+            for v in &params {
+                cq = bind_query(cq, v);
+            }
+            if cq.fetch_optional(&mut *tx).await?.is_none() {
+                // The created row violates the create rule → roll back by dropping the tx.
+                return Err(DbError::AccessDenied {
+                    model: model.name.to_string(),
+                    operation: "create (record rule)",
+                });
+            }
+        }
+        tx.commit().await?;
+        Ok(id)
+    }
+
+    /// Updates row `id` with validated `values`, enforcing ACL Write and the Write record rule
+    /// (rows outside the rule are not matched → 0 affected). Returns the number of rows updated.
+    pub async fn update_secured(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        id: i64,
+        values: &Map<String, Json>,
+    ) -> Result<u64, DbError> {
+        if !check_access(Operation::Write, model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "write" });
+        }
+        let cols = validate_write_values(model, values, false)?;
+        if cols.is_empty() {
+            return Err(DbError::BadInput("no values provided".to_string()));
+        }
+        let set: Vec<String> =
+            cols.iter().enumerate().map(|(i, (c, _))| format!("{} = ${}", c, i + 1)).collect();
+        let id_ph = cols.len() + 1;
+        let mut params: Vec<Value> = cols.iter().map(|(_, v)| v.clone()).collect();
+        params.push(Value::Int(id));
+        let where_sql = match record_rule_domain(Operation::Write, model.name, ctx, rules) {
+            Some(rule) => format!("id = ${id_ph} AND {}", rule.compile_into(model, &mut params)?),
+            None => format!("id = ${id_ph}"),
+        };
+        let sql = format!("UPDATE {} SET {} WHERE {}", model.table, set.join(", "), where_sql);
+        let mut q = sqlx::query(&sql);
+        for v in &params {
+            q = bind_query(q, v);
+        }
+        Ok(q.execute(&self.pool).await?.rows_affected())
+    }
+
+    /// Deletes row `id`, enforcing ACL Delete and the Delete record rule. Returns rows deleted.
+    pub async fn delete_secured(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        id: i64,
+    ) -> Result<u64, DbError> {
+        if !check_access(Operation::Delete, model.name, ctx, acls) {
+            return Err(DbError::AccessDenied {
+                model: model.name.to_string(),
+                operation: "delete",
+            });
+        }
+        let mut params: Vec<Value> = vec![Value::Int(id)];
+        let where_sql = match record_rule_domain(Operation::Delete, model.name, ctx, rules) {
+            Some(rule) => format!("id = $1 AND {}", rule.compile_into(model, &mut params)?),
+            None => "id = $1".to_string(),
+        };
+        let sql = format!("DELETE FROM {} WHERE {}", model.table, where_sql);
+        let mut q = sqlx::query(&sql);
+        for v in &params {
+            q = bind_query(q, v);
+        }
+        Ok(q.execute(&self.pool).await?.rows_affected())
+    }
+}
+
+/// Validates a write payload against the model: every key must be a writable stored column, every
+/// value must match its field kind, and `null` is rejected for required fields. With
+/// `require_all` (create), every required column must be present. This is the input-validation
+/// boundary for writes — required/option enforcement happens here (clean BadInput), not as an
+/// opaque Postgres constraint error.
+fn validate_write_values(
+    model: &ResolvedModel,
+    values: &Map<String, Json>,
+    require_all: bool,
+) -> Result<Vec<(&'static str, Value)>, DbError> {
+    let mut out = Vec::new();
+    for (key, jv) in values {
+        let field = model
+            .fields
+            .iter()
+            .find(|f| f.name == key)
+            .ok_or_else(|| DbError::BadInput(format!("unknown field '{key}'")))?;
+        if !field.has_column() {
+            return Err(DbError::BadInput(format!("field '{key}' is not a stored column")));
+        }
+        if field.is_computed() {
+            return Err(DbError::BadInput(format!("field '{key}' is computed and not writable")));
+        }
+        if jv.is_null() && field.required {
+            return Err(DbError::BadInput(format!("field '{key}' is required and cannot be null")));
+        }
+        out.push((field.name, json_to_value(field, jv)?));
+    }
+    if require_all {
+        for f in &model.fields {
+            if f.has_column() && !f.is_computed() && f.required && !values.contains_key(f.name) {
+                return Err(DbError::BadInput(format!("field '{}' is required", f.name)));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
+    let bad = || {
+        DbError::BadInput(format!(
+            "value for '{}' is not compatible with field kind {:?}",
+            field.name, field.kind
+        ))
+    };
+    Ok(match (&field.kind, jv) {
+        (_, Json::Null) => Value::Null,
+        (FieldKind::Text, Json::String(s)) => Value::Str(s.clone()),
+        (FieldKind::Selection(opts), Json::String(s)) => {
+            if !opts.iter().any(|(k, _)| k == s) {
+                return Err(DbError::BadInput(format!(
+                    "'{s}' is not a valid option for '{}'",
+                    field.name
+                )));
+            }
+            Value::Str(s.clone())
+        }
+        (FieldKind::Integer | FieldKind::Many2one { .. }, Json::Number(n)) => {
+            Value::Int(n.as_i64().ok_or_else(bad)?)
+        }
+        (FieldKind::Decimal { .. }, Json::Number(n)) => {
+            Value::Float(n.as_f64().filter(|x| x.is_finite()).ok_or_else(bad)?)
+        }
+        (FieldKind::Bool, Json::Bool(b)) => Value::Bool(*b),
+        _ => return Err(bad()),
+    })
+}
+
+/// Binds a domain parameter into a non-scalar query (used for UPDATE/DELETE and the create check).
+fn bind_query<'q>(q: Query<'q, Postgres, PgArguments>, v: &Value) -> Query<'q, Postgres, PgArguments> {
+    match v {
+        Value::Str(s) => q.bind(s.clone()),
+        Value::Int(n) => q.bind(*n),
+        Value::Float(f) => q.bind(*f),
+        Value::Bool(b) => q.bind(*b),
+        Value::Null => q.bind(Option::<String>::None),
+        Value::List(_) => q,
+    }
 }
 
 /// Builds the SELECT column list for a model. NUMERIC columns are cast to float8 so they decode
@@ -234,4 +431,77 @@ fn bind_all<'q>(
         };
     }
     q
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use meshble_core::{resolve, ModelDescriptor};
+    use serde_json::json;
+
+    static M: ModelDescriptor = ModelDescriptor {
+        name: "w",
+        table: "w",
+        fields: &[
+            FieldDef {
+                name: "name", label: "Name", kind: FieldKind::Text,
+                required: true, stored: true, compute: None, depends: &[],
+            },
+            FieldDef {
+                name: "note", label: "Note", kind: FieldKind::Text,
+                required: false, stored: true, compute: None, depends: &[],
+            },
+            FieldDef {
+                name: "total", label: "Total", kind: FieldKind::Decimal { currency_field: None },
+                required: false, stored: true, compute: Some("c"), depends: &[],
+            },
+        ],
+    };
+
+    fn obj(v: serde_json::Value) -> Map<String, Json> {
+        v.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn rejects_null_on_required_field() {
+        let m = resolve(&M, &[]).unwrap();
+        assert!(matches!(
+            validate_write_values(&m, &obj(json!({ "name": null })), false),
+            Err(DbError::BadInput(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_required_on_create() {
+        let m = resolve(&M, &[]).unwrap();
+        assert!(matches!(
+            validate_write_values(&m, &obj(json!({ "note": "x" })), true),
+            Err(DbError::BadInput(_))
+        ));
+    }
+
+    #[test]
+    fn allows_partial_update_of_optional_field() {
+        let m = resolve(&M, &[]).unwrap();
+        assert!(validate_write_values(&m, &obj(json!({ "note": "x" })), false).is_ok());
+    }
+
+    #[test]
+    fn rejects_unknown_and_computed_fields() {
+        let m = resolve(&M, &[]).unwrap();
+        assert!(matches!(
+            validate_write_values(&m, &obj(json!({ "nope": 1 })), false),
+            Err(DbError::BadInput(_))
+        ));
+        assert!(matches!(
+            validate_write_values(&m, &obj(json!({ "total": 1.0 })), false),
+            Err(DbError::BadInput(_))
+        ));
+    }
+
+    #[test]
+    fn accepts_valid_create_payload() {
+        let m = resolve(&M, &[]).unwrap();
+        assert!(validate_write_values(&m, &obj(json!({ "name": "x", "note": "y" })), true).is_ok());
+    }
 }
