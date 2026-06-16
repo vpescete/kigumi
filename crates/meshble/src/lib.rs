@@ -7,14 +7,15 @@ pub use meshble_core::inventory;
 /// Everything needed to define a module: `use meshble::prelude::*;`
 pub mod prelude {
     pub use meshble_core::{
-        check_access, check_compat, json_string, record_rule_domain, resolve, resolve_module_set,
-        resolve_modules, resolve_registered, validate_depends, Acl, Condition, Ctx, Domain,
+        check_access, check_compat, json_string, record_rule_domain, registered_model_names,
+        resolve, resolve_all_registered, resolve_module_set, resolve_modules, resolve_registered,
+        validate_depends, Acl, Condition, Ctx, Domain,
         DomainError, FieldBuilder, FieldDef, FieldExtension, FieldKind, Model, ModelDescriptor,
         ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
         RecordRule, ResolutionError, ResolvedModel, Sql, Value, FRAMEWORK_VERSION,
     };
     pub use meshble_macros::{extend, model};
-    pub use meshble_schema::{to_ddl, to_ui_contract, FieldRule, UiRule};
+    pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
 }
 
 /// Registers a module's manifest in the global catalog, so `resolve_modules` can see it.

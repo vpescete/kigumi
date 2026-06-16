@@ -100,6 +100,19 @@ mod tests {
     }
 
     #[test]
+    fn catalog_resolves_all_models() {
+        // Reference a base symbol so the base crate is linked into this test binary and its
+        // models self-register (the inventory linkage requirement).
+        let _ = meshble_mod_base::MANIFEST;
+        // base (res.partner, res.currency) + sales (sale.order) are all registered.
+        let names = registered_model_names();
+        for expected in ["res.partner", "res.currency", "sale.order"] {
+            assert!(names.contains(&expected), "missing {expected}");
+        }
+        assert!(resolve_all_registered().is_ok());
+    }
+
+    #[test]
     fn margin_extension_merged() {
         let m = resolved_sale_order();
         assert_eq!(m.fields.len(), SaleOrder::descriptor().fields.len() + 1);

@@ -1,0 +1,17 @@
+[package]
+name = "meshble-server"
+description = "Headless HTTP server (axum): serves the OpenAPI spec, model list, and UI contracts from a model set"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meshble-core = { workspace = true }
+meshble-schema = { workspace = true }
+axum = "0.7"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

@@ -248,7 +248,7 @@ meshble/
 │   ├── meshble-macros/        # proc-macro: #[model], #[field], #[extend], #[action]
 │   ├── meshble-schema/        # ResolvedModel → DDL, OpenAPI, GraphQL, UI-contract
 │   ├── meshble-db/            # persistenza Postgres (sqlx): DDL + query parametrizzate dal Domain
-│   ├── meshble-server/        # Tokio + axum: monta REST/GraphQL dal Registry
+│   ├── meshble-server/        # axum: serve OpenAPI spec, model list, contratti-UI dal catalogo
 │   └── meshble/               # facade: prelude, re-export
 ├── modules/
 │   └── sales/                 # primo modulo applicativo (sale.order) — dogfooding
@@ -278,7 +278,11 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
    (5 fix: su forgiabile, NULL three-valued ×2, NaN, gate operatore↔kind). **UI**: le regole
    `invisible_when`/`readonly_when` sono nel contratto-UI come **AST JSON portabile**
    (`Domain::to_json`), validate contro il modello — stesso domain che il server compila in SQL.
-5. **OpenAPI/GraphQL + generazione SDK**.
+5. **OpenAPI/GraphQL + generazione SDK**. 🟡 In corso: proiezione **OpenAPI 3.1**
+   (`meshble_schema::openapi`) generata dal catalogo modelli (schemas + paths) → spec consumabile
+   da chiunque, SDK via `openapi-generator`. Server headless `meshble-server` (axum):
+   `GET /openapi.json`, `/api/models`, `/api/{model}/view` (contratto-UI), testato via oneshot.
+   ⬅ restano i data-endpoint con auth (riusano `*_secured` di `meshble-db`) e GraphQL.
 6. **Persistenza reale (sqlx) + migrazioni generate**. 🟡 In corso: `meshble-db` (crate
    separato, backend pluggable — il core resta headless) esegue il DDL generato e le query con
    `WHERE` compilato dal `Domain` e **parametrizzato**, provato end-to-end contro Postgres reale

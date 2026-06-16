@@ -43,6 +43,20 @@ pub fn resolve_modules() -> Result<Vec<ModuleManifest>, ResolutionError> {
     resolve_module_set(&modules, FRAMEWORK_VERSION)
 }
 
+/// Names of all models registered in the catalog (sorted, deterministic).
+pub fn registered_model_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> =
+        inventory::iter::<ModelRegistration>.into_iter().map(|r| r.name).collect();
+    names.sort_unstable();
+    names
+}
+
+/// Resolves every registered model (base + extensions). The bridge from the catalog to a server
+/// or any consumer that needs the full set of models.
+pub fn resolve_all_registered() -> Result<Vec<ResolvedModel>, String> {
+    registered_model_names().iter().map(|n| resolve_registered(n)).collect()
+}
+
 /// Resolves a model from the CATALOG: registered base + all auto-registered extensions,
 /// merged (with conflict checks) and validated. No wiring: modules auto-register.
 pub fn resolve_registered(model: &str) -> Result<ResolvedModel, String> {

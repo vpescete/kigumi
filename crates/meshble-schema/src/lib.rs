@@ -4,6 +4,9 @@
 //! a portable [`Domain`] JSON AST — the frontend evaluates them client-side from data, never an
 //! eval'd string, and they are the SAME domains the server compiles to SQL.
 
+mod openapi;
+pub use openapi::openapi;
+
 use meshble_core::{json_string, Domain, DomainError, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
