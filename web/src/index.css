@@ -1,0 +1,216 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── DESIGN TOKENS ────────────────────────────────────────────────────────────
+   Three design systems, generated from independent design-token specs (Linear /
+   Stripe / Notion). [data-theme] selects the system; [data-mode] selects light/dark.
+   Theme-level vars (type, radius, shadow, density) are mode-independent and live on
+   [data-theme]; colors live on [data-theme][data-mode]. Components only ever read
+   the semantic variables — no per-theme branching anywhere in the React code.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --density-row: 44px;
+  --control-h: 36px;
+  --fs-base: 14px;
+  --space: 8px;
+}
+
+/* ===== Linear — "Meshble Mono": dark-first, monochrome, tight, hairline ===== */
+[data-theme='linear'] {
+  --font-sans: 'Inter', 'Inter var', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Roboto Mono', ui-monospace, Menlo, monospace;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.36), 0 1px 2px rgba(0, 0, 0, 0.24);
+  --density-row: 36px;
+  --control-h: 28px;
+  --fs-base: 13px;
+  --space: 8px;
+}
+[data-theme='linear'][data-mode='dark'] {
+  --color-bg: #0b0c10;
+  --color-surface: #16171d;
+  --color-surface2: #1f2027;
+  --color-border: #2a2c34;
+  --color-text: #f7f8f8;
+  --color-text-muted: #9ca0ad;
+  --color-accent: #6358d4;
+  --color-accent-fg: #ffffff;
+  --color-accent-hover: #7165e0;
+  --color-success: #4cc38a;
+  --color-success-bg: #10261d;
+  --color-warning: #f5c563;
+  --color-warning-bg: #2e2310;
+  --color-danger: #f56565;
+  --color-danger-bg: #2e1414;
+  --color-ring: #7c6cf3;
+}
+[data-theme='linear'][data-mode='light'] {
+  --color-bg: #fbfbfc;
+  --color-surface: #ffffff;
+  --color-surface2: #f4f5f8;
+  --color-border: #e6e7ec;
+  --color-text: #16181f;
+  --color-text-muted: #62646e;
+  --color-accent: #5b51e0;
+  --color-accent-fg: #ffffff;
+  --color-accent-hover: #4f45d6;
+  --color-success: #0f7b53;
+  --color-success-bg: #e4f6ee;
+  --color-warning: #a35d00;
+  --color-warning-bg: #fdf0d9;
+  --color-danger: #bf2230;
+  --color-danger-bg: #fdeaec;
+  --color-ring: #5b51e0;
+}
+
+/* ===== Stripe — "Meshble Aurora": light, airy, soft layered shadows ===== */
+[data-theme='stripe'] {
+  --font-sans: 'Inter', 'Inter var', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(26, 31, 54, 0.06), 0 1px 1px rgba(26, 31, 54, 0.04);
+  --shadow-md: 0 4px 12px rgba(26, 31, 54, 0.08), 0 12px 32px rgba(26, 31, 54, 0.1), 0 0 0 1px rgba(26, 31, 54, 0.03);
+  --density-row: 48px;
+  --control-h: 40px;
+  --fs-base: 15px;
+  --space: 8px;
+}
+[data-theme='stripe'][data-mode='light'] {
+  --color-bg: #f6f8fb;
+  --color-surface: #ffffff;
+  --color-surface2: #f1f4f9;
+  --color-border: #e3e8ef;
+  --color-text: #1a1f36;
+  --color-text-muted: #5a6478;
+  --color-accent: #635bff;
+  --color-accent-fg: #ffffff;
+  --color-accent-hover: #5249e0;
+  --color-success: #0a7c5a;
+  --color-success-bg: #dcf6ec;
+  --color-warning: #8a5d00;
+  --color-warning-bg: #fdf3d7;
+  --color-danger: #c0341d;
+  --color-danger-bg: #fde7e3;
+  --color-ring: #635bff;
+}
+[data-theme='stripe'][data-mode='dark'] {
+  --color-bg: #0e1018;
+  --color-surface: #181b27;
+  --color-surface2: #202432;
+  --color-border: #2a2f40;
+  --color-text: #e6e9f2;
+  --color-text-muted: #a0a8bd;
+  --color-accent: #5d54ec;
+  --color-accent-fg: #ffffff;
+  --color-accent-hover: #6a62f0;
+  --color-success: #5ce0ab;
+  --color-success-bg: #0f2a22;
+  --color-warning: #f2c14e;
+  --color-warning-bg: #2e2410;
+  --color-danger: #ff8a75;
+  --color-danger-bg: #33150f;
+  --color-ring: #8b85ff;
+}
+
+/* ===== Notion — "Meshble Notion": light, warm grays, rounded, near-flat ===== */
+[data-theme='notion'] {
+  --font-sans: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Roboto Mono', monospace;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-sm: 0 1px 2px rgba(15, 14, 12, 0.05);
+  --shadow-md: 0 4px 12px rgba(15, 14, 12, 0.08), 0 1px 3px rgba(15, 14, 12, 0.06);
+  --density-row: 52px;
+  --control-h: 38px;
+  --fs-base: 15px;
+  --space: 8px;
+}
+[data-theme='notion'][data-mode='light'] {
+  --color-bg: #fbfaf9;
+  --color-surface: #ffffff;
+  --color-surface2: #f4f2ef;
+  --color-border: #eae7e2;
+  --color-text: #2f2c28;
+  --color-text-muted: #6b645c;
+  --color-accent: #1668c2;
+  --color-accent-fg: #ffffff;
+  --color-accent-hover: #125aab;
+  --color-success: #1b7340;
+  --color-success-bg: #e5f3ea;
+  --color-warning: #8a5a00;
+  --color-warning-bg: #fbefd6;
+  --color-danger: #b5341b;
+  --color-danger-bg: #fbe6e1;
+  --color-ring: #1668c2;
+}
+[data-theme='notion'][data-mode='dark'] {
+  --color-bg: #1f1e1c;
+  --color-surface: #272624;
+  --color-surface2: #302e2b;
+  --color-border: #3a3835;
+  --color-text: #e9e6e1;
+  --color-text-muted: #a39c92;
+  --color-accent: #2d8fe8;
+  --color-accent-fg: #0e1b2e;
+  --color-accent-hover: #4596ec;
+  --color-success: #7fd79f;
+  --color-success-bg: #1b3a28;
+  --color-warning: #e8c272;
+  --color-warning-bg: #3a2e14;
+  --color-danger: #f0a491;
+  --color-danger-bg: #3d211b;
+  --color-ring: #2d8fe8;
+}
+/* ── END DESIGN TOKENS ──────────────────────────────────────────────────────── */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+  border: 3px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Ease the swap between systems and modes. */
+body * {
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.12s ease,
+    box-shadow 0.16s ease;
+}
