@@ -1,9 +1,10 @@
 //! The projections: from a `ResolvedModel` to Postgres DDL and an agnostic UI contract (JSON).
 //!
-//! Same source of truth → multiple outputs. Here are two of the design's four projections
-//! (DB + UI). API (OpenAPI/GraphQL) and security arrive in phases 4-5.
+//! Same source of truth → multiple outputs. The UI contract carries visibility/readonly rules as
+//! a portable [`Domain`] JSON AST — the frontend evaluates them client-side from data, never an
+//! eval'd string, and they are the SAME domains the server compiles to SQL.
 
-use meshble_core::{FieldKind, ResolvedModel};
+use meshble_core::{json_string, Domain, DomainError, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
 fn pg_type(kind: &FieldKind) -> &'static str {
@@ -51,23 +52,101 @@ fn widget(kind: &FieldKind) -> &'static str {
     }
 }
 
-/// Agnostic UI contract: JSON consumable by ANY frontend.
-/// No interpreted XML, no proprietary framework. Computed fields are readonly.
+/// Which dynamic rule a [`FieldRule`] expresses.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum UiRule {
+    Invisible,
+    Readonly,
+}
+
+/// A dynamic UI rule bound to a field: when `domain` holds for a record, the field becomes
+/// invisible/readonly. The domain is a thunk because a [`Domain`] is not const-constructible.
+#[derive(Clone, Copy)]
+pub struct FieldRule {
+    pub field: &'static str,
+    pub rule: UiRule,
+    pub domain: fn() -> Domain,
+}
+
+fn rule_json(rules: &[FieldRule], field: &str, kind: UiRule) -> Option<String> {
+    rules
+        .iter()
+        .find(|r| r.field == field && r.rule == kind)
+        .map(|r| (r.domain)().to_json())
+}
+
+/// Agnostic UI contract: JSON consumable by ANY frontend. Computed fields are readonly; dynamic
+/// `invisible_when` / `readonly_when` rules are emitted as portable domain ASTs.
+///
+/// Returns an error if any rule references an unknown/invalid field — UI rules are validated, not
+/// discovered broken in production (the Odoo `attrs`/xpath failure mode).
 /// ponytail: JSON built by hand (zero-dep). Switch to serde in phase 5.
-pub fn to_ui_contract(m: &ResolvedModel) -> String {
+pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, DomainError> {
+    for r in rules {
+        (r.domain)().validate(m)?;
+    }
     let fields: Vec<String> = m
         .fields
         .iter()
         .map(|f| {
-            format!(
-                "    {{ \"name\": \"{}\", \"label\": \"{}\", \"widget\": \"{}\", \"required\": {}, \"readonly\": {} }}",
-                f.name, f.label, widget(&f.kind), f.required, f.is_computed()
-            )
+            let mut parts = vec![
+                format!("\"name\": {}", json_string(f.name)),
+                format!("\"label\": {}", json_string(f.label)),
+                format!("\"widget\": \"{}\"", widget(&f.kind)),
+                format!("\"required\": {}", f.required),
+                format!("\"readonly\": {}", f.is_computed()),
+            ];
+            if let Some(j) = rule_json(rules, f.name, UiRule::Invisible) {
+                parts.push(format!("\"invisible_when\": {j}"));
+            }
+            if let Some(j) = rule_json(rules, f.name, UiRule::Readonly) {
+                parts.push(format!("\"readonly_when\": {j}"));
+            }
+            format!("    {{ {} }}", parts.join(", "))
         })
         .collect();
-    format!(
-        "{{\n  \"model\": \"{}\",\n  \"type\": \"form\",\n  \"fields\": [\n{}\n  ]\n}}",
-        m.name,
+    Ok(format!(
+        "{{\n  \"model\": {},\n  \"type\": \"form\",\n  \"fields\": [\n{}\n  ]\n}}",
+        json_string(m.name),
         fields.join(",\n")
-    )
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use meshble_core::{resolve, FieldDef, ModelDescriptor, ResolvedModel};
+
+    static MODEL: ModelDescriptor = ModelDescriptor {
+        name: "demo.model",
+        table: "demo_model",
+        fields: &[FieldDef {
+            name: "state", label: "State",
+            kind: FieldKind::Selection(&[("a", "A"), ("b", "B")]),
+            required: true, stored: true, compute: None, depends: &[],
+        }],
+    };
+    fn model() -> ResolvedModel {
+        resolve(&MODEL, &[]).unwrap()
+    }
+    fn good() -> Domain {
+        Domain::field("state").eq("a")
+    }
+    fn bad() -> Domain {
+        Domain::field("nope").eq("a")
+    }
+
+    #[test]
+    fn emits_invisible_when_as_domain_ast() {
+        let rules = &[FieldRule { field: "state", rule: UiRule::Invisible, domain: good }];
+        let c = to_ui_contract(&model(), rules).unwrap();
+        assert!(c.contains("\"invisible_when\": {\"field\":\"state\",\"op\":\"=\",\"value\":\"a\"}"));
+    }
+
+    #[test]
+    fn rejects_rule_referencing_unknown_field() {
+        // A typo'd rule field is an error at build/load time, not a silent broken UI.
+        let rules = &[FieldRule { field: "state", rule: UiRule::Readonly, domain: bad }];
+        assert!(to_ui_contract(&model(), rules).is_err());
+    }
 }

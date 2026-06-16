@@ -11,7 +11,7 @@ mod metamodel;
 mod registry;
 mod security;
 
-pub use domain::{Condition, Domain, DomainError, FieldBuilder, Operator, Sql, Value};
+pub use domain::{json_string, Condition, Domain, DomainError, FieldBuilder, Operator, Sql, Value};
 pub use manifest::{check_compat, resolve_module_set, ModuleDep, ModuleManifest, ResolutionError};
 pub use metamodel::{resolve, validate_depends, FieldDef, FieldKind, Model, ModelDescriptor, ResolvedModel};
 pub use registry::{resolve_modules, resolve_registered, FieldExtension, ModelRegistration, ModuleRegistration};

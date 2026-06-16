@@ -274,8 +274,9 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
 4. **Domini AST tipizzati + security engine**. ✅ Fatto: `Domain` AST → SQL **parametrizzato**
    con validazione contro il modello (no `safe_eval`, no injection); ACL + record rules
    (global AND / group OR) + `Ctx`/`sudo` (flag privato). Indurito da audit security adversarial
-   (5 fix: su forgiabile, NULL three-valued ×2, NaN, gate operatore↔kind). ⬅ resta il wiring
-   delle **regole di visibilità/readonly nel contratto-UI** come dati (prossimo step UI).
+   (5 fix: su forgiabile, NULL three-valued ×2, NaN, gate operatore↔kind). **UI**: le regole
+   `invisible_when`/`readonly_when` sono nel contratto-UI come **AST JSON portabile**
+   (`Domain::to_json`), validate contro il modello — stesso domain che il server compila in SQL.
 5. **OpenAPI/GraphQL + generazione SDK**.
 6. **Persistenza reale (sqlx) + migrazioni generate**.
 

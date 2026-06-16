@@ -3,7 +3,7 @@
 
 use meshble::prelude::*;
 use meshble_mod_base as base; // depend on base so it joins the catalog
-use meshble_mod_sales::{resolved_sale_order, ACLS, MANIFEST, RECORD_RULES};
+use meshble_mod_sales::{resolved_sale_order, ACLS, MANIFEST, RECORD_RULES, UI_RULES};
 
 fn main() {
     // Reference a base symbol so the base module is linked and self-registers in the catalog.
@@ -39,7 +39,8 @@ fn main() {
     let model = resolved_sale_order();
     println!("== Resolved model: {} ({} fields) ==\n", model.name, model.fields.len());
     println!("--- Postgres DDL ---\n{}\n", to_ddl(&model));
-    println!("--- UI contract (JSON, for any frontend) ---\n{}\n", to_ui_contract(&model));
+    let contract = to_ui_contract(&model, UI_RULES).expect("valid UI rules");
+    println!("--- UI contract (JSON, for any frontend) ---\n{}\n", contract);
 
     // 4. Security: ACL + row-level record rules → parameterized SQL (no string eval).
     let junior = Ctx::new(7, vec!["sales.user".to_string()]);

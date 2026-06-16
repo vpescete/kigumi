@@ -321,6 +321,100 @@ fn check_value_type(field: &FieldDef, v: &Value) -> Result<(), DomainError> {
     }
 }
 
+impl Domain {
+    /// Serializes the domain to a portable JSON AST. A frontend evaluates visibility/readonly
+    /// rules client-side from this DATA — the same AST the server compiles to SQL, never an
+    /// eval'd string.
+    pub fn to_json(&self) -> String {
+        match self {
+            Domain::True => "{\"const\":true}".to_string(),
+            Domain::False => "{\"const\":false}".to_string(),
+            Domain::Not(d) => format!("{{\"not\":{}}}", d.to_json()),
+            Domain::And(a, b) => format!("{{\"and\":[{},{}]}}", a.to_json(), b.to_json()),
+            Domain::Or(a, b) => format!("{{\"or\":[{},{}]}}", a.to_json(), b.to_json()),
+            Domain::Cond(c) => cond_to_json(c),
+        }
+    }
+
+    /// Validates the domain against `model` (field existence, types, operator/kind) without
+    /// emitting SQL. Used to reject malformed UI rules at build/load time.
+    pub fn validate(&self, model: &ResolvedModel) -> Result<(), DomainError> {
+        self.compile(model).map(|_| ())
+    }
+}
+
+fn op_str(op: Operator) -> &'static str {
+    match op {
+        Operator::Eq => "=",
+        Operator::Ne => "!=",
+        Operator::Lt => "<",
+        Operator::Le => "<=",
+        Operator::Gt => ">",
+        Operator::Ge => ">=",
+        Operator::In => "in",
+        Operator::NotIn => "not in",
+        Operator::Like => "like",
+        Operator::ILike => "ilike",
+        Operator::IsNull => "is null",
+        Operator::IsNotNull => "is not null",
+    }
+}
+
+fn cond_to_json(c: &Condition) -> String {
+    match c.op {
+        Operator::IsNull | Operator::IsNotNull => {
+            format!("{{\"field\":{},\"op\":\"{}\"}}", json_string(&c.field), op_str(c.op))
+        }
+        _ => format!(
+            "{{\"field\":{},\"op\":\"{}\",\"value\":{}}}",
+            json_string(&c.field),
+            op_str(c.op),
+            value_to_json(&c.value)
+        ),
+    }
+}
+
+fn value_to_json(v: &Value) -> String {
+    match v {
+        Value::Str(s) => json_string(s),
+        Value::Int(n) => n.to_string(),
+        // Non-finite floats are rejected at compile time; guard here so to_json never emits
+        // invalid JSON (NaN/inf) if called on an unvalidated domain.
+        Value::Float(f) => {
+            if f.is_finite() {
+                f.to_string()
+            } else {
+                "null".to_string()
+            }
+        }
+        Value::Bool(b) => b.to_string(),
+        Value::Null => "null".to_string(),
+        Value::List(items) => {
+            format!("[{}]", items.iter().map(value_to_json).collect::<Vec<_>>().join(","))
+        }
+    }
+}
+
+/// JSON-escapes `s` and wraps it in double quotes. Shared by domain and UI-contract serialization
+/// so every string in the emitted JSON is escaped consistently (no broken-out quotes).
+pub fn json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,5 +550,26 @@ mod tests {
     fn ordering_on_bool_is_rejected() {
         let d = Domain::field("flag").gt(false);
         assert!(matches!(d.compile(&model()), Err(DomainError::BadOperatorValue { .. })));
+    }
+
+    #[test]
+    fn serializes_to_json_ast() {
+        let d = Domain::field("state").eq("done").and(Domain::field("amount_total").gt(100_i64));
+        assert_eq!(
+            d.to_json(),
+            r#"{"and":[{"field":"state","op":"=","value":"done"},{"field":"amount_total","op":">","value":100}]}"#
+        );
+    }
+
+    #[test]
+    fn json_strings_are_escaped() {
+        // A value containing quotes/backslashes must not break out of the JSON string.
+        let d = Domain::field("state").eq("a\"b\\c");
+        assert!(d.to_json().contains(r#""value":"a\"b\\c""#));
+    }
+
+    #[test]
+    fn is_null_json_omits_value() {
+        assert_eq!(Domain::field("state").is_null().to_json(), r#"{"field":"state","op":"is null"}"#);
     }
 }

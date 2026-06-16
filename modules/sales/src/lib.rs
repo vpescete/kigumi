@@ -66,6 +66,17 @@ fn not_done() -> Domain {
 fn small_orders() -> Domain {
     Domain::field("amount_total").lt(10_000_i64)
 }
+fn done_state() -> Domain {
+    Domain::field("state").eq("done")
+}
+
+/// UI rules: the total becomes read-only once the order is "done". Emitted into the UI contract
+/// as a portable domain AST the frontend evaluates client-side.
+pub static UI_RULES: &[FieldRule] = &[FieldRule {
+    field: "amount_total",
+    rule: UiRule::Readonly,
+    domain: done_state,
+}];
 
 /// Row-level rules: everyone is restricted to non-"done" orders; juniors only see small ones.
 pub static RECORD_RULES: &[RecordRule] = &[
@@ -115,6 +126,9 @@ mod tests {
         let ddl = to_ddl(&m);
         assert!(!ddl.contains("line_ids"), "one2many has no column");
         assert!(ddl.contains("partner_id bigint REFERENCES res_partner(id) NOT NULL"));
-        assert!(to_ui_contract(&m).contains("\"widget\": \"monetary\""));
+        let contract = to_ui_contract(&m, UI_RULES).unwrap();
+        assert!(contract.contains("\"widget\": \"monetary\""));
+        // The dynamic readonly rule is emitted as a portable domain AST.
+        assert!(contract.contains("\"readonly_when\": {\"field\":\"state\",\"op\":\"=\",\"value\":\"done\"}"));
     }
 }
