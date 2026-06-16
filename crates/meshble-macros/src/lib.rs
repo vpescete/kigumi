@@ -12,8 +12,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{
-    parse_macro_input, punctuated::Punctuated, Data, DeriveInput, Expr, ExprLit, Fields, Lit, Meta,
-    MetaNameValue, Token, Type,
+    parse_macro_input, punctuated::Punctuated, Data, DeriveInput, Expr, ExprLit, Fields, Lit,
+    LitStr, Meta, MetaNameValue, Token, Type,
 };
 
 /// `#[model(name = "sale.order", table = "sale_order")]`
@@ -62,6 +62,64 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
                         fields: &[ #(#field_toks),* ],
                     };
                 &D
+            }
+        }
+
+        // Auto-registrazione nel catalogo: niente wiring manuale.
+        ::meshble::inventory::submit! {
+            ::meshble::prelude::ModelRegistration {
+                name: #model_name,
+                module: ::core::module_path!(),
+                descriptor: <#ident as ::meshble::prelude::Model>::descriptor,
+            }
+        }
+    })
+}
+
+/// `#[extend("sale.order")]` — aggiunge campi a un modello definito altrove.
+/// Le estensioni si auto-registrano e vengono fuse da `resolve_registered`.
+#[proc_macro_attribute]
+pub fn extend(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let target = parse_macro_input!(attr as LitStr);
+    let input = parse_macro_input!(item as DeriveInput);
+    match expand_extend(&target, &input) {
+        Ok(ts) => ts.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn expand_extend(target: &LitStr, input: &DeriveInput) -> syn::Result<TokenStream2> {
+    let fields = match &input.data {
+        Data::Struct(s) => match &s.fields {
+            Fields::Named(n) => &n.named,
+            _ => return Err(err(&input.ident, "#[extend] richiede una struct con campi nominati")),
+        },
+        _ => return Err(err(&input.ident, "#[extend] si applica solo a una struct")),
+    };
+
+    let mut field_toks: Vec<TokenStream2> = Vec::new();
+    for f in fields {
+        field_toks.push(build_field(f)?);
+    }
+
+    let vis = &input.vis;
+    let ident = &input.ident;
+    let target_str = target.value();
+    Ok(quote! {
+        #vis struct #ident;
+
+        impl #ident {
+            pub fn fields() -> &'static [::meshble::prelude::FieldDef] {
+                static F: &[::meshble::prelude::FieldDef] = &[ #(#field_toks),* ];
+                F
+            }
+        }
+
+        ::meshble::inventory::submit! {
+            ::meshble::prelude::FieldExtension {
+                target: #target_str,
+                module: ::core::module_path!(),
+                fields: <#ident>::fields,
             }
         }
     })

@@ -7,9 +7,14 @@
 
 mod metamodel;
 mod manifest;
+mod registry;
 
 pub use metamodel::{resolve, validate_depends, FieldDef, FieldKind, Model, ModelDescriptor, ResolvedModel};
 pub use manifest::{check_compat, ModuleDep, ModuleManifest, ResolutionError};
+pub use registry::{resolve_registered, FieldExtension, ModelRegistration};
+
+// Re-export per i path generati dalle macro (`::meshble::inventory::submit!`).
+pub use inventory;
 
 /// Versione SemVer del framework (= versione del workspace). I moduli la confrontano
 /// col proprio range di compatibilità via [`check_compat`].

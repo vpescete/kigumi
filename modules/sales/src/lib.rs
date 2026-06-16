@@ -36,19 +36,17 @@ pub struct SaleOrder {
     amount_total: Decimal,
 }
 
-/// Estensione `sale_margin`: aggiunge `margin` SENZA toccare la base.
-pub static SALE_MARGIN_FIELDS: &[FieldDef] = &[FieldDef {
-    name: "margin", label: "Margin",
-    kind: FieldKind::Decimal { currency_field: Some("currency_id") },
-    required: false, stored: true, compute: Some("compute_margin"),
-    depends: &["amount_total"],
-}];
+/// Estensione `sale_margin`: aggiunge `margin` via `#[extend]`, SENZA toccare la base.
+/// Si auto-registra nel catalogo (fase 3) — nessun wiring in `resolved_sale_order`.
+#[extend("sale.order")]
+pub struct SaleMargin {
+    #[field(label = "Margin", compute = "compute_margin", depends = "amount_total", currency = "currency_id", store)]
+    margin: Decimal,
+}
 
-/// Risolve il modello completo del modulo (base + estensioni), validato.
+/// Risolve il modello completo del modulo dal catalogo (base + estensioni auto-registrate).
 pub fn resolved_sale_order() -> ResolvedModel {
-    let m = resolve(SaleOrder::descriptor(), &[SALE_MARGIN_FIELDS]).expect("risoluzione sale.order");
-    validate_depends(&m).expect("depends sale.order");
-    m
+    resolve_registered("sale.order").expect("risoluzione sale.order")
 }
 
 #[cfg(test)]

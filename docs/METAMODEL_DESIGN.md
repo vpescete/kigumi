@@ -267,7 +267,9 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
    un endpoint REST read. Prova end-to-end che il metamodello → 3 proiezioni regge. *Compila.*
 2. ~~**Proc-macro `#[model]`**: sostituisce la definizione a mano.~~ ✅ Fatta — `meshble-macros`
    genera `ModelDescriptor` + `impl Model` dal DSL della struct; output identico alla fase 1.
-3. **`#[extend]` + risoluzione composizione** a build time (il superpotere). ⬅ prossima.
+3. **`#[extend]` + risoluzione composizione**. ✅ Fatto il `#[extend]` + auto-registrazione
+   via `inventory` + `resolve_registered()` (catalogo, niente wiring). ⬅ resta il **resolver
+   delle dipendenze tra moduli** con i range SemVer (vedi `VERSIONING.md` fase 3.1).
 4. **Domini AST tipizzati + security engine**.
 5. **OpenAPI/GraphQL + generazione SDK**.
 6. **Persistenza reale (sqlx) + migrazioni generate**.
