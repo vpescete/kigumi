@@ -1,3 +1,7 @@
 /target
 # Sparse checkout di Odoo usato solo come riferimento di analisi — non parte del repo.
 /odoo19
+
+# Instance config & secrets (real files — keep only the .example)
+/meshble.toml
+.env
