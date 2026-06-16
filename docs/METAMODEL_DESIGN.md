@@ -271,7 +271,11 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
    `inventory` + `resolve_registered()` (catalogo modelli) **e** `resolve_module_set()` /
    `resolve_modules()` (grafo moduli: compat framework + range SemVer + topo-order, indurito da
    audit adversarial). Vedi `VERSIONING.md`.
-4. **Domini AST tipizzati + security engine**.
+4. **Domini AST tipizzati + security engine**. ✅ Fatto: `Domain` AST → SQL **parametrizzato**
+   con validazione contro il modello (no `safe_eval`, no injection); ACL + record rules
+   (global AND / group OR) + `Ctx`/`sudo` (flag privato). Indurito da audit security adversarial
+   (5 fix: su forgiabile, NULL three-valued ×2, NaN, gate operatore↔kind). ⬅ resta il wiring
+   delle **regole di visibilità/readonly nel contratto-UI** come dati (prossimo step UI).
 5. **OpenAPI/GraphQL + generazione SDK**.
 6. **Persistenza reale (sqlx) + migrazioni generate**.
 

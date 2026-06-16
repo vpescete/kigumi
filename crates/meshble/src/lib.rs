@@ -7,10 +7,11 @@ pub use meshble_core::inventory;
 /// Everything needed to define a module: `use meshble::prelude::*;`
 pub mod prelude {
     pub use meshble_core::{
-        check_compat, resolve, resolve_module_set, resolve_modules, resolve_registered,
-        validate_depends, FieldDef, FieldExtension, FieldKind, Model, ModelDescriptor,
-        ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, ResolutionError,
-        ResolvedModel, FRAMEWORK_VERSION,
+        check_access, check_compat, record_rule_domain, resolve, resolve_module_set,
+        resolve_modules, resolve_registered, validate_depends, Acl, Condition, Ctx, Domain,
+        DomainError, FieldBuilder, FieldDef, FieldExtension, FieldKind, Model, ModelDescriptor,
+        ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
+        RecordRule, ResolutionError, ResolvedModel, Sql, Value, FRAMEWORK_VERSION,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{to_ddl, to_ui_contract};

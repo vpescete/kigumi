@@ -50,6 +50,34 @@ pub fn resolved_sale_order() -> ResolvedModel {
     resolve_registered("sale.order").expect("sale.order resolution")
 }
 
+/// Access control: `sales.user` can read/write/create sale orders, but not delete.
+pub static ACLS: &[Acl] = &[Acl {
+    model: "sale.order",
+    group: "sales.user",
+    read: true,
+    write: true,
+    create: true,
+    delete: false,
+}];
+
+fn not_done() -> Domain {
+    Domain::field("state").ne("done")
+}
+fn small_orders() -> Domain {
+    Domain::field("amount_total").lt(10_000_i64)
+}
+
+/// Row-level rules: everyone is restricted to non-"done" orders; juniors only see small ones.
+pub static RECORD_RULES: &[RecordRule] = &[
+    RecordRule { model: "sale.order", groups: &[], ops: &[Operation::Read], domain: not_done },
+    RecordRule {
+        model: "sale.order",
+        groups: &["sales.user"],
+        ops: &[Operation::Read],
+        domain: small_orders,
+    },
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

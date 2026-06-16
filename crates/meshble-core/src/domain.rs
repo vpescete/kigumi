@@ -1,0 +1,460 @@
+//! Typed domain AST: a filter expression compiled to PARAMETERIZED SQL.
+//!
+//! Unlike Odoo's `ir.rule.domain_force` (a Python string evaluated with `safe_eval`), a domain
+//! here is typed data: validated against the model (unknown fields are an error, not a runtime
+//! surprise) and compiled with bound parameters (`$1, $2, …`), so values are never interpolated
+//! into SQL text. This closes both the injection surface and the "broken filter discovered in
+//! production" failure mode.
+
+use crate::{FieldDef, FieldKind, ResolvedModel};
+
+/// A scalar (or list) literal used on the right-hand side of a condition.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    Str(String),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Null,
+    List(Vec<Value>),
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::Str(s.to_string())
+    }
+}
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::Str(s)
+    }
+}
+impl From<i64> for Value {
+    fn from(n: i64) -> Self {
+        Value::Int(n)
+    }
+}
+impl From<f64> for Value {
+    fn from(n: f64) -> Self {
+        Value::Float(n)
+    }
+}
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Operator {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    In,
+    NotIn,
+    Like,
+    ILike,
+    IsNull,
+    IsNotNull,
+}
+
+/// A single leaf condition `field <op> value`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Condition {
+    pub field: String,
+    pub op: Operator,
+    pub value: Value,
+}
+
+/// A filter expression. Combine with `and`/`or`/`not`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Domain {
+    True,
+    False,
+    Cond(Condition),
+    And(Box<Domain>, Box<Domain>),
+    Or(Box<Domain>, Box<Domain>),
+    Not(Box<Domain>),
+}
+
+impl Domain {
+    /// Starts a condition on `name`: `Domain::field("state").eq("sale")`.
+    pub fn field(name: &str) -> FieldBuilder {
+        FieldBuilder(name.to_string())
+    }
+    pub fn and(self, other: Domain) -> Domain {
+        Domain::And(Box::new(self), Box::new(other))
+    }
+    pub fn or(self, other: Domain) -> Domain {
+        Domain::Or(Box::new(self), Box::new(other))
+    }
+    pub fn not(self) -> Domain {
+        Domain::Not(Box::new(self))
+    }
+}
+
+/// Fluent builder for a single condition.
+pub struct FieldBuilder(String);
+
+impl FieldBuilder {
+    fn cond(self, op: Operator, value: Value) -> Domain {
+        Domain::Cond(Condition { field: self.0, op, value })
+    }
+    pub fn eq(self, v: impl Into<Value>) -> Domain {
+        self.cond(Operator::Eq, v.into())
+    }
+    pub fn ne(self, v: impl Into<Value>) -> Domain {
+        self.cond(Operator::Ne, v.into())
+    }
+    pub fn lt(self, v: impl Into<Value>) -> Domain {
+        self.cond(Operator::Lt, v.into())
+    }
+    pub fn le(self, v: impl Into<Value>) -> Domain {
+        self.cond(Operator::Le, v.into())
+    }
+    pub fn gt(self, v: impl Into<Value>) -> Domain {
+        self.cond(Operator::Gt, v.into())
+    }
+    pub fn ge(self, v: impl Into<Value>) -> Domain {
+        self.cond(Operator::Ge, v.into())
+    }
+    pub fn like(self, v: impl Into<Value>) -> Domain {
+        self.cond(Operator::Like, v.into())
+    }
+    pub fn ilike(self, v: impl Into<Value>) -> Domain {
+        self.cond(Operator::ILike, v.into())
+    }
+    pub fn is_null(self) -> Domain {
+        self.cond(Operator::IsNull, Value::Null)
+    }
+    pub fn is_not_null(self) -> Domain {
+        self.cond(Operator::IsNotNull, Value::Null)
+    }
+    pub fn in_<T: Into<Value>>(self, vs: impl IntoIterator<Item = T>) -> Domain {
+        self.cond(Operator::In, Value::List(vs.into_iter().map(Into::into).collect()))
+    }
+    pub fn not_in<T: Into<Value>>(self, vs: impl IntoIterator<Item = T>) -> Domain {
+        self.cond(Operator::NotIn, Value::List(vs.into_iter().map(Into::into).collect()))
+    }
+}
+
+/// Compiled SQL: a boolean expression plus its ordered bound parameters.
+#[derive(Debug, PartialEq)]
+pub struct Sql {
+    pub where_clause: String,
+    pub params: Vec<Value>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum DomainError {
+    UnknownField { field: String, model: String },
+    NotAColumn { field: String },
+    TypeMismatch { field: String, detail: String },
+    BadOperatorValue { field: String, detail: String },
+    /// Dotted relational paths (e.g. `partner_id.country_id`) are not yet supported (joins).
+    UnsupportedPath { field: String },
+}
+
+impl Domain {
+    /// Validates the domain against `model` and compiles it to parameterized SQL.
+    pub fn compile(&self, model: &ResolvedModel) -> Result<Sql, DomainError> {
+        let mut params = Vec::new();
+        let where_clause = self.emit(model, &mut params)?;
+        Ok(Sql { where_clause, params })
+    }
+
+    fn emit(&self, model: &ResolvedModel, params: &mut Vec<Value>) -> Result<String, DomainError> {
+        match self {
+            Domain::True => Ok("TRUE".to_string()),
+            Domain::False => Ok("FALSE".to_string()),
+            Domain::Not(d) => Ok(format!("(NOT {})", d.emit(model, params)?)),
+            Domain::And(a, b) => {
+                Ok(format!("({} AND {})", a.emit(model, params)?, b.emit(model, params)?))
+            }
+            Domain::Or(a, b) => {
+                Ok(format!("({} OR {})", a.emit(model, params)?, b.emit(model, params)?))
+            }
+            Domain::Cond(c) => emit_cond(c, model, params),
+        }
+    }
+}
+
+fn emit_cond(
+    c: &Condition,
+    model: &ResolvedModel,
+    params: &mut Vec<Value>,
+) -> Result<String, DomainError> {
+    if c.field.contains('.') {
+        return Err(DomainError::UnsupportedPath { field: c.field.clone() });
+    }
+    let field = model
+        .fields
+        .iter()
+        .find(|f| f.name == c.field)
+        .ok_or_else(|| DomainError::UnknownField {
+            field: c.field.clone(),
+            model: model.name.to_string(),
+        })?;
+    if !field.has_column() {
+        return Err(DomainError::NotAColumn { field: c.field.clone() });
+    }
+    // The identifier comes from the model (a controlled static), never from the input string.
+    let col = field.name;
+
+    match c.op {
+        Operator::IsNull => Ok(format!("{col} IS NULL")),
+        Operator::IsNotNull => Ok(format!("{col} IS NOT NULL")),
+        Operator::In | Operator::NotIn => {
+            let list = match &c.value {
+                Value::List(v) => v,
+                _ => {
+                    return Err(DomainError::BadOperatorValue {
+                        field: c.field.clone(),
+                        detail: "IN/NOT IN require a list value".to_string(),
+                    })
+                }
+            };
+            if list.is_empty() {
+                // `x IN ()` is always false; `x NOT IN ()` is always true.
+                return Ok(if matches!(c.op, Operator::In) { "FALSE" } else { "TRUE" }.to_string());
+            }
+            let mut placeholders = Vec::with_capacity(list.len());
+            for v in list {
+                if matches!(v, Value::Null) {
+                    // `x NOT IN (.., NULL)` is UNKNOWN for every row — a silent record-rule footgun.
+                    return Err(DomainError::BadOperatorValue {
+                        field: c.field.clone(),
+                        detail: "NULL is not allowed inside IN/NOT IN; use is_null()/is_not_null()"
+                            .to_string(),
+                    });
+                }
+                check_value_type(field, v)?;
+                params.push(v.clone());
+                placeholders.push(format!("${}", params.len()));
+            }
+            let kw = if matches!(c.op, Operator::In) { "IN" } else { "NOT IN" };
+            Ok(format!("{col} {kw} ({})", placeholders.join(", ")))
+        }
+        _ => {
+            if matches!(c.value, Value::List(_)) {
+                return Err(DomainError::BadOperatorValue {
+                    field: c.field.clone(),
+                    detail: "scalar operator given a list value".to_string(),
+                });
+            }
+            // NULL never compares with =, <>, <, … (the result is UNKNOWN, matching zero rows).
+            // Normalize the meaningful cases and reject the rest, so a rule is never silently empty.
+            if matches!(c.value, Value::Null) {
+                return match c.op {
+                    Operator::Eq => Ok(format!("{col} IS NULL")),
+                    Operator::Ne => Ok(format!("{col} IS NOT NULL")),
+                    _ => Err(DomainError::BadOperatorValue {
+                        field: c.field.clone(),
+                        detail: "NULL only supported with =, !=, is_null(), is_not_null()"
+                            .to_string(),
+                    }),
+                };
+            }
+            check_operator_kind(c.op, &field.kind, &c.field)?;
+            check_value_type(field, &c.value)?;
+            params.push(c.value.clone());
+            let p = format!("${}", params.len());
+            let sql_op = match c.op {
+                Operator::Eq => "=",
+                Operator::Ne => "<>",
+                Operator::Lt => "<",
+                Operator::Le => "<=",
+                Operator::Gt => ">",
+                Operator::Ge => ">=",
+                Operator::Like => "LIKE",
+                Operator::ILike => "ILIKE",
+                Operator::In | Operator::NotIn | Operator::IsNull | Operator::IsNotNull => {
+                    unreachable!("handled above")
+                }
+            };
+            Ok(format!("{col} {sql_op} {p}"))
+        }
+    }
+}
+
+/// Rejects operator/field-kind combinations that are almost always author mistakes (e.g. LIKE
+/// on a non-text field, ordering a boolean), so the validator catches them before production.
+fn check_operator_kind(op: Operator, kind: &FieldKind, field: &str) -> Result<(), DomainError> {
+    let bad = |detail: &str| {
+        Err(DomainError::BadOperatorValue { field: field.to_string(), detail: detail.to_string() })
+    };
+    match op {
+        Operator::Like | Operator::ILike if !matches!(kind, FieldKind::Text) => {
+            bad("LIKE/ILIKE only apply to Text fields")
+        }
+        Operator::Lt | Operator::Le | Operator::Gt | Operator::Ge
+            if matches!(kind, FieldKind::Bool) =>
+        {
+            bad("ordering operators do not apply to Bool fields")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Checks that a (non-null) value is type-compatible with the field's kind. Null is handled at
+/// the operator level (only IS NULL / IS NOT NULL), so it must never reach here.
+fn check_value_type(field: &FieldDef, v: &Value) -> Result<(), DomainError> {
+    let ok = match (&field.kind, v) {
+        (FieldKind::Text | FieldKind::Selection(_), Value::Str(_)) => true,
+        (FieldKind::Integer | FieldKind::Many2one { .. }, Value::Int(_)) => true,
+        (FieldKind::Decimal { .. }, Value::Int(_)) => true,
+        // NaN / Infinity cannot be stored in NUMERIC and make every comparison UNKNOWN.
+        (FieldKind::Decimal { .. }, Value::Float(f)) => f.is_finite(),
+        (FieldKind::Bool, Value::Bool(_)) => true,
+        _ => false,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(DomainError::TypeMismatch {
+            field: field.name.to_string(),
+            detail: format!("{:?} is not compatible with field kind {:?}", v, field.kind),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{resolve, FieldDef, FieldKind, ModelDescriptor};
+
+    static MODEL: ModelDescriptor = ModelDescriptor {
+        name: "sale.order",
+        table: "sale_order",
+        fields: &[
+            FieldDef {
+                name: "state", label: "State",
+                kind: FieldKind::Selection(&[("draft", "Draft"), ("done", "Done")]),
+                required: true, stored: true, compute: None, depends: &[],
+            },
+            FieldDef {
+                name: "amount_total", label: "Total",
+                kind: FieldKind::Decimal { currency_field: None },
+                required: false, stored: true, compute: None, depends: &[],
+            },
+            FieldDef {
+                name: "line_ids", label: "Lines",
+                kind: FieldKind::One2many { target: "sale.order.line", inverse: "order_id" },
+                required: false, stored: false, compute: None, depends: &[],
+            },
+            FieldDef {
+                name: "flag", label: "Flag", kind: FieldKind::Bool,
+                required: false, stored: true, compute: None, depends: &[],
+            },
+        ],
+    };
+
+    fn model() -> crate::ResolvedModel {
+        resolve(&MODEL, &[]).unwrap()
+    }
+
+    #[test]
+    fn compiles_parameterized_sql() {
+        let d = Domain::field("state").ne("done").and(Domain::field("amount_total").lt(10000_i64));
+        let sql = d.compile(&model()).unwrap();
+        assert_eq!(sql.where_clause, "(state <> $1 AND amount_total < $2)");
+        assert_eq!(sql.params, vec![Value::Str("done".into()), Value::Int(10000)]);
+    }
+
+    #[test]
+    fn values_are_never_inlined_into_sql() {
+        // A SQL-injection attempt must end up as a bound parameter, not in the SQL text.
+        let evil = "x'; DROP TABLE sale_order; --";
+        let sql = Domain::field("state").eq(evil).compile(&model()).unwrap();
+        assert_eq!(sql.where_clause, "state = $1");
+        assert!(!sql.where_clause.contains("DROP"));
+        assert_eq!(sql.params, vec![Value::Str(evil.into())]);
+    }
+
+    #[test]
+    fn unknown_field_is_rejected() {
+        let d = Domain::field("nope").eq("x");
+        assert!(matches!(d.compile(&model()), Err(DomainError::UnknownField { .. })));
+    }
+
+    #[test]
+    fn one2many_is_not_a_column() {
+        let d = Domain::field("line_ids").eq(1_i64);
+        assert!(matches!(d.compile(&model()), Err(DomainError::NotAColumn { .. })));
+    }
+
+    #[test]
+    fn type_mismatch_is_rejected() {
+        // amount_total is numeric; a string value is invalid.
+        let d = Domain::field("amount_total").eq("oops");
+        assert!(matches!(d.compile(&model()), Err(DomainError::TypeMismatch { .. })));
+    }
+
+    #[test]
+    fn empty_in_is_false() {
+        let d = Domain::field("state").in_(Vec::<&str>::new());
+        assert_eq!(d.compile(&model()).unwrap().where_clause, "FALSE");
+    }
+
+    #[test]
+    fn in_list_expands_to_placeholders() {
+        let d = Domain::field("state").in_(["draft", "done"]);
+        let sql = d.compile(&model()).unwrap();
+        assert_eq!(sql.where_clause, "state IN ($1, $2)");
+        assert_eq!(sql.params.len(), 2);
+    }
+
+    #[test]
+    fn dotted_path_is_unsupported_for_now() {
+        let d = Domain::field("partner_id.name").eq("x");
+        assert!(matches!(d.compile(&model()), Err(DomainError::UnsupportedPath { .. })));
+    }
+
+    #[test]
+    fn eq_null_becomes_is_null() {
+        let sql = Domain::field("state").eq(Value::Null).compile(&model()).unwrap();
+        assert_eq!(sql.where_clause, "state IS NULL");
+        assert!(sql.params.is_empty(), "NULL must not be bound as a parameter");
+    }
+
+    #[test]
+    fn ne_null_becomes_is_not_null() {
+        let sql = Domain::field("state").ne(Value::Null).compile(&model()).unwrap();
+        assert_eq!(sql.where_clause, "state IS NOT NULL");
+        assert!(sql.params.is_empty());
+    }
+
+    #[test]
+    fn ordering_with_null_is_rejected() {
+        let d = Domain::field("amount_total").lt(Value::Null);
+        assert!(matches!(d.compile(&model()), Err(DomainError::BadOperatorValue { .. })));
+    }
+
+    #[test]
+    fn null_inside_in_list_is_rejected() {
+        let d = Domain::field("state").not_in(vec![Value::from("done"), Value::Null]);
+        assert!(matches!(d.compile(&model()), Err(DomainError::BadOperatorValue { .. })));
+    }
+
+    #[test]
+    fn non_finite_float_is_rejected() {
+        let d = Domain::field("amount_total").gt(f64::NAN);
+        assert!(matches!(d.compile(&model()), Err(DomainError::TypeMismatch { .. })));
+    }
+
+    #[test]
+    fn like_on_non_text_is_rejected() {
+        // `state` is a Selection (closed enum) — pattern matching it is almost always a mistake.
+        let d = Domain::field("state").like("dra%");
+        assert!(matches!(d.compile(&model()), Err(DomainError::BadOperatorValue { .. })));
+    }
+
+    #[test]
+    fn ordering_on_bool_is_rejected() {
+        let d = Domain::field("flag").gt(false);
+        assert!(matches!(d.compile(&model()), Err(DomainError::BadOperatorValue { .. })));
+    }
+}
