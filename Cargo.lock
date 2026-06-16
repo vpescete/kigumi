@@ -710,6 +710,7 @@ version = "0.1.0"
 dependencies = [
  "meshble-core",
  "meshble-schema",
+ "serde_json",
  "sqlx",
  "tokio",
 ]
@@ -753,7 +754,10 @@ dependencies = [
  "axum",
  "http-body-util",
  "meshble-core",
+ "meshble-db",
  "meshble-schema",
+ "serde_json",
+ "sqlx",
  "tokio",
  "tower",
 ]

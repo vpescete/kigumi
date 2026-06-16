@@ -7,13 +7,14 @@
 //! query — so a user can never read rows the rules forbid.
 
 use meshble_core::{
-    check_access, record_rule_domain, Acl, Ctx, Domain, DomainError, Operation, RecordRule,
-    ResolvedModel, Value,
+    check_access, record_rule_domain, Acl, Ctx, Domain, DomainError, FieldKind, Operation,
+    RecordRule, ResolvedModel, Value,
 };
 use meshble_schema::to_ddl;
-use sqlx::postgres::{PgArguments, PgPoolOptions};
+use serde_json::{Map, Value as Json};
+use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use sqlx::query::QueryScalar;
-use sqlx::{PgPool, Postgres};
+use sqlx::{PgPool, Postgres, Row};
 
 #[derive(Debug)]
 pub enum DbError {
@@ -87,6 +88,39 @@ impl Db {
         self.count_where(model, &dom).await
     }
 
+    /// Returns the rows of `model` visible to `ctx` as JSON objects (one per row, field→value),
+    /// enforcing ACL + record rules. The same secured WHERE as the count/id variants.
+    pub async fn find_secured(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        filter: Option<&Domain>,
+    ) -> Result<Vec<Json>, DbError> {
+        let dom = self.secured_read_domain(model, ctx, acls, rules, filter)?;
+        let f = dom.compile(model)?;
+        let sql = format!(
+            "SELECT {} FROM {} WHERE {} ORDER BY id",
+            select_columns(model),
+            model.table,
+            f.where_clause
+        );
+        let mut q = sqlx::query(&sql);
+        for p in &f.params {
+            q = match p {
+                Value::Str(s) => q.bind(s.clone()),
+                Value::Int(n) => q.bind(*n),
+                Value::Float(x) => q.bind(*x),
+                Value::Bool(b) => q.bind(*b),
+                Value::Null => q.bind(Option::<String>::None),
+                Value::List(_) => q,
+            };
+        }
+        let rows = q.fetch_all(&self.pool).await?;
+        rows.iter().map(|r| row_to_json(model, r)).collect()
+    }
+
     /// Like [`Db::count_secured`] but returns the ids of the visible rows (ordered).
     pub async fn find_ids_secured(
         &self,
@@ -127,6 +161,54 @@ impl Db {
             (None, None) => Domain::True,
         })
     }
+}
+
+/// Builds the SELECT column list for a model. NUMERIC columns are cast to float8 so they decode
+/// into `f64` without a decimal dependency. Identifiers come from the model, never user input.
+fn select_columns(model: &ResolvedModel) -> String {
+    let mut cols = vec!["id".to_string()];
+    for f in &model.fields {
+        if !f.has_column() {
+            continue;
+        }
+        if matches!(f.kind, FieldKind::Decimal { .. }) {
+            cols.push(format!("{}::float8 AS {}", f.name, f.name));
+        } else {
+            cols.push(f.name.to_string());
+        }
+    }
+    cols.join(", ")
+}
+
+/// Converts a database row into a JSON object keyed by field name, decoding each column per its
+/// field kind (NULL → JSON null).
+fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
+    let mut obj = Map::new();
+    let id: i64 = row.try_get("id")?;
+    obj.insert("id".to_string(), Json::from(id));
+    for f in &model.fields {
+        if !f.has_column() {
+            continue;
+        }
+        let v: Json = match &f.kind {
+            FieldKind::Text | FieldKind::Selection(_) => {
+                row.try_get::<Option<String>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
+            }
+            FieldKind::Integer | FieldKind::Many2one { .. } => {
+                row.try_get::<Option<i64>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
+            }
+            FieldKind::Decimal { .. } => match row.try_get::<Option<f64>, _>(f.name)? {
+                Some(x) => serde_json::json!(x),
+                None => Json::Null,
+            },
+            FieldKind::Bool => {
+                row.try_get::<Option<bool>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
+            }
+            FieldKind::One2many { .. } => continue,
+        };
+        obj.insert(f.name.to_string(), v);
+    }
+    Ok(Json::Object(obj))
 }
 
 /// Binds the compiled domain's parameters in order. Owned binds (clone/copy) so the bound
