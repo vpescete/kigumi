@@ -1,0 +1,12 @@
+[package]
+name = "meshble"
+description = "Meshble framework facade: prelude re-exporting core, schema and macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meshble-core = { workspace = true }
+meshble-schema = { workspace = true }
+meshble-macros = { workspace = true }

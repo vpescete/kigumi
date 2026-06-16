@@ -1,0 +1,11 @@
+[package]
+name = "meshble-mod-sales"
+description = "Example Meshble module: sale.order + sale_margin extension"
+# Versione del MODULO, indipendente dal framework (vedi docs/VERSIONING.md).
+version = "1.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meshble = { workspace = true }

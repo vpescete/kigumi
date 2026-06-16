@@ -1,0 +1,10 @@
+[package]
+name = "meshble-schema"
+description = "Projections from a resolved Meshble model: Postgres DDL and agnostic UI contract (JSON)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meshble-core = { workspace = true }

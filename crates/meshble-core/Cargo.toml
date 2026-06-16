@@ -1,0 +1,10 @@
+[package]
+name = "meshble-core"
+description = "Meshble metamodel: inspectable model descriptors, extension resolution, module manifests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+semver = { workspace = true }
