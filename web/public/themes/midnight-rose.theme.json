@@ -1,0 +1,46 @@
+{
+  "id": "midnight-rose",
+  "name": "Midnight Rose",
+  "author": "community",
+  "version": "1.0.0",
+  "compat": "^0.1",
+  "defaultMode": "dark",
+  "fontImports": [
+    "https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+  ],
+  "fonts": {
+    "display": "'Sora', ui-sans-serif, system-ui, sans-serif",
+    "body": "'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif",
+    "mono": "'JetBrains Mono', ui-monospace, Menlo, monospace"
+  },
+  "type": {
+    "display": { "stack": "display", "size": "38px", "weight": 600, "lh": "1.06", "tracking": "-0.025em", "transform": "none" },
+    "h1": { "stack": "display", "size": "26px", "weight": 600, "lh": "1.15", "tracking": "-0.02em", "transform": "none" },
+    "h2": { "stack": "display", "size": "18px", "weight": 600, "lh": "1.25", "tracking": "-0.01em", "transform": "none" },
+    "subtitle": { "stack": "body", "size": "15px", "weight": 500, "lh": "1.45", "tracking": "0", "transform": "none" },
+    "body": { "stack": "body", "size": "14px", "weight": 400, "lh": "1.55", "tracking": "0", "transform": "none" },
+    "label": { "stack": "body", "size": "11px", "weight": 600, "lh": "1.3", "tracking": "0.07em", "transform": "uppercase" },
+    "caption": { "stack": "body", "size": "12px", "weight": 400, "lh": "1.4", "tracking": "0.01em", "transform": "none" },
+    "mono": { "stack": "mono", "size": "13px", "weight": 500, "lh": "1.45", "tracking": "0", "transform": "none" }
+  },
+  "radius": { "sm": "6px", "md": "10px", "lg": "16px" },
+  "shadow": {
+    "sm": "0 1px 2px rgba(10, 6, 14, 0.4)",
+    "md": "0 8px 28px -8px rgba(10, 6, 14, 0.6)"
+  },
+  "density": { "row": "42px", "control": "34px", "fsBase": "14px", "space": "8px" },
+  "color": {
+    "light": {
+      "bg": "#FBF7F8", "surface": "#FFFFFF", "surface2": "#F6EEF0", "border": "#ECDCE0",
+      "text": "#2A1C22", "textMuted": "#6E5A62", "accent": "#D11E47", "accentFg": "#FFFFFF",
+      "accentHover": "#B5183C", "accentSoft": "#FBE2E8", "success": "#1B7340", "successBg": "#E5F3EA",
+      "warning": "#8A5A00", "warningBg": "#FBEFD6", "danger": "#C0392B", "dangerBg": "#FBE6E1", "ring": "#D11E47"
+    },
+    "dark": {
+      "bg": "#141019", "surface": "#1C1622", "surface2": "#251D2E", "border": "#342839",
+      "text": "#F2ECF2", "textMuted": "#AEA3B6", "accent": "#F4476A", "accentFg": "#1A0710",
+      "accentHover": "#FF6184", "accentSoft": "#2E1622", "success": "#46C77E", "successBg": "#16291F",
+      "warning": "#E0A93B", "warningBg": "#2C2310", "danger": "#FF5C5C", "dangerBg": "#2E1614", "ring": "#F4476A"
+    }
+  }
+}

@@ -1,37 +1,31 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import type { Mode, Theme } from './theme/contract'
+import { getAllThemes, subscribe } from './theme/registry'
 
-export type ThemeName = 'graphite' | 'editorial' | 'swiss' | 'humanist' | 'monotech'
-export type Mode = 'light' | 'dark'
-
-/** The five design systems, with their natural default mode and a one-line character. */
-export const THEMES: { id: ThemeName; name: string; blurb: string; defaultMode: Mode }[] = [
-  { id: 'graphite', name: 'Graphite', blurb: 'Dark dev-console · cyan · dense', defaultMode: 'dark' },
-  { id: 'editorial', name: 'Editorial', blurb: 'Warm serif · terracotta · airy', defaultMode: 'light' },
-  { id: 'swiss', name: 'Swiss', blurb: 'Bold grid · signal red · flat', defaultMode: 'light' },
-  { id: 'humanist', name: 'Verdigris', blurb: 'Friendly · emerald · rounded', defaultMode: 'light' },
-  { id: 'monotech', name: 'Mono-Tech', blurb: 'Ops console · amber · mono', defaultMode: 'dark' },
-]
-
-const IDS = THEMES.map((t) => t.id)
-const isTheme = (v: string | null): v is ThemeName => !!v && (IDS as string[]).includes(v)
+export type { Mode }
 
 type Ctx = {
-  theme: ThemeName
+  theme: string
   mode: Mode
-  setTheme: (t: ThemeName) => void
+  themes: Theme[]
+  setTheme: (id: string) => void
   toggleMode: () => void
 }
 const ThemeCtx = createContext<Ctx | null>(null)
 
+const knownId = (id: string | null, themes: Theme[]): string =>
+  id && themes.some((t) => t.id === id) ? id : 'graphite'
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  // Validate persisted values — a theme id from an earlier build would leave the app uncolored.
-  const [theme, setThemeState] = useState<ThemeName>(() => {
-    const saved = localStorage.getItem('msh-theme')
-    return isTheme(saved) ? saved : 'graphite'
-  })
+  // Re-render when the registry changes (a theme added in the Studio / dropped in).
+  const [, bump] = useState(0)
+  useEffect(() => subscribe(() => bump((n) => n + 1)), [])
+  const themes = getAllThemes()
+
+  const [theme, setThemeState] = useState<string>(() => knownId(localStorage.getItem('msh-theme'), getAllThemes()))
   const [mode, setMode] = useState<Mode>(() => {
-    const saved = localStorage.getItem('msh-mode')
-    return saved === 'light' || saved === 'dark' ? saved : 'dark'
+    const s = localStorage.getItem('msh-mode')
+    return s === 'light' || s === 'dark' ? s : 'dark'
   })
 
   useEffect(() => {
@@ -42,16 +36,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('msh-mode', mode)
   }, [theme, mode])
 
-  // Switching design system jumps to that system's natural default mode.
-  const setTheme = (t: ThemeName) => {
-    setThemeState(t)
-    setMode(THEMES.find((x) => x.id === t)?.defaultMode ?? 'light')
+  const setTheme = (id: string) => {
+    setThemeState(id)
+    const def = themes.find((t) => t.id === id)?.defaultMode
+    if (def) setMode(def)
   }
 
   return (
-    <ThemeCtx.Provider
-      value={{ theme, mode, setTheme, toggleMode: () => setMode(mode === 'dark' ? 'light' : 'dark') }}
-    >
+    <ThemeCtx.Provider value={{ theme, mode, themes, setTheme, toggleMode: () => setMode(mode === 'dark' ? 'light' : 'dark') }}>
       {children}
     </ThemeCtx.Provider>
   )

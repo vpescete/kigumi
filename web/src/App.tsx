@@ -2,25 +2,28 @@ import { NavLink, Route, Routes } from 'react-router-dom'
 import {
   LayoutDashboard,
   Package,
+  Palette,
   Search,
   ShoppingCart,
   Sun,
   Moon,
   Users,
 } from 'lucide-react'
-import { THEMES, useTheme } from './theme'
+import { useTheme } from './theme'
 import { cx } from './ui'
 import { Dashboard } from './screens/Dashboard'
 import { Orders } from './screens/Orders'
 import { OrderDetail } from './screens/OrderDetail'
 import { Customers } from './screens/Customers'
 import { Products } from './screens/Products'
+import { ThemeStudio } from './screens/ThemeStudio'
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/orders', label: 'Sales Orders', icon: ShoppingCart, end: false },
   { to: '/customers', label: 'Customers', icon: Users, end: false },
   { to: '/products', label: 'Products', icon: Package, end: false },
+  { to: '/theme-studio', label: 'Theme Studio', icon: Palette, end: false },
 ]
 
 function Sidebar() {
@@ -69,16 +72,15 @@ function Sidebar() {
 }
 
 function ThemeSwitcher() {
-  const { theme, setTheme, mode, toggleMode } = useTheme()
-  const active = THEMES.find((t) => t.id === theme)
+  const { theme, setTheme, mode, toggleMode, themes } = useTheme()
   return (
     <div className="flex items-center gap-2">
-      <div className="hidden md:flex items-center gap-0.5 p-1 rounded-md bg-surface2 border border-border">
-        {THEMES.map((t) => (
+      <div className="hidden md:flex items-center gap-0.5 p-1 rounded-md bg-surface2 border border-border max-w-[460px] overflow-x-auto">
+        {themes.map((t) => (
           <button
             key={t.id}
             onClick={() => setTheme(t.id)}
-            title={t.blurb}
+            title={`${t.name}${t.author && t.author !== 'Meshble' ? ` · ${t.author}` : ''}`}
             className={cx(
               'px-2 py-1 rounded-sm text-xs font-medium transition-colors whitespace-nowrap',
               theme === t.id ? 'bg-accent text-accent-fg shadow-sm' : 'text-muted hover:text-text',
@@ -95,7 +97,6 @@ function ThemeSwitcher() {
       >
         {mode === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
       </button>
-      <div className="hidden xl:block t-caption text-muted w-32 leading-tight">{active?.blurb}</div>
     </div>
   )
 }
@@ -138,6 +139,7 @@ export function App() {
               <Route path="/orders/:id" element={<OrderDetail />} />
               <Route path="/customers" element={<Customers />} />
               <Route path="/products" element={<Products />} />
+              <Route path="/theme-studio" element={<ThemeStudio />} />
             </Routes>
           </div>
         </main>

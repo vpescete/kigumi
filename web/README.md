@@ -36,15 +36,27 @@ No backend needed — screens run on in-memory mock data shaped like the real AP
 - **Dashboard → Sales Orders → click a row → Order detail**: the master-detail screen (header record
   + inline order lines + computed total) is the one to judge — the core ERP shape.
 
+## Community theming
+
+A theme is declarative **data** (`src/theme/contract.ts`), turned into CSS variables at runtime — so
+the community can ship themes without touching the UI. Three ways to make one:
+
+1. **Theme Studio** (`/theme-studio`, no code): fork a base, tune tokens with live preview + contrast
+   lint, then Save (joins the switcher) or Export JSON.
+2. **Drop-in JSON** (no rebuild): add a `*.theme.json` to `public/themes/` + list it in
+   `public/themes/index.json` (see `midnight-rose.theme.json`).
+3. **Built-in TS**: a `Theme` in `src/theme/themes/` registered in `index.ts`.
+
+Validation (`src/theme/validate.ts`): structure + safe color formats + WCAG contrast (≥ 4.5:1). See
+[../docs/THEMING.md](../docs/THEMING.md).
+
 ## How it's wired
 
-- `src/index.css` — the five token systems (colors + type scale + radius/shadow/density) as CSS
-  variables under `[data-theme][data-mode]`, generated from the design specs.
-- `src/type.css` — `.t-display … .t-mono` role classes driven by the per-theme type variables.
-- `tailwind.config.js` — semantic colors (`bg`, `surface`, `accent`, `accent-soft`, …) map to vars.
-- `src/theme.tsx` — theme/mode state on `<html data-theme data-mode>`, persisted, validated.
-- `src/ui.tsx` — theme-agnostic primitives (Button, Card, Badge, DataTable, Stat).
-- `src/screens/*` — Dashboard, Orders, OrderDetail, Customers, Products.
-
-Once a system is chosen, the unpicked token blocks are deleted, the winner becomes the real design
-system, and the screens are wired to the live API instead of mock data.
+- `src/theme/contract.ts` — the public, versioned `Theme` shape (tokens + 8 type roles).
+- `src/theme/css.ts` — `themeToCss` + runtime injection (built-in & community themes, identical path).
+- `src/theme/registry.ts` — built-ins + drop-ins + customs (localStorage), reactive.
+- `src/theme/themes/*` — the 5 seed systems as `Theme` objects (Graphite is the base).
+- `src/type.css` — `.t-display … .t-mono` role classes driven by per-theme type variables.
+- `src/index.css` — `:root` fallback = Graphite dark (resilient before JS); structure only.
+- `tailwind.config.js` — semantic colors (`bg`, `surface`, `accent`, `accent-soft`, …) → vars.
+- `src/ui.tsx` — theme-agnostic primitives; `src/screens/*` — the screens + Theme Studio.
