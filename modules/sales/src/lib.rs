@@ -9,9 +9,10 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "sales",
     version: "1.0.0",
     framework: ">=0.1, <0.2",
-    depends: &[ModuleDep { name: "base", req: "^0.1" }],
+    depends: &[ModuleDep { name: "base", req: "^1.0" }],
     summary: "Sales order management",
 };
+meshble::register_module!(MANIFEST);
 
 /// The "base" of sale.order — now declared with `#[model]` (phase 2).
 /// The macro generates `ModelDescriptor` + `impl Model`; the field "types" are the DSL.

@@ -9,3 +9,6 @@ repository.workspace = true
 
 [dependencies]
 meshble = { workspace = true }
+# Module dependency mirrors the manifest `depends` (base). Keeping Cargo deps and
+# manifest deps aligned is intentional — a future lint can enforce the match.
+meshble-mod-base = { path = "../base", version = "1.0.0" }

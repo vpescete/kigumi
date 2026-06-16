@@ -38,10 +38,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "meshble-mod-base"
+version = "1.0.0"
+dependencies = [
+ "meshble",
+]
+
+[[package]]
 name = "meshble-mod-sales"
 version = "1.0.0"
 dependencies = [
  "meshble",
+ "meshble-mod-base",
 ]
 
 [[package]]

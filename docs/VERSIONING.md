@@ -84,15 +84,37 @@ Differenze con Odoo, tutte verificabili:
 | Install/uninstall per tenant | runtime (`ir_module_module`) | runtime su catalogo compile-time |
 | Migrazioni | script Python per versione | passi Rust tipizzati + DDL generato |
 
-## 4. Stato attuale (questo commit)
+## 4. Policy sulle pre-release
 
-Implementato e testato:
-- `FRAMEWORK_VERSION` esposto dal core.
-- `ModuleManifest` / `ModuleDep` + `check_compat()` con `semver` reale (range verificati).
-- `modules/sales` dichiara il proprio manifest; test di compatibilità verde.
+Una build pre-release del framework o di un modulo (es. `0.1.5-rc.1`) è trattata come la sua
+**release line** (`0.1.5`) quando si confrontano i range. Senza questa policy, le regole
+Cargo/SemVer rifiuterebbero ogni pre-release in-range (un range matcha una pre-release solo se
+un comparator condivide l'esatto `major.minor.patch` e porta a sua volta una pre-release) →
+ogni install fallirebbe durante le build RC/dev del framework stesso. Implementato in
+`release_of()` e applicato sia alla compat col framework sia ai range tra moduli. La boundary
+resta corretta: `0.2.0-rc.1` → `0.2.0`, ancora fuori da `<0.2`.
+
+## 5. Questione aperta: policy sui nomi dei moduli
+
+Oggi i nomi sono confrontati case-sensitive. Essendo literal Rust controllati, una collisione
+case-only è improbabile (≠ Odoo, dove l'identità è la directory dell'addon). Da decidere se
+imporre un **pattern canonico** (es. `snake_case` minuscolo) a registrazione + un hint
+"did you mean" sui `MissingDependency`. Rimandato finché non c'è un ecosistema reale.
+
+## 6. Stato attuale
+
+Implementato e testato (fase 3 completa):
+- `FRAMEWORK_VERSION` esposto dal core; `ModuleManifest` / `ModuleDep`.
+- `check_compat()` con `semver` reale (range verificati, policy pre-release).
+- **`resolve_module_set()`** (puro, testabile): compat framework + range dei `depends` +
+  no-duplicati + no-self-dep + no-cicli → **ordine topologico**. Errori dedicati
+  (`MissingDependency`, `DependencyConflict`, `DuplicateModule`, `SelfDependency`,
+  `DependencyCycle` con i soli membri reali del ciclo).
+- **`resolve_modules()`** + `register_module!` + `inventory`: auto-registrazione del catalogo.
+- `modules/base` (`res.partner`, `res.currency`) + `modules/sales` (`depends: base`).
+- Indurito da audit adversarial (4 fix: pre-release ×2, ciclo preciso, self-dep). 21 test verdi.
 
 Roadmap versioning:
-1. **Resolver di moduli** (fase 3): risolve `depends` con range su tutto il catalogo, rifiuta
-   combinazioni incompatibili a build/install time.
-2. **Tabella `installed_module`** per-DB con `installed_version` (attivazione runtime).
-3. **Motore di migrazioni** schema+dati versionato.
+1. **Tabella `installed_module`** per-DB con `installed_version` (attivazione runtime).
+2. **Motore di migrazioni** schema+dati versionato.
+3. (Eventuale) policy sui nomi (§5).

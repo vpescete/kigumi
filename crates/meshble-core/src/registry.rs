@@ -5,7 +5,10 @@
 //! boundaries: extensions are separate data, merged with conflict checks (`resolve`), not a
 //! monkey-patch that mutates a class at runtime.
 
-use crate::{resolve, validate_depends, FieldDef, ModelDescriptor, ResolvedModel};
+use crate::{
+    resolve, resolve_module_set, validate_depends, FieldDef, ModelDescriptor, ModuleManifest,
+    ResolutionError, ResolvedModel, FRAMEWORK_VERSION,
+};
 
 /// Registration of a base model (emitted by `#[model]`).
 pub struct ModelRegistration {
@@ -22,6 +25,23 @@ pub struct FieldExtension {
     pub fields: fn() -> &'static [FieldDef],
 }
 inventory::collect!(FieldExtension);
+
+/// Registration of a module manifest (emitted by `register_module!`).
+pub struct ModuleRegistration {
+    pub manifest: fn() -> ModuleManifest,
+}
+inventory::collect!(ModuleRegistration);
+
+/// Resolves every module registered in the catalog: framework compatibility, dependency
+/// version ranges, no duplicates, no cycles — returning them in dependency order.
+/// The validation `resolve_module_set` does is exactly what Odoo's `depends` cannot express.
+pub fn resolve_modules() -> Result<Vec<ModuleManifest>, ResolutionError> {
+    let modules: Vec<ModuleManifest> = inventory::iter::<ModuleRegistration>
+        .into_iter()
+        .map(|r| (r.manifest)())
+        .collect();
+    resolve_module_set(&modules, FRAMEWORK_VERSION)
+}
 
 /// Resolves a model from the CATALOG: registered base + all auto-registered extensions,
 /// merged (with conflict checks) and validated. No wiring: modules auto-register.
