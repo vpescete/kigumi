@@ -283,9 +283,12 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
    da chiunque, SDK via `openapi-generator`. Server headless `meshble-server` (axum):
    `GET /openapi.json`, `/api/models`, `/api/{model}/view` (contratto-UI), testato via oneshot.
    ⬅ restano i data-endpoint con auth (riusano `*_secured` di `meshble-db`) e GraphQL.
-6. **Persistenza reale (sqlx) + migrazioni generate**. 🟡 In corso: `meshble-db` (crate
-   separato, backend pluggable — il core resta headless) esegue il DDL generato e le query con
-   `WHERE` compilato dal `Domain` e **parametrizzato**, provato end-to-end contro Postgres reale
-   (incl. test anti-injection a runtime). ⬅ restano le **migrazioni versionate** (schema+dati).
+6. **Persistenza reale (sqlx) + migrazioni generate**. ✅ Fatto: `meshble-db` (crate separato,
+   backend pluggable — il core resta headless) esegue il DDL generato e le query con `WHERE`
+   compilato dal `Domain` e **parametrizzato** (anti-injection provato a runtime), con read
+   **security-enforced** (ACL + record rules). **Migrazioni versionate** (`install_or_upgrade`,
+   tabelle `meshble_module`/`meshble_migration`): atomiche (transazione), serializzate
+   (`pg_advisory_xact_lock`), idempotenti, con check duplicati e reachability. Indurito da audit
+   adversarial (leak errori, race, gap di versione).
 
 Il punto 1 è nel codice del workspace; il resto sono fasi successive da validare una alla volta.

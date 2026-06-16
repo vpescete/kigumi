@@ -710,6 +710,7 @@ version = "0.1.0"
 dependencies = [
  "meshble-core",
  "meshble-schema",
+ "semver",
  "serde_json",
  "sqlx",
  "tokio",

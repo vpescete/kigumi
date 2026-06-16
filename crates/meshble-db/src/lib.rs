@@ -6,6 +6,9 @@
 //! database boundary: access is checked, and the user's record-rule domain is AND-ed into the
 //! query — so a user can never read rows the rules forbid.
 
+mod migration;
+pub use migration::{Migration, MigrationOutcome};
+
 use meshble_core::{
     check_access, record_rule_domain, Acl, Ctx, Domain, DomainError, FieldKind, Operation,
     RecordRule, ResolvedModel, Value,
@@ -22,6 +25,8 @@ pub enum DbError {
     Domain(DomainError),
     /// The context is not allowed to perform the operation on the model (ACL denied).
     AccessDenied { model: String, operation: &'static str },
+    /// A migration problem (e.g. an unparseable version).
+    Migration(String),
 }
 
 impl From<sqlx::Error> for DbError {

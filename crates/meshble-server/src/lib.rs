@@ -90,11 +90,18 @@ async fn models_handler(State(state): State<AppState>) -> Json<Vec<String>> {
     Json(state.models.iter().map(|m| m.name.to_string()).collect())
 }
 
+/// Logs the detail server-side and returns an opaque 500 — internal schema/SQL detail must never
+/// reach the client (it would leak table/column names and Postgres error text).
+fn internal_error(context: &str, detail: impl std::fmt::Debug) -> Response {
+    eprintln!("meshble-server {context} error: {detail:?}");
+    (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+}
+
 async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     match state.models.iter().find(|m| m.name == name) {
         Some(m) => match to_ui_contract(m, &[]) {
             Ok(json) => json_response(json),
-            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")).into_response(),
+            Err(e) => internal_error("view", e),
         },
         None => (StatusCode::NOT_FOUND, format!("unknown model: {name}")).into_response(),
     }
@@ -116,7 +123,7 @@ async fn list_handler(
         Err(DbError::AccessDenied { .. }) => {
             (StatusCode::FORBIDDEN, "access denied").into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")).into_response(),
+        Err(e) => internal_error("data", e),
     }
 }
 
