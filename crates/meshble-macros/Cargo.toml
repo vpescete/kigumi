@@ -1,6 +1,6 @@
 [package]
 name = "meshble-macros"
-description = "Meshble derive/attribute macros: #[model], #[extend], #[action] (phase-2 codegen)"
+description = "Meshble derive/attribute macros: #[model] (and #[extend], #[action] in later phases)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,3 +10,6 @@ repository.workspace = true
 proc-macro = true
 
 [dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
