@@ -265,9 +265,9 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
 1. **Walking skeleton** (questo commit): `Model` trait + `ResolvedModel` descrittore scritti
    *a mano* (no macro ancora), un modello `sale.order`, generazione del DDL e del UI-contract,
    un endpoint REST read. Prova end-to-end che il metamodello → 3 proiezioni regge. *Compila.*
-2. **Proc-macro `#[model]`**: sostituisce la definizione a mano. È la parte difficile → si fa
-   dopo aver provato i trait runtime.
-3. **`#[extend]` + risoluzione composizione** a build time (il superpotere).
+2. ~~**Proc-macro `#[model]`**: sostituisce la definizione a mano.~~ ✅ Fatta — `meshble-macros`
+   genera `ModelDescriptor` + `impl Model` dal DSL della struct; output identico alla fase 1.
+3. **`#[extend]` + risoluzione composizione** a build time (il superpotere). ⬅ prossima.
 4. **Domini AST tipizzati + security engine**.
 5. **OpenAPI/GraphQL + generazione SDK**.
 6. **Persistenza reale (sqlx) + migrazioni generate**.
