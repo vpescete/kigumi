@@ -6,7 +6,9 @@
 //! database boundary: access is checked, and the user's record-rule domain is AND-ed into the
 //! query — so a user can never read rows the rules forbid.
 
+mod auth_store;
 mod migration;
+pub use auth_store::UserRow;
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{

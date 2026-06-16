@@ -7,7 +7,7 @@
 use axum::response::Html;
 use axum::routing::get;
 use meshble::prelude::*;
-use meshble_auth::Authenticator;
+use meshble_auth::{hash_password, Authenticator};
 use meshble_db::Db;
 use meshble_server::router_with_data;
 
@@ -56,7 +56,11 @@ async fn main() {
         }
     }
 
-    let token = Authenticator::new(SECRET).issue(1, vec!["user".to_string()], 86_400).unwrap();
+    // Auth: ensure the user/refresh tables and seed an admin (login: admin / admin).
+    db.ensure_auth_schema().await.expect("auth schema");
+    db.upsert_user("admin", &hash_password("admin").unwrap(), &["user"]).await.expect("seed admin");
+
+    let token = Authenticator::new(SECRET).issue_access(1, vec!["user".to_string()], 86_400).unwrap();
     let db_app = Db::connect(&url).await.unwrap();
     let app = router_with_data(vec![model], db_app, ACLS, RULES, SECRET)
         .route("/", get(|| async { Html(UI) }));
@@ -64,6 +68,8 @@ async fn main() {
     let addr = "127.0.0.1:8099";
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     println!("\n  Meshble reference renderer");
-    println!("  Open:  http://{addr}/?token={token}\n");
+    println!("  Open:   http://{addr}/");
+    println!("  Login:  admin / admin   (or deep link with a token below)");
+    println!("  Token:  http://{addr}/?token={token}\n");
     axum::serve(listener, app).await.unwrap();
 }

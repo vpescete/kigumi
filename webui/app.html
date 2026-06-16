@@ -34,8 +34,11 @@
 <header>
   <h1>Meshble <span>· reference renderer</span></h1>
   <select id="model"></select>
-  <input id="token" placeholder="JWT (Authorization: Bearer ...)" style="flex:1;min-width:220px" />
-  <button id="reload">Reload</button>
+  <input id="login" placeholder="login" style="width:100px" />
+  <input id="password" type="password" placeholder="password" style="width:110px" />
+  <button id="loginBtn" class="primary">Log in</button>
+  <button id="logoutBtn">Logout</button>
+  <input id="token" placeholder="…or paste an access token" style="flex:1;min-width:160px" />
   <span id="status" class="muted"></span>
 </header>
 <main>
@@ -66,12 +69,42 @@ const headers = () => {
   if (t) h["authorization"] = "Bearer " + t;
   return h;
 };
-const api = async (method, path, body) => {
+async function tryRefresh() {
+  const refresh = localStorage.getItem("meshble_refresh");
+  if (!refresh) return false;
+  const res = await fetch("/auth/refresh", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ refresh_token: refresh }) });
+  if (!res.ok) return false;
+  const t = await res.json();
+  localStorage.setItem("meshble_token", t.access_token);
+  localStorage.setItem("meshble_refresh", t.refresh_token);
+  $("#token").value = t.access_token;
+  return true;
+}
+const api = async (method, path, body, retried) => {
   const res = await fetch(path, { method, headers: headers(), body: body ? JSON.stringify(body) : undefined });
+  // Transparently refresh an expired access token once, then retry.
+  if (res.status === 401 && !retried && (await tryRefresh())) return api(method, path, body, true);
   const text = await res.text();
   if (!res.ok) throw new Error(res.status + " " + text);
   return text ? JSON.parse(text) : null;
 };
+async function login() {
+  try {
+    const res = await fetch("/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ login: $("#login").value.trim(), password: $("#password").value }) });
+    if (!res.ok) throw new Error("login failed");
+    const t = await res.json();
+    localStorage.setItem("meshble_token", t.access_token);
+    localStorage.setItem("meshble_refresh", t.refresh_token);
+    $("#token").value = t.access_token; $("#password").value = "";
+    status("Logged in."); await init();
+  } catch (e) { status("Login failed.", true); }
+}
+async function logout() {
+  const refresh = localStorage.getItem("meshble_refresh");
+  if (refresh) await fetch("/auth/logout", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ refresh_token: refresh }) }).catch(() => {});
+  localStorage.removeItem("meshble_token"); localStorage.removeItem("meshble_refresh");
+  $("#token").value = ""; $("#list").innerHTML = '<span class="muted">Logged out.</span>'; status("Logged out.");
+}
 
 // Evaluate a domain AST (the same data the server compiles to SQL) against a record, client-side.
 function evalDomain(d, rec) {
@@ -193,7 +226,8 @@ async function init() {
     if (models.length) await loadModel(models[0]);
   } catch (err) { status("Cannot load models — set a valid token. " + err.message, true); }
 }
-$("#reload").onclick = init;
+$("#loginBtn").onclick = login;
+$("#logoutBtn").onclick = logout;
 init();
 </script>
 </body>

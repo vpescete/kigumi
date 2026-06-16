@@ -6,20 +6,24 @@
 //! `meshble_core::resolve_all_registered()` and its security policy, then calls [`router`] or
 //! [`router_with_data`]. The core stays headless; this crate is optional.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use serde_json::Value as Json2;
-use meshble_auth::Authenticator;
+use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{Acl, Ctx, RecordRule, ResolvedModel};
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
+
+/// Access tokens are short-lived; refresh tokens long-lived (and revocable/rotated server-side).
+const ACCESS_TTL: u64 = 900; // 15 minutes
+const REFRESH_TTL: u64 = 2_592_000; // 30 days
 
 #[derive(Clone)]
 struct AppState {
@@ -57,6 +61,9 @@ pub fn router_with_data(
     auth_secret: impl Into<String>,
 ) -> Router {
     base_router()
+        .route("/auth/login", post(login_handler))
+        .route("/auth/refresh", post(refresh_handler))
+        .route("/auth/logout", post(logout_handler))
         .route("/api/:name", get(list_handler).post(create_handler))
         .route("/api/:name/:id", axum::routing::patch(update_handler).delete(delete_handler))
         .with_state(AppState {
@@ -230,6 +237,96 @@ async fn delete_handler(
         Ok(n) => json_status(StatusCode::OK, format!("{{\"deleted\": {n}}}")),
         Err(e) => write_error("delete", e),
     }
+}
+
+fn str_field<'a>(body: &'a Json2, key: &str) -> Option<&'a str> {
+    body.get(key).and_then(|v| v.as_str())
+}
+
+/// Issues an access + (stored) refresh token pair for `uid` with `groups`.
+async fn issue_token_pair(backend: &DataBackend, uid: i64, groups: Vec<String>) -> Response {
+    let access = match backend.auth.issue_access(uid, groups, ACCESS_TTL) {
+        Ok(t) => t,
+        Err(_) => return internal_error("token", "issue access"),
+    };
+    let jti = new_jti();
+    if let Err(e) = backend.db.store_refresh(&jti, uid, REFRESH_TTL as i64).await {
+        return internal_error("refresh-store", e);
+    }
+    let refresh = match backend.auth.issue_refresh(uid, &jti, REFRESH_TTL) {
+        Ok(t) => t,
+        Err(_) => return internal_error("token", "issue refresh"),
+    };
+    let body = serde_json::json!({
+        "access_token": access,
+        "refresh_token": refresh,
+        "token_type": "Bearer",
+        "expires_in": ACCESS_TTL,
+    });
+    json_status(StatusCode::OK, body.to_string())
+}
+
+/// A constant valid argon2 hash, verified against on the unknown-user path so login spends the
+/// same argon2 time whether or not the account exists (defeats username enumeration via timing).
+fn dummy_hash() -> &'static str {
+    static H: OnceLock<String> = OnceLock::new();
+    H.get_or_init(|| hash_password("meshble-timing-equalizer").expect("dummy hash"))
+}
+
+async fn login_handler(State(state): State<AppState>, Json(body): Json<Json2>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on auth routes");
+    let (login, password) = match (str_field(&body, "login"), str_field(&body, "password")) {
+        (Some(l), Some(p)) => (l, p),
+        _ => return (StatusCode::BAD_REQUEST, "login and password required").into_response(),
+    };
+    let user = match backend.db.find_user(login).await {
+        Ok(u) => u,
+        Err(e) => return internal_error("login", e),
+    };
+    // Always run argon2 (against a dummy hash if the user is unknown) so timing — and the
+    // 401 body — are identical for unknown-user and wrong-password (no user enumeration).
+    let hash = user.as_ref().map(|u| u.password_hash.as_str()).unwrap_or_else(|| dummy_hash());
+    let ok = verify_password(password, hash);
+    match user {
+        Some(u) if ok => issue_token_pair(backend, u.id, u.groups).await,
+        _ => (StatusCode::UNAUTHORIZED, "invalid credentials").into_response(),
+    }
+}
+
+async fn refresh_handler(State(state): State<AppState>, Json(body): Json<Json2>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on auth routes");
+    let token = match str_field(&body, "refresh_token") {
+        Some(t) => t,
+        None => return (StatusCode::BAD_REQUEST, "refresh_token required").into_response(),
+    };
+    let claims = match backend.auth.verify_refresh(token) {
+        Ok(c) => c,
+        Err(_) => return (StatusCode::UNAUTHORIZED, "invalid refresh token").into_response(),
+    };
+    // Atomically claim (revoke) the presented token. A concurrent replay claims zero rows and is
+    // rejected → no double-spend. The token also must belong to the uid it claims.
+    match backend.db.claim_refresh(&claims.jti).await {
+        Ok(Some(uid)) if uid == claims.uid => {
+            let groups = match backend.db.user_groups(uid).await {
+                Ok(g) => g,
+                Err(e) => return internal_error("groups", e),
+            };
+            issue_token_pair(backend, uid, groups).await
+        }
+        Ok(_) => (StatusCode::UNAUTHORIZED, "invalid refresh token").into_response(),
+        Err(e) => internal_error("refresh", e),
+    }
+}
+
+async fn logout_handler(State(state): State<AppState>, Json(body): Json<Json2>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on auth routes");
+    // Always 204 — never reveal whether the token was valid.
+    if let Some(token) = str_field(&body, "refresh_token") {
+        if let Ok(claims) = backend.auth.verify_refresh(token) {
+            let _ = backend.db.revoke_refresh(&claims.jti).await;
+        }
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 #[cfg(test)]

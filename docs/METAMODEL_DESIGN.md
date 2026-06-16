@@ -287,7 +287,10 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
    (`*_secured` di `meshble-db`), input validato a confine (required/option/kind), errori
    403/400/404/500-opaco. **Auth**: JWT HS256 (`meshble-auth`, crate pluggable) — `Authorization:
    Bearer` verificato (firma + alg pinned + exp) → `Ctx` fidato; assente/invalido → 401 (prima
-   del DB). Indurito da audit (null-bypass su required; auth boundary: 0 findings). ⬅ resta **GraphQL**.
+   del DB). **Lifecycle**: `/auth/login` (password **argon2**, login a tempo-costante),
+   `/auth/refresh` (refresh token **stateful**: revoca+rotazione atomica, no double-spend),
+   `/auth/logout` (revoca); access/refresh **tipizzati** (un refresh non vale come bearer).
+   Indurito da audit (null-bypass, timing enumeration, race rotazione; auth-token boundary: 0). ⬅ resta **GraphQL**.
 6. **Persistenza reale (sqlx) + migrazioni generate**. ✅ Fatto: `meshble-db` (crate separato,
    backend pluggable — il core resta headless) esegue il DDL generato e le query con `WHERE`
    compilato dal `Domain` e **parametrizzato** (anti-injection provato a runtime), con read
