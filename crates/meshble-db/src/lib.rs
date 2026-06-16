@@ -186,12 +186,15 @@ impl Db {
         if !check_access(Operation::Create, model.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "create" });
         }
-        let cols = validate_write_values(model, values, true)?;
+        // Split the payload: scalar columns vs One2many child-create payloads (nested writes).
+        let (scalars, nested) = split_nested(model, values)?;
+        let cols = validate_write_values(model, &scalars, true)?;
         if cols.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
         }
         // Run the compute engine: stored computed fields are derived from the record and inserted.
-        // A brand-new row has no children yet, so aggregate computes start at their empty value.
+        // A brand-new row has no children yet, so aggregate computes start at their empty value
+        // (recomputed below once the nested children are inserted).
         let mut record: BTreeMap<String, Value> =
             cols.into_iter().map(|(c, v)| (c.to_string(), v)).collect();
         compute_stored(model, &mut record, &Children::new());
@@ -227,8 +230,70 @@ impl Db {
                 });
             }
         }
+
+        // Nested One2many children: create each in the SAME transaction with its inverse FK pointed
+        // at the new parent, so the parent+children are all-or-nothing. ACL Create is enforced on
+        // the child model too; a denial drops the tx and rolls back the parent.
+        for nc in &nested {
+            if !check_access(Operation::Create, nc.child.name, ctx, acls) {
+                return Err(DbError::AccessDenied {
+                    model: nc.child.name.to_string(),
+                    operation: "create",
+                });
+            }
+            for row in &nc.rows {
+                let mut cvals = row.clone();
+                cvals.insert(nc.inverse.to_string(), Json::from(id)); // parent owns the FK
+                let ccols = validate_write_values(&nc.child, &cvals, true)?;
+                let mut crec: BTreeMap<String, Value> =
+                    ccols.into_iter().map(|(c, v)| (c.to_string(), v)).collect();
+                compute_stored(&nc.child, &mut crec, &Children::new());
+                let (cn, cv): (Vec<&str>, Vec<Value>) =
+                    crec.iter().map(|(k, v)| (k.as_str(), v.clone())).unzip();
+                let cph: Vec<String> = (1..=cn.len()).map(|i| format!("${i}")).collect();
+                let csql = format!(
+                    "INSERT INTO {} ({}) VALUES ({}) RETURNING id",
+                    nc.child.table,
+                    cn.join(", "),
+                    cph.join(", ")
+                );
+                let mut cq = sqlx::query_scalar::<Postgres, i64>(&csql);
+                cq = bind_all(cq, &cv);
+                let child_id: i64 = cq.fetch_one(&mut *tx).await?;
+
+                // The child's own Create record rule must hold too — otherwise nesting would be a
+                // weaker path than the child's own endpoint (record-rule bypass). Violation rolls
+                // back the whole parent+children tx.
+                if let Some(rule) = record_rule_domain(Operation::Create, nc.child.name, ctx, rules) {
+                    let mut params: Vec<Value> = vec![Value::Int(child_id)];
+                    let where_sql = rule.compile_into(&nc.child, &mut params)?;
+                    let check =
+                        format!("SELECT 1 FROM {} WHERE id = $1 AND {}", nc.child.table, where_sql);
+                    let mut chk = sqlx::query(&check);
+                    for v in &params {
+                        chk = bind_query(chk, v);
+                    }
+                    if chk.fetch_optional(&mut *tx).await?.is_none() {
+                        return Err(DbError::AccessDenied {
+                            model: nc.child.name.to_string(),
+                            operation: "create (record rule)",
+                        });
+                    }
+                }
+            }
+        }
+
+        // Recompute this parent's own aggregate from the just-inserted children IN THIS TRANSACTION,
+        // so the parent row, its children, and its aggregate commit atomically (no stale window, and
+        // no "stale forever" if a post-commit recompute were to fail). The parent is brand-new — its
+        // id is invisible to other transactions — so no advisory lock is needed here.
+        if !nested.is_empty() {
+            recompute_columns_on(&mut tx, model, id).await?;
+        }
         tx.commit().await?;
-        // If this row is a child of an aggregate parent, recompute that parent.
+
+        // Grandparents are a separate aggregate (single-level by design); recompute post-commit. The
+        // call is idempotent (it reads current state), so a retry repairs it.
         self.recompute_parents_of(model, &record).await?;
         Ok(id)
     }
@@ -307,35 +372,21 @@ impl Db {
         model: &ResolvedModel,
         id: i64,
     ) -> Result<Option<BTreeMap<String, Value>>, DbError> {
-        let sql = format!("SELECT {} FROM {} WHERE id = $1", select_columns(model), model.table);
-        let row = sqlx::query(&sql).bind(id).fetch_optional(&self.pool).await?;
-        Ok(row.map(|r| record_to_values(model, &r)))
+        let mut c = self.pool.acquire().await?;
+        read_record_on(&mut c, model, id).await
     }
 
     /// Loads the One2many children of `parent_id` (one entry per o2m field) for aggregate compute.
     async fn read_children(&self, parent: &ResolvedModel, parent_id: i64) -> Result<Children, DbError> {
-        let mut children = Children::new();
-        for f in &parent.fields {
-            if let FieldKind::One2many { target, inverse } = f.kind {
-                let child = match resolve_registered(target) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                };
-                let sql = format!(
-                    "SELECT {} FROM {} WHERE {inverse} = $1",
-                    select_columns(&child),
-                    child.table
-                );
-                let rows = sqlx::query(&sql).bind(parent_id).fetch_all(&self.pool).await?;
-                children.insert(f.name.to_string(), rows.iter().map(|r| record_to_values(&child, r)).collect());
-            }
-        }
-        Ok(children)
+        let mut c = self.pool.acquire().await?;
+        read_children_on(&mut c, parent, parent_id).await
     }
 
-    /// Recomputes `parent`'s aggregate computed fields from its current children (a direct UPDATE,
+    /// Recomputes `parent`'s aggregate computed columns from its current children (a direct UPDATE,
     /// so it never re-enters the secured write path / re-triggers). Serialized per parent with an
-    /// advisory lock so concurrent child writes can't lose-update the aggregate.
+    /// advisory lock so concurrent child writes can't lose-update the aggregate. All reads and the
+    /// write run on the SAME locked connection, so holding the lock never contends for a second
+    /// pool connection.
     async fn recompute_parent(&self, parent: &ResolvedModel, parent_id: i64) -> Result<(), DbError> {
         if computed_fields(parent).is_empty() {
             return Ok(());
@@ -347,30 +398,13 @@ impl Db {
             .bind(format!("agg:{}:{}", parent.table, parent_id))
             .execute(&mut *lock)
             .await?;
-        let outcome = self.recompute_parent_locked(parent, parent_id).await;
+        let outcome = recompute_columns_on(&mut lock, parent, parent_id).await;
         lock.commit().await?; // release the lock
         outcome
     }
-
-    async fn recompute_parent_locked(&self, parent: &ResolvedModel, parent_id: i64) -> Result<(), DbError> {
-        let computed = computed_fields(parent);
-        let mut record = match self.read_record(parent, parent_id).await? {
-            Some(r) => r,
-            None => return Ok(()),
-        };
-        let children = self.read_children(parent, parent_id).await?;
-        compute_stored(parent, &mut record, &children);
-        let set: Vec<String> =
-            computed.iter().enumerate().map(|(i, name)| format!("{} = ${}", name, i + 1)).collect();
-        let sql = format!("UPDATE {} SET {} WHERE id = ${}", parent.table, set.join(", "), computed.len() + 1);
-        let mut q = sqlx::query(&sql);
-        for name in &computed {
-            q = bind_query(q, record.get(*name).unwrap_or(&Value::Null));
-        }
-        q = bind_query(q, &Value::Int(parent_id));
-        q.execute(&self.pool).await?;
-        Ok(())
-    }
+    // ponytail: aggregate recompute on a child UPDATE/DELETE still runs post-commit (advisory-locked
+    // and idempotent); a process crash in that window leaves a stale parent total until the next
+    // write. Fold into the write tx like insert_secured if that window ever matters.
 
     /// For a freshly inserted child, recompute the parent it points to (FK from the child values).
     async fn recompute_parents_of(
@@ -482,6 +516,57 @@ fn validate_write_values(
     Ok(out)
 }
 
+/// A One2many field's child create-payloads, extracted from a write `values` map.
+struct NestedCreate {
+    child: ResolvedModel,
+    inverse: &'static str,
+    rows: Vec<Map<String, Json>>,
+}
+
+/// Splits a write payload into scalar columns and One2many child-create payloads. A One2many value
+/// must be an array of objects; each object is a NEW child to create. Only the create form is
+/// supported through a parent write — an item carrying an `id` is rejected (linking/updating
+/// existing children goes through the child's own CRUD endpoints).
+fn split_nested(
+    model: &ResolvedModel,
+    values: &Map<String, Json>,
+) -> Result<(Map<String, Json>, Vec<NestedCreate>), DbError> {
+    let mut scalars = Map::new();
+    let mut nested = Vec::new();
+    for (key, jv) in values {
+        match model.fields.iter().find(|f| f.name == *key).map(|f| f.kind) {
+            Some(FieldKind::One2many { target, inverse }) => {
+                let arr = jv.as_array().ok_or_else(|| {
+                    DbError::BadInput(format!("'{key}' must be an array of child records"))
+                })?;
+                let mut rows = Vec::with_capacity(arr.len());
+                for item in arr {
+                    let obj = item.as_object().ok_or_else(|| {
+                        DbError::BadInput(format!("each '{key}' item must be an object"))
+                    })?;
+                    if obj.contains_key("id") {
+                        return Err(DbError::BadInput(format!(
+                            "'{key}': nested writes can only create children (item with 'id' not allowed)"
+                        )));
+                    }
+                    rows.push(obj.clone());
+                }
+                if !rows.is_empty() {
+                    let child = resolve_registered(target).map_err(|e| {
+                        DbError::BadInput(format!("unknown child model '{target}': {e}"))
+                    })?;
+                    nested.push(NestedCreate { child, inverse, rows });
+                }
+            }
+            // Scalar (or unknown) field: validate_write_values will accept or reject it.
+            _ => {
+                scalars.insert(key.clone(), jv.clone());
+            }
+        }
+    }
+    Ok((scalars, nested))
+}
+
 fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
     let bad = || {
         DbError::BadInput(format!(
@@ -522,6 +607,71 @@ fn bind_query<'q>(q: Query<'q, Postgres, PgArguments>, v: &Value) -> Query<'q, P
         Value::Null => q.bind(Option::<String>::None),
         Value::List(_) => q,
     }
+}
+
+/// Reads a row's stored field values into a typed map, on a caller-provided connection (a pooled
+/// one, or the very tx that wrote the row — so recompute can see uncommitted children).
+async fn read_record_on(
+    conn: &mut sqlx::PgConnection,
+    model: &ResolvedModel,
+    id: i64,
+) -> Result<Option<BTreeMap<String, Value>>, DbError> {
+    let sql = format!("SELECT {} FROM {} WHERE id = $1", select_columns(model), model.table);
+    let row = sqlx::query(&sql).bind(id).fetch_optional(&mut *conn).await?;
+    Ok(row.map(|r| record_to_values(model, &r)))
+}
+
+/// Loads the One2many children of `parent_id` (one entry per o2m field), on `conn`.
+async fn read_children_on(
+    conn: &mut sqlx::PgConnection,
+    parent: &ResolvedModel,
+    parent_id: i64,
+) -> Result<Children, DbError> {
+    let mut children = Children::new();
+    for f in &parent.fields {
+        if let FieldKind::One2many { target, inverse } = f.kind {
+            let child = match resolve_registered(target) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let sql =
+                format!("SELECT {} FROM {} WHERE {inverse} = $1", select_columns(&child), child.table);
+            let rows = sqlx::query(&sql).bind(parent_id).fetch_all(&mut *conn).await?;
+            children
+                .insert(f.name.to_string(), rows.iter().map(|r| record_to_values(&child, r)).collect());
+        }
+    }
+    Ok(children)
+}
+
+/// Recomputes `parent`'s stored computed columns from its current children and writes them, all on
+/// `conn`. Works on a pooled connection, an advisory-locked tx, or the tx that just inserted the
+/// children (making the aggregate atomic with them). No-op when the model has no computed columns.
+async fn recompute_columns_on(
+    conn: &mut sqlx::PgConnection,
+    parent: &ResolvedModel,
+    parent_id: i64,
+) -> Result<(), DbError> {
+    let computed = computed_fields(parent);
+    if computed.is_empty() {
+        return Ok(());
+    }
+    let mut record = match read_record_on(&mut *conn, parent, parent_id).await? {
+        Some(r) => r,
+        None => return Ok(()),
+    };
+    let children = read_children_on(&mut *conn, parent, parent_id).await?;
+    compute_stored(parent, &mut record, &children);
+    let set: Vec<String> =
+        computed.iter().enumerate().map(|(i, name)| format!("{} = ${}", name, i + 1)).collect();
+    let sql = format!("UPDATE {} SET {} WHERE id = ${}", parent.table, set.join(", "), computed.len() + 1);
+    let mut q = sqlx::query(&sql);
+    for name in &computed {
+        q = bind_query(q, record.get(*name).unwrap_or(&Value::Null));
+    }
+    q = bind_query(q, &Value::Int(parent_id));
+    q.execute(&mut *conn).await?;
+    Ok(())
 }
 
 /// Builds the SELECT column list for a model. NUMERIC columns are cast to float8 so they decode
