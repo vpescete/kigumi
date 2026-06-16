@@ -99,6 +99,13 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
                 format!("\"required\": {}", f.required),
                 format!("\"readonly\": {}", f.is_computed()),
             ];
+            if let FieldKind::Selection(opts) = &f.kind {
+                let items: Vec<String> = opts
+                    .iter()
+                    .map(|(v, l)| format!("{{ \"value\": {}, \"label\": {} }}", json_string(v), json_string(l)))
+                    .collect();
+                parts.push(format!("\"options\": [{}]", items.join(", ")));
+            }
             if let Some(j) = rule_json(rules, f.name, UiRule::Invisible) {
                 parts.push(format!("\"invisible_when\": {j}"));
             }
@@ -144,6 +151,12 @@ mod tests {
         let rules = &[FieldRule { field: "state", rule: UiRule::Invisible, domain: good }];
         let c = to_ui_contract(&model(), rules).unwrap();
         assert!(c.contains("\"invisible_when\": {\"field\":\"state\",\"op\":\"=\",\"value\":\"a\"}"));
+    }
+
+    #[test]
+    fn selection_fields_carry_their_options() {
+        let c = to_ui_contract(&model(), &[]).unwrap();
+        assert!(c.contains("\"options\": [{ \"value\": \"a\", \"label\": \"A\" }, { \"value\": \"b\", \"label\": \"B\" }]"));
     }
 
     #[test]

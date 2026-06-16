@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meshble — reference renderer</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e6e9ef; --muted:#8a93a6; --accent:#5b9dff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.2px; }
+  header h1 span { color:var(--muted); font-weight:400; }
+  input, select, button { font:inherit; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:7px; padding:7px 10px; }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#05122b; font-weight:600; }
+  main { padding:20px; max-width:1000px; margin:0 auto; }
+  .row { display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .panel h2 { margin:0 0 12px; font-size:13px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:12px; }
+  .field { display:flex; flex-direction:column; gap:5px; margin-bottom:12px; }
+  .field label { color:var(--muted); font-size:12px; }
+  .field .req { color:#ff7a7a; }
+  .muted { color:var(--muted); }
+  .err { color:#ff7a7a; }
+  .lock { color:var(--muted); }
+  form { min-width:280px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Meshble <span>· reference renderer</span></h1>
+  <select id="model"></select>
+  <input id="token" placeholder="JWT (Authorization: Bearer ...)" style="flex:1;min-width:220px" />
+  <button id="reload">Reload</button>
+  <span id="status" class="muted"></span>
+</header>
+<main>
+  <div class="row">
+    <div class="panel" style="flex:2;min-width:420px">
+      <h2>Records</h2>
+      <div id="list" class="muted">Pick a model.</div>
+    </div>
+    <div class="panel">
+      <h2>Create</h2>
+      <form id="create"></form>
+    </div>
+  </div>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const status = (m, isErr) => { const el = $("#status"); el.textContent = m || ""; el.className = isErr ? "err" : "muted"; };
+
+// Token: ?token=... (deep link), else the input, persisted in localStorage.
+const urlTok = new URLSearchParams(location.search).get("token");
+if (urlTok) localStorage.setItem("meshble_token", urlTok);
+$("#token").value = localStorage.getItem("meshble_token") || "";
+$("#token").addEventListener("change", () => localStorage.setItem("meshble_token", $("#token").value));
+
+const headers = () => {
+  const h = { "content-type": "application/json" };
+  const t = $("#token").value.trim();
+  if (t) h["authorization"] = "Bearer " + t;
+  return h;
+};
+const api = async (method, path, body) => {
+  const res = await fetch(path, { method, headers: headers(), body: body ? JSON.stringify(body) : undefined });
+  const text = await res.text();
+  if (!res.ok) throw new Error(res.status + " " + text);
+  return text ? JSON.parse(text) : null;
+};
+
+// Evaluate a domain AST (the same data the server compiles to SQL) against a record, client-side.
+function evalDomain(d, rec) {
+  if (!d) return true;
+  if ("const" in d) return !!d.const;
+  if (d.and) return d.and.every((x) => evalDomain(x, rec));
+  if (d.or) return d.or.some((x) => evalDomain(x, rec));
+  if (d.not) return !evalDomain(d.not, rec);
+  const v = rec[d.field], t = d.value;
+  switch (d.op) {
+    case "=": return v === t;
+    case "!=": return v !== t;
+    case "<": return v < t; case "<=": return v <= t;
+    case ">": return v > t; case ">=": return v >= t;
+    case "in": return Array.isArray(t) && t.includes(v);
+    case "not in": return Array.isArray(t) && !t.includes(v);
+    case "like": case "ilike": return String(v ?? "").includes(String(t).replace(/%/g, ""));
+    case "is null": return v == null;
+    case "is not null": return v != null;
+    default: return true;
+  }
+}
+
+let contract = null;
+
+function inputFor(f) {
+  if (f.widget === "selection") {
+    const sel = document.createElement("select");
+    sel.name = f.name;
+    for (const o of f.options || []) {
+      const opt = document.createElement("option");
+      opt.value = o.value; opt.textContent = o.label; sel.appendChild(opt);
+    }
+    return sel;
+  }
+  const inp = document.createElement("input");
+  inp.name = f.name;
+  if (f.widget === "boolean") inp.type = "checkbox";
+  else if (["integer", "float", "monetary"].includes(f.widget)) inp.type = "number";
+  else inp.type = "text";
+  if (f.required) inp.required = true;
+  return inp;
+}
+
+function coerce(f, el) {
+  if (f.widget === "boolean") return el.checked;
+  if (["integer"].includes(f.widget)) return el.value === "" ? null : parseInt(el.value, 10);
+  if (["float", "monetary"].includes(f.widget)) return el.value === "" ? null : parseFloat(el.value);
+  return el.value;
+}
+
+// A field is writable in the create form if it is not computed (readonly) and has a column.
+const writable = (f) => !f.readonly && f.widget !== "one2many";
+
+function renderForm() {
+  const form = $("#create");
+  form.innerHTML = "";
+  for (const f of contract.fields.filter(writable)) {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const lab = document.createElement("label");
+    lab.innerHTML = f.label + (f.required ? ' <span class="req">*</span>' : "");
+    wrap.appendChild(lab);
+    wrap.appendChild(inputFor(f));
+    form.appendChild(wrap);
+  }
+  const btn = document.createElement("button");
+  btn.className = "primary"; btn.textContent = "Create"; btn.type = "submit";
+  form.appendChild(btn);
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = {};
+    for (const f of contract.fields.filter(writable)) {
+      const el = form.elements[f.name];
+      const v = coerce(f, el);
+      if (v !== null && v !== "") body[f.name] = v;
+      else if (f.widget === "boolean") body[f.name] = v;
+    }
+    try { await api("POST", "/api/" + contract.model, body); status("Created."); await loadRows(); form.reset(); }
+    catch (err) { status(err.message, true); }
+  };
+}
+
+async function loadRows() {
+  const rows = await api("GET", "/api/" + contract.model);
+  const cols = contract.fields.filter((f) => f.widget !== "one2many");
+  let html = "<table><thead><tr><th>id</th>" + cols.map((c) => "<th>" + c.label + "</th>").join("") + "</tr></thead><tbody>";
+  for (const r of rows) {
+    html += "<tr><td>" + r.id + "</td>";
+    for (const c of cols) {
+      const ro = c.readonly_when && evalDomain(c.readonly_when, r);
+      const val = r[c.name] === null || r[c.name] === undefined ? "" : r[c.name];
+      html += "<td>" + escapeHtml(String(val)) + (ro ? ' <span class="lock" title="readonly_when holds">🔒</span>' : "") + "</td>";
+    }
+    html += "</tr>";
+  }
+  html += "</tbody></table>";
+  $("#list").innerHTML = rows.length ? html : '<span class="muted">No records.</span>';
+}
+
+const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function loadModel(name) {
+  try {
+    status("Loading " + name + "…");
+    contract = await api("GET", "/api/" + name + "/view");
+    renderForm();
+    await loadRows();
+    status("");
+  } catch (err) { status(err.message, true); }
+}
+
+async function init() {
+  try {
+    const models = await api("GET", "/api/models");
+    const sel = $("#model");
+    sel.innerHTML = models.map((m) => `<option>${m}</option>`).join("");
+    sel.onchange = () => loadModel(sel.value);
+    if (models.length) await loadModel(models[0]);
+  } catch (err) { status("Cannot load models — set a valid token. " + err.message, true); }
+}
+$("#reload").onclick = init;
+init();
+</script>
+</body>
+</html>

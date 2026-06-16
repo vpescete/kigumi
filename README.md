@@ -18,29 +18,43 @@ time**, non mutata a runtime.
 
 ```
 crates/
-  meshble-core     metamodello ispezionabile, risoluzione estensioni, manifest/versioning
-  meshble-macros   proc-macro #[model] (fase 2)
-  meshble-schema   proiezioni: DDL Postgres, contratto-UI JSON
+  meshble-core     metamodello ispezionabile, domini AST, security (ACL+rule+sudo), versioning
+  meshble-macros   proc-macro #[model] / #[extend]
+  meshble-schema   proiezioni: DDL Postgres, contratto-UI JSON, OpenAPI 3.1
+  meshble-db       persistenza Postgres (sqlx): CRUD security-enforced + migrazioni versionate
+  meshble-auth     auth JWT HS256 (Bearer → Ctx fidato)
+  meshble-server   server axum headless: metadata + CRUD dal catalogo
   meshble          facade (prelude)
 modules/
-  sales            modulo d'esempio: sale.order + estensione sale_margin
-docs/
-  ANALISI_ODOO19.md   analisi del sorgente Odoo 19 (forze/debolezze)
-  METAMODEL_DESIGN.md design del metamodello
-  VERSIONING.md       versioning di framework e moduli
+  base             res.partner, res.currency
+  sales            sale.order + estensione sale_margin
+apps/
+  renderer-demo    demo eseguibile: migra+seed un modello, serve API + renderer
+webui/
+  app.html         renderer di riferimento (HTML+JS vanilla, generico, guidato dal contratto)
+docs/               ANALISI_ODOO19 · METAMODEL_DESIGN · VERSIONING
 ```
 
 ## Prova
 
 ```bash
-cargo test
-cargo run -p meshble-mod-sales --example demo
+cargo test                                   # unit; gli integration-test DB si auto-skippano
+
+# stack completo end-to-end (richiede un Postgres):
+export DATABASE_URL=postgres://USER@127.0.0.1/meshble_test
+cargo test                                   # ora include gli integration-test live
+cargo run -p meshble-renderer-demo           # poi apri l'URL stampato (con token JWT)
 ```
+
+Il demo migra un modello `task`, lo seeda, e serve su `:8099` sia l'**API headless**
+(`/openapi.json`, `/api/models`, `/api/{m}/view`, CRUD `/api/{m}`) sia il **renderer**: un
+frontend generico che disegna form e tabella *dal contratto*, autenticato via JWT.
 
 ## Stato
 
-Walking skeleton (fase 1): metamodello → DDL + contratto-UI, risoluzione estensioni con
-check conflitti/`depends`, versioning moduli con SemVer verificato. Roadmap in
+Slice verticale sicura completa (fasi 1-6): metamodello → DDL + migrazioni → SQL parametrizzato
+→ CRUD security-enforced (ACL + record rules) → OpenAPI/contratto-UI → auth JWT → renderer
+agnostico. Ogni pezzo security-critical passato per audit adversarial. Roadmap e dettagli in
 [`docs/METAMODEL_DESIGN.md`](docs/METAMODEL_DESIGN.md) e [`docs/VERSIONING.md`](docs/VERSIONING.md).
 
 ## Licenza
