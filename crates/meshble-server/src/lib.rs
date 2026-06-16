@@ -16,6 +16,7 @@ use axum::{
     Json, Router,
 };
 use serde_json::Value as Json2;
+use meshble_auth::Authenticator;
 use meshble_core::{Acl, Ctx, RecordRule, ResolvedModel};
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
@@ -31,6 +32,7 @@ struct DataBackend {
     db: Arc<Db>,
     acls: &'static [Acl],
     rules: &'static [RecordRule],
+    auth: Arc<Authenticator>,
 }
 
 fn base_router() -> Router<AppState> {
@@ -45,38 +47,37 @@ pub fn router(models: Vec<ResolvedModel>) -> Router {
     base_router().with_state(AppState { models: Arc::new(models), data: None })
 }
 
-/// Full router: metadata routes plus `GET /api/{model}` returning rows visible to the request's
-/// identity, enforcing ACL + record rules through [`Db::find_secured`].
+/// Full router: metadata routes plus secured CRUD data endpoints. `auth_secret` is the HS256
+/// secret used to verify the `Authorization: Bearer <token>` of each data request into a `Ctx`.
 pub fn router_with_data(
     models: Vec<ResolvedModel>,
     db: Db,
     acls: &'static [Acl],
     rules: &'static [RecordRule],
+    auth_secret: impl Into<String>,
 ) -> Router {
     base_router()
         .route("/api/:name", get(list_handler).post(create_handler))
         .route("/api/:name/:id", axum::routing::patch(update_handler).delete(delete_handler))
         .with_state(AppState {
             models: Arc::new(models),
-            data: Some(DataBackend { db: Arc::new(db), acls, rules }),
+            data: Some(DataBackend {
+                db: Arc::new(db),
+                acls,
+                rules,
+                auth: Arc::new(Authenticator::new(auth_secret)),
+            }),
         })
 }
 
-/// DEV-ONLY identity: trusts client-supplied `X-User-Id` / `X-User-Groups` headers. This is NOT
-/// authentication — any client can claim any group. A real deployment MUST replace this with an
-/// authenticated session/token → `Ctx` mapping before exposing data endpoints.
-fn dev_identity_from_headers(headers: &HeaderMap) -> Ctx {
-    let uid = headers
-        .get("x-user-id")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let groups = headers
-        .get("x-user-groups")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').map(|g| g.trim().to_string()).filter(|g| !g.is_empty()).collect())
-        .unwrap_or_default();
-    Ctx::new(uid, groups)
+/// Verifies the request's bearer token into a trusted `Ctx`, or a 401 response. This is real
+/// authentication: a client cannot claim a group without a token signed by the server secret.
+fn authenticate(backend: &DataBackend, headers: &HeaderMap) -> Result<Ctx, Response> {
+    let header = headers.get("authorization").and_then(|v| v.to_str().ok());
+    backend
+        .auth
+        .verify_bearer(header)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "unauthorized").into_response())
 }
 
 fn json_response(body: String) -> Response {
@@ -141,7 +142,10 @@ async fn list_handler(
         None => return (StatusCode::NOT_FOUND, format!("unknown model: {name}")).into_response(),
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = dev_identity_from_headers(&headers);
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
     match backend.db.find_secured(model, &ctx, backend.acls, backend.rules, None).await {
         Ok(rows) => json_response(serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string())),
         Err(DbError::AccessDenied { .. }) => {
@@ -167,7 +171,10 @@ async fn create_handler(
         Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = dev_identity_from_headers(&headers);
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
     let obj = match body_object(&body) {
         Ok(o) => o,
         Err(r) => return r,
@@ -189,7 +196,10 @@ async fn update_handler(
         Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = dev_identity_from_headers(&headers);
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
     let obj = match body_object(&body) {
         Ok(o) => o,
         Err(r) => return r,
@@ -211,7 +221,10 @@ async fn delete_handler(
         Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = dev_identity_from_headers(&headers);
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
     match backend.db.delete_secured(model, &ctx, backend.acls, backend.rules, id).await {
         Ok(0) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
         Ok(n) => json_status(StatusCode::OK, format!("{{\"deleted\": {n}}}")),

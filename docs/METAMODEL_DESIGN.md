@@ -248,7 +248,8 @@ meshble/
 │   ├── meshble-macros/        # proc-macro: #[model], #[field], #[extend], #[action]
 │   ├── meshble-schema/        # ResolvedModel → DDL, OpenAPI, GraphQL, UI-contract
 │   ├── meshble-db/            # persistenza Postgres (sqlx): DDL + query parametrizzate dal Domain
-│   ├── meshble-server/        # axum: serve OpenAPI spec, model list, contratti-UI dal catalogo
+│   ├── meshble-auth/          # auth: verifica JWT HS256 (Bearer) → Ctx fidato
+│   ├── meshble-server/        # axum: serve OpenAPI spec, model list, contratti-UI, CRUD dal catalogo
 │   └── meshble/               # facade: prelude, re-export
 ├── modules/
 │   └── sales/                 # primo modulo applicativo (sale.order) — dogfooding
@@ -284,8 +285,9 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
    metadata (`/openapi.json`, `/api/models`, `/api/{m}/view`) **+ CRUD dati sicuro**
    (`GET/POST/PATCH/DELETE /api/{m}[/{id}]`): ogni operazione passa per ACL + record rules
    (`*_secured` di `meshble-db`), input validato a confine (required/option/kind), errori
-   403/400/404/500-opaco. Indurito da audit (null-bypass su required). ⬅ restano **auth vera**
-   (oggi identità-da-header dev) e **GraphQL**.
+   403/400/404/500-opaco. **Auth**: JWT HS256 (`meshble-auth`, crate pluggable) — `Authorization:
+   Bearer` verificato (firma + alg pinned + exp) → `Ctx` fidato; assente/invalido → 401 (prima
+   del DB). Indurito da audit (null-bypass su required; auth boundary: 0 findings). ⬅ resta **GraphQL**.
 6. **Persistenza reale (sqlx) + migrazioni generate**. ✅ Fatto: `meshble-db` (crate separato,
    backend pluggable — il core resta headless) esegue il DDL generato e le query con `WHERE`
    compilato dal `Domain` e **parametrizzato** (anti-injection provato a runtime), con read

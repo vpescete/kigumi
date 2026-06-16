@@ -1,0 +1,12 @@
+[package]
+name = "meshble-auth"
+description = "Authentication: verify a signed (HS256 JWT) bearer token into a trusted Ctx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meshble-core = { workspace = true }
+jsonwebtoken = "9"
+serde = { version = "1", features = ["derive"] }

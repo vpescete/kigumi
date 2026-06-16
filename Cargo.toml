@@ -15,6 +15,7 @@ repository = "https://github.com/vpescete/msh_framework"
 meshble-core = { path = "crates/meshble-core", version = "0.1.0" }
 meshble-schema = { path = "crates/meshble-schema", version = "0.1.0" }
 meshble-db = { path = "crates/meshble-db", version = "0.1.0" }
+meshble-auth = { path = "crates/meshble-auth", version = "0.1.0" }
 meshble-macros = { path = "crates/meshble-macros", version = "0.1.0" }
 meshble = { path = "crates/meshble", version = "0.1.0" }
 semver = "1"

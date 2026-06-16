@@ -1,10 +1,11 @@
-//! End-to-end test of the secured data endpoint: HTTP request → dev identity → Db::find_secured
+//! End-to-end test of the secured data endpoint: HTTP request → JWT auth → Db::find_secured
 //! (ACL + record rules) → JSON. Requires `DATABASE_URL`; skipped otherwise.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
+use meshble_auth::Authenticator;
 use meshble_core::{
     resolve, Acl, Domain, FieldDef, FieldKind, ModelDescriptor, Operation, RecordRule,
     ResolvedModel,
@@ -12,6 +13,15 @@ use meshble_core::{
 use meshble_db::Db;
 use meshble_server::router_with_data;
 use tower::ServiceExt;
+
+const SECRET: &str = "test-secret-change-me";
+
+/// Mints a `Bearer` header for a JWT carrying the given comma-separated groups.
+fn bearer(groups: &str) -> String {
+    let g: Vec<String> = groups.split(',').filter(|s| !s.is_empty()).map(String::from).collect();
+    let token = Authenticator::new(SECRET).issue(1, g, 3600).unwrap();
+    format!("Bearer {token}")
+}
 
 static MODEL: ModelDescriptor = ModelDescriptor {
     name: "widget",
@@ -46,7 +56,7 @@ fn model() -> ResolvedModel {
 async fn get(app: Router, uri: &str, groups: Option<&str>) -> (StatusCode, String) {
     let mut req = Request::builder().uri(uri);
     if let Some(g) = groups {
-        req = req.header("x-user-id", "1").header("x-user-groups", g);
+        req = req.header("authorization", bearer(g));
     }
     let resp = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
     let status = resp.status();
@@ -77,7 +87,7 @@ async fn secured_data_endpoint_enforces_rules() {
     }
 
     let app_db = Db::connect(&url).await.unwrap();
-    let app = router_with_data(vec![model()], app_db, ACLS, RULES);
+    let app = router_with_data(vec![model()], app_db, ACLS, RULES, SECRET);
 
     // Group "u": the record rule restricts to active rows → alpha, beta only.
     let (status, body) = get(app.clone(), "/api/widget", Some("u")).await;
@@ -86,9 +96,13 @@ async fn secured_data_endpoint_enforces_rules() {
     assert_eq!(rows.as_array().unwrap().len(), 2);
     assert!(body.contains("alpha") && body.contains("beta") && !body.contains("gamma"));
 
-    // No granting group → ACL denies → 403.
-    let (status, _) = get(app.clone(), "/api/widget", None).await;
+    // Authenticated but no granting group → ACL denies → 403.
+    let (status, _) = get(app.clone(), "/api/widget", Some("other")).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // No token → unauthenticated → 401.
+    let (status, _) = get(app.clone(), "/api/widget", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     seed.drop_table(&m).await.unwrap();
 }
@@ -119,7 +133,7 @@ static WRITE_RULES: &[RecordRule] = &[
 async fn req(app: Router, method: &str, uri: &str, groups: Option<&str>, body: Option<&str>) -> (StatusCode, String) {
     let mut b = Request::builder().method(method).uri(uri);
     if let Some(g) = groups {
-        b = b.header("x-user-id", "1").header("x-user-groups", g);
+        b = b.header("authorization", bearer(g));
     }
     let body = match body {
         Some(s) => {
@@ -153,7 +167,7 @@ async fn write_path_enforces_acl_and_rules() {
     seed.create_table(&m).await.unwrap();
 
     let app_db = Db::connect(&url).await.unwrap();
-    let app = router_with_data(vec![resolve(&WRITE_MODEL, &[]).unwrap()], app_db, WRITE_ACLS, WRITE_RULES);
+    let app = router_with_data(vec![resolve(&WRITE_MODEL, &[]).unwrap()], app_db, WRITE_ACLS, WRITE_RULES, SECRET);
 
     // Create (group "u" has Create) → 201.
     let (s, body) = req(app.clone(), "POST", "/api/widget", Some("u"), Some(r#"{"name":"keep","active":true}"#)).await;
@@ -163,9 +177,13 @@ async fn write_path_enforces_acl_and_rules() {
     assert_eq!(s, StatusCode::CREATED);
     let id_inactive = id_of(&body);
 
-    // Create without an ACL group → 403.
-    let (s, _) = req(app.clone(), "POST", "/api/widget", None, Some(r#"{"name":"x","active":true}"#)).await;
+    // Authenticated but no granting group → 403.
+    let (s, _) = req(app.clone(), "POST", "/api/widget", Some("other"), Some(r#"{"name":"x","active":true}"#)).await;
     assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // No token → 401.
+    let (s, _) = req(app.clone(), "POST", "/api/widget", None, Some(r#"{"name":"x","active":true}"#)).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
 
     // Unknown field → 400 (input validation at the boundary).
     let (s, _) = req(app.clone(), "POST", "/api/widget", Some("u"), Some(r#"{"nope":1}"#)).await;
