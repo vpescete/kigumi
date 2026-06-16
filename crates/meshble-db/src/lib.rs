@@ -148,6 +148,60 @@ impl Db {
         Ok(q.fetch_all(&self.pool).await?)
     }
 
+    /// Reads one visible row by id with its One2many children INLINED. Each child set is read
+    /// through the secured path (its own Read ACL + record rules), so children the caller cannot
+    /// read are filtered out; a child model the caller cannot read at all is omitted rather than
+    /// failing the parent read. Returns None if the row does not exist or the caller cannot read it.
+    pub async fn find_one_secured(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        id: i64,
+    ) -> Result<Option<Json>, DbError> {
+        if !check_access(Operation::Read, model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "read" });
+        }
+        // Parent row, restricted by the Read record rule. `id` is not a domain field, so it is bound
+        // raw as $1 and the rule (if any) compiles into $2.. via compile_into.
+        let mut params: Vec<Value> = vec![Value::Int(id)];
+        let where_sql = match record_rule_domain(Operation::Read, model.name, ctx, rules) {
+            Some(rule) => format!("id = $1 AND {}", rule.compile_into(model, &mut params)?),
+            None => "id = $1".to_string(),
+        };
+        let sql =
+            format!("SELECT {} FROM {} WHERE {}", select_columns(model), model.table, where_sql);
+        let mut q = sqlx::query(&sql);
+        for p in &params {
+            q = bind_query(q, p);
+        }
+        let row = match q.fetch_optional(&self.pool).await? {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+        let mut obj = match row_to_json(model, &row)? {
+            Json::Object(o) => o,
+            _ => return Ok(None),
+        };
+        // Inline each One2many field as an array of the caller's visible child rows.
+        for f in &model.fields {
+            if let FieldKind::One2many { target, inverse } = f.kind {
+                let child = match resolve_registered(target) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+                if !check_access(Operation::Read, child.name, ctx, acls) {
+                    continue; // caller cannot read the child model → omit the relation
+                }
+                let cdom = Domain::field(inverse).eq(id);
+                let children = self.find_secured(&child, ctx, acls, rules, Some(&cdom)).await?;
+                obj.insert(f.name.to_string(), Json::Array(children));
+            }
+        }
+        Ok(Some(Json::Object(obj)))
+    }
+
     /// Builds the effective read domain: deny if the ACL forbids Read, else AND the caller's
     /// filter with the record-rule restriction for this context.
     fn secured_read_domain(

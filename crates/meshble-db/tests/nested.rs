@@ -139,6 +139,77 @@ async fn child_acl_denial_rolls_back_the_parent() {
     db.drop_table(&order).await.unwrap();
 }
 
+#[tokio::test]
+async fn reads_a_parent_with_its_children_inlined() {
+    let url = match url_or_skip() {
+        Some(u) => u,
+        None => return,
+    };
+    let db = Db::connect(&url).await.unwrap();
+    let order = order_model();
+    let line = line_model();
+    let su = Ctx::new(0, vec![]).sudo();
+    fresh(&db, &order, &line).await;
+
+    let oid = db
+        .insert_secured(
+            &order,
+            &su,
+            &[],
+            RULES,
+            serde_json::json!({ "name": "O1", "line_ids": [ { "price": 10.0 }, { "price": 5.0 } ] })
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let got = db.find_one_secured(&order, &su, &[], RULES, oid).await.unwrap().expect("order visible");
+    let obj = got.as_object().unwrap();
+    assert_eq!(obj["name"], "O1");
+    assert_eq!(obj["amount_total"].as_f64().unwrap(), 15.0, "aggregate present on the parent");
+    let lines = obj["line_ids"].as_array().expect("line_ids inlined as an array");
+    assert_eq!(lines.len(), 2, "both children inlined");
+    assert_eq!(lines[0]["order_id"].as_i64().unwrap(), oid, "child points back to the parent");
+
+    db.drop_table(&line).await.unwrap();
+    db.drop_table(&order).await.unwrap();
+}
+
+#[tokio::test]
+async fn child_model_not_readable_is_omitted_from_inline() {
+    let url = match url_or_skip() {
+        Some(u) => u,
+        None => return,
+    };
+    let db = Db::connect(&url).await.unwrap();
+    let order = order_model();
+    let line = line_model();
+    let su = Ctx::new(0, vec![]).sudo();
+    fresh(&db, &order, &line).await;
+
+    let oid = db
+        .insert_secured(
+            &order,
+            &su,
+            &[],
+            RULES,
+            serde_json::json!({ "name": "O1", "line_ids": [ { "price": 10.0 } ] }).as_object().unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Group "u" may read orders but NOT lines (no Read ACL on nst.line).
+    let acls = [Acl { model: "nst.order", group: "u", read: true, write: false, create: false, delete: false }];
+    let ctx = Ctx::new(1, vec!["u".to_string()]);
+    let got = db.find_one_secured(&order, &ctx, &acls, RULES, oid).await.unwrap().expect("order visible");
+    let obj = got.as_object().unwrap();
+    assert!(obj.get("line_ids").is_none(), "unreadable child model → relation omitted, parent still served");
+
+    db.drop_table(&line).await.unwrap();
+    db.drop_table(&order).await.unwrap();
+}
+
 fn line_price_min() -> Domain {
     Domain::field("price").ge(10.0)
 }

@@ -55,8 +55,10 @@ fn field_schema(f: &FieldDef) -> Value {
         }
         FieldKind::Decimal { .. } => json!({ "type": "number" }),
         FieldKind::Bool => json!({ "type": "boolean" }),
-        FieldKind::One2many { .. } => {
-            json!({ "type": "array", "items": { "type": "integer", "format": "int64" } })
+        // The get-one response inlines One2many children as full child objects, so the schema
+        // references the child model (not a bare id array).
+        FieldKind::One2many { target, .. } => {
+            json!({ "type": "array", "items": { "$ref": format!("#/components/schemas/{target}") } })
         }
     };
     let obj = s.as_object_mut().expect("field schema is an object");
@@ -105,6 +107,11 @@ mod tests {
                 kind: FieldKind::Selection(&[("draft", "Draft"), ("done", "Done")]),
                 required: true, stored: true, compute: None, depends: &[],
             },
+            FieldDef {
+                name: "line_ids", label: "Lines",
+                kind: FieldKind::One2many { target: "sale.order.line", inverse: "order_id" },
+                required: false, stored: false, compute: None, depends: &[],
+            },
         ],
     };
 
@@ -120,6 +127,11 @@ mod tests {
         assert_eq!(
             v["paths"]["/api/sale_order/{id}"]["get"]["operationId"],
             "get_sale_order"
+        );
+        // One2many is schema'd as an array of the CHILD object (matches the inlined get-one read).
+        assert_eq!(
+            v["components"]["schemas"]["sale.order"]["properties"]["line_ids"]["items"]["$ref"],
+            "#/components/schemas/sale.order.line"
         );
     }
 }

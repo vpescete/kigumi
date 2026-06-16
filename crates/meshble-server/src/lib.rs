@@ -65,7 +65,10 @@ pub fn router_with_data(
         .route("/auth/refresh", post(refresh_handler))
         .route("/auth/logout", post(logout_handler))
         .route("/api/:name", get(list_handler).post(create_handler))
-        .route("/api/:name/:id", axum::routing::patch(update_handler).delete(delete_handler))
+        .route(
+            "/api/:name/:id",
+            get(get_one_handler).patch(update_handler).delete(delete_handler),
+        )
         .with_state(AppState {
             models: Arc::new(models),
             data: Some(DataBackend {
@@ -158,6 +161,30 @@ async fn list_handler(
         Err(DbError::AccessDenied { .. }) => {
             (StatusCode::FORBIDDEN, "access denied").into_response()
         }
+        Err(e) => internal_error("data", e),
+    }
+}
+
+async fn get_one_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.find_one_secured(model, &ctx, backend.acls, backend.rules, id).await {
+        Ok(Some(obj)) => {
+            json_response(serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string()))
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
+        Err(DbError::AccessDenied { .. }) => (StatusCode::FORBIDDEN, "access denied").into_response(),
         Err(e) => internal_error("data", e),
     }
 }
