@@ -154,8 +154,10 @@ pub enum DomainError {
     NotAColumn { field: String },
     TypeMismatch { field: String, detail: String },
     BadOperatorValue { field: String, detail: String },
-    /// Dotted relational paths (e.g. `partner_id.country_id`) are not yet supported (joins).
+    /// A dotted-path segment is not a relation (cannot be traversed).
     UnsupportedPath { field: String },
+    /// A relation's target model is not registered in the catalog (cannot resolve the join).
+    UnknownRelation { target: String, detail: String },
 }
 
 impl Domain {
@@ -198,46 +200,97 @@ fn emit_cond(
     model: &ResolvedModel,
     params: &mut Vec<Value>,
 ) -> Result<String, DomainError> {
-    if c.field.contains('.') {
-        return Err(DomainError::UnsupportedPath { field: c.field.clone() });
+    emit_path_cond(model, &c.field, c.op, &c.value, params)
+}
+
+/// Compiles a (possibly dotted) field path. A relation segment becomes a SUBQUERY against the
+/// target table — Many2one as `fk IN (SELECT id FROM target WHERE <rest>)`, One2many as
+/// `id IN (SELECT inverse FROM target WHERE <rest>)`. This works uniformly in SELECT/UPDATE/DELETE
+/// `WHERE` (so record rules can traverse relations) with no joins to manage, and handles NULLs
+/// correctly (a null FK simply doesn't match). Nesting handles multi-hop paths.
+fn emit_path_cond(
+    model: &ResolvedModel,
+    path: &str,
+    op: Operator,
+    value: &Value,
+    params: &mut Vec<Value>,
+) -> Result<String, DomainError> {
+    let (first, rest) = match path.split_once('.') {
+        None => return emit_leaf_cond(model, path, op, value, params),
+        Some(parts) => parts,
+    };
+    let field = model.fields.iter().find(|f| f.name == first).ok_or_else(|| {
+        DomainError::UnknownField { field: first.to_string(), model: model.name.to_string() }
+    })?;
+    let resolve_target = |target: &str| {
+        crate::resolve_registered(target)
+            .map_err(|e| DomainError::UnknownRelation { target: target.to_string(), detail: e })
+    };
+    // Use the model's own identifier in SQL, never the raw input segment. Subqueries are made
+    // NULL-safe (2-valued) so that `Not(...)` around a relation traversal behaves correctly: the
+    // result is never UNKNOWN, so a null FK / orphan child can't silently break a negated rule.
+    let col = field.name;
+    match &field.kind {
+        FieldKind::Many2one { target } => {
+            let t = resolve_target(target)?;
+            let inner = emit_path_cond(&t, rest, op, value, params)?;
+            // `id` is a PK (never null), so the IN set has no NULLs; the explicit IS NOT NULL
+            // makes a null FK evaluate to FALSE (not UNKNOWN), so `NOT(...)` includes null-FK rows.
+            Ok(format!("({col} IS NOT NULL AND {col} IN (SELECT id FROM {} WHERE {inner}))", t.table))
+        }
+        FieldKind::One2many { target, inverse } => {
+            let t = resolve_target(target)?;
+            let inner = emit_path_cond(&t, rest, op, value, params)?;
+            // Exclude null inverse FKs so the IN set never contains NULL (the NOT IN footgun).
+            Ok(format!(
+                "id IN (SELECT {inverse} FROM {} WHERE {inverse} IS NOT NULL AND ({inner}))",
+                t.table
+            ))
+        }
+        _ => Err(DomainError::UnsupportedPath { field: path.to_string() }),
     }
-    let field = model
-        .fields
-        .iter()
-        .find(|f| f.name == c.field)
-        .ok_or_else(|| DomainError::UnknownField {
-            field: c.field.clone(),
-            model: model.name.to_string(),
-        })?;
+}
+
+/// Compiles a single (non-dotted) field condition against `model`.
+fn emit_leaf_cond(
+    model: &ResolvedModel,
+    field_name: &str,
+    op: Operator,
+    value: &Value,
+    params: &mut Vec<Value>,
+) -> Result<String, DomainError> {
+    let field = model.fields.iter().find(|f| f.name == field_name).ok_or_else(|| {
+        DomainError::UnknownField { field: field_name.to_string(), model: model.name.to_string() }
+    })?;
     if !field.has_column() {
-        return Err(DomainError::NotAColumn { field: c.field.clone() });
+        return Err(DomainError::NotAColumn { field: field_name.to_string() });
     }
     // The identifier comes from the model (a controlled static), never from the input string.
     let col = field.name;
 
-    match c.op {
+    match op {
         Operator::IsNull => Ok(format!("{col} IS NULL")),
         Operator::IsNotNull => Ok(format!("{col} IS NOT NULL")),
         Operator::In | Operator::NotIn => {
-            let list = match &c.value {
+            let list = match value {
                 Value::List(v) => v,
                 _ => {
                     return Err(DomainError::BadOperatorValue {
-                        field: c.field.clone(),
+                        field: field_name.to_string(),
                         detail: "IN/NOT IN require a list value".to_string(),
                     })
                 }
             };
             if list.is_empty() {
                 // `x IN ()` is always false; `x NOT IN ()` is always true.
-                return Ok(if matches!(c.op, Operator::In) { "FALSE" } else { "TRUE" }.to_string());
+                return Ok(if matches!(op, Operator::In) { "FALSE" } else { "TRUE" }.to_string());
             }
             let mut placeholders = Vec::with_capacity(list.len());
             for v in list {
                 if matches!(v, Value::Null) {
                     // `x NOT IN (.., NULL)` is UNKNOWN for every row — a silent record-rule footgun.
                     return Err(DomainError::BadOperatorValue {
-                        field: c.field.clone(),
+                        field: field_name.to_string(),
                         detail: "NULL is not allowed inside IN/NOT IN; use is_null()/is_not_null()"
                             .to_string(),
                     });
@@ -246,34 +299,34 @@ fn emit_cond(
                 params.push(v.clone());
                 placeholders.push(format!("${}", params.len()));
             }
-            let kw = if matches!(c.op, Operator::In) { "IN" } else { "NOT IN" };
+            let kw = if matches!(op, Operator::In) { "IN" } else { "NOT IN" };
             Ok(format!("{col} {kw} ({})", placeholders.join(", ")))
         }
         _ => {
-            if matches!(c.value, Value::List(_)) {
+            if matches!(value, Value::List(_)) {
                 return Err(DomainError::BadOperatorValue {
-                    field: c.field.clone(),
+                    field: field_name.to_string(),
                     detail: "scalar operator given a list value".to_string(),
                 });
             }
             // NULL never compares with =, <>, <, … (the result is UNKNOWN, matching zero rows).
             // Normalize the meaningful cases and reject the rest, so a rule is never silently empty.
-            if matches!(c.value, Value::Null) {
-                return match c.op {
+            if matches!(value, Value::Null) {
+                return match op {
                     Operator::Eq => Ok(format!("{col} IS NULL")),
                     Operator::Ne => Ok(format!("{col} IS NOT NULL")),
                     _ => Err(DomainError::BadOperatorValue {
-                        field: c.field.clone(),
+                        field: field_name.to_string(),
                         detail: "NULL only supported with =, !=, is_null(), is_not_null()"
                             .to_string(),
                     }),
                 };
             }
-            check_operator_kind(c.op, &field.kind, &c.field)?;
-            check_value_type(field, &c.value)?;
-            params.push(c.value.clone());
+            check_operator_kind(op, &field.kind, field_name)?;
+            check_value_type(field, value)?;
+            params.push(value.clone());
             let p = format!("${}", params.len());
-            let sql_op = match c.op {
+            let sql_op = match op {
                 Operator::Eq => "=",
                 Operator::Ne => "<>",
                 Operator::Lt => "<",
@@ -454,8 +507,28 @@ mod tests {
                 name: "flag", label: "Flag", kind: FieldKind::Bool,
                 required: false, stored: true, compute: None, depends: &[],
             },
+            FieldDef {
+                name: "partner_id", label: "Partner",
+                kind: FieldKind::Many2one { target: "rel.partner" },
+                required: false, stored: true, compute: None, depends: &[],
+            },
         ],
     };
+
+    // A registered target model so relation traversal can resolve it.
+    static PARTNER: ModelDescriptor = ModelDescriptor {
+        name: "rel.partner", table: "rel_partner",
+        fields: &[FieldDef {
+            name: "code", label: "Code", kind: FieldKind::Text,
+            required: true, stored: true, compute: None, depends: &[],
+        }],
+    };
+    fn partner_desc() -> &'static ModelDescriptor {
+        &PARTNER
+    }
+    inventory::submit! {
+        crate::ModelRegistration { name: "rel.partner", module: "test", descriptor: partner_desc }
+    }
 
     fn model() -> crate::ResolvedModel {
         resolve(&MODEL, &[]).unwrap()
@@ -513,8 +586,28 @@ mod tests {
     }
 
     #[test]
-    fn dotted_path_is_unsupported_for_now() {
-        let d = Domain::field("partner_id.name").eq("x");
+    fn dotted_path_through_relation_compiles_to_subquery() {
+        // partner_id is a Many2one to the registered rel.partner → traversal becomes a subquery.
+        let d = Domain::field("partner_id.code").eq("acme");
+        let sql = d.compile(&model()).unwrap();
+        assert_eq!(
+            sql.where_clause,
+            "(partner_id IS NOT NULL AND partner_id IN (SELECT id FROM rel_partner WHERE code = $1))"
+        );
+        assert_eq!(sql.params, vec![Value::Str("acme".into())]);
+    }
+
+    #[test]
+    fn dotted_path_through_one2many_compiles_to_inverse_subquery() {
+        // line_ids is a One2many whose target is unregistered here → UnknownRelation.
+        let d = Domain::field("line_ids.price").gt(0_i64);
+        assert!(matches!(d.compile(&model()), Err(DomainError::UnknownRelation { .. })));
+    }
+
+    #[test]
+    fn dotted_path_through_non_relation_is_unsupported() {
+        // `state` is a Selection, not a relation — cannot traverse into it.
+        let d = Domain::field("state.x").eq("y");
         assert!(matches!(d.compile(&model()), Err(DomainError::UnsupportedPath { .. })));
     }
 
