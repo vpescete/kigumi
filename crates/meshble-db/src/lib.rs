@@ -12,8 +12,9 @@ pub use auth_store::UserRow;
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
-    check_access, compute_stored, computed_fields, record_rule_domain, Acl, Ctx, Domain, DomainError,
-    FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
+    check_access, compute_stored, computed_fields, record_rule_domain, resolve_all_registered,
+    resolve_registered, Acl, Children, Ctx, Domain, DomainError, FieldDef, FieldKind, Operation,
+    RecordRule, ResolvedModel, Value,
 };
 use meshble_schema::to_ddl;
 use serde_json::{Map, Value as Json};
@@ -190,9 +191,10 @@ impl Db {
             return Err(DbError::BadInput("no values provided".to_string()));
         }
         // Run the compute engine: stored computed fields are derived from the record and inserted.
+        // A brand-new row has no children yet, so aggregate computes start at their empty value.
         let mut record: BTreeMap<String, Value> =
             cols.into_iter().map(|(c, v)| (c.to_string(), v)).collect();
-        compute_stored(model, &mut record);
+        compute_stored(model, &mut record, &Children::new());
 
         let (names, vals): (Vec<&str>, Vec<Value>) =
             record.iter().map(|(k, v)| (k.as_str(), v.clone())).unzip();
@@ -226,6 +228,8 @@ impl Db {
             }
         }
         tx.commit().await?;
+        // If this row is a child of an aggregate parent, recompute that parent.
+        self.recompute_parents_of(model, &record).await?;
         Ok(id)
     }
 
@@ -259,7 +263,8 @@ impl Db {
             for (c, v) in &cols {
                 record.insert(c.to_string(), v.clone());
             }
-            compute_stored(model, &mut record);
+            let children = self.read_children(model, id).await?;
+            compute_stored(model, &mut record, &children);
             for name in &computed {
                 if let Some(v) = record.get(*name) {
                     set_pairs.push((name.to_string(), v.clone()));
@@ -281,7 +286,19 @@ impl Db {
         for v in &params {
             q = bind_query(q, v);
         }
-        Ok(q.execute(&self.pool).await?.rows_affected())
+        // Capture the parents the child pointed to BEFORE the update, run it, then capture the new
+        // parents — so re-parenting a child recomputes BOTH the old and the new aggregate.
+        let before = self.parent_targets(model, id).await?;
+        let affected = q.execute(&self.pool).await?.rows_affected();
+        let after = self.parent_targets(model, id).await?;
+        let mut seen: Vec<(&'static str, i64)> = Vec::new();
+        for (parent, pid) in before.into_iter().chain(after) {
+            if !seen.iter().any(|&(n, p)| n == parent.name && p == pid) {
+                seen.push((parent.name, pid));
+                self.recompute_parent(&parent, pid).await?;
+            }
+        }
+        Ok(affected)
     }
 
     /// Reads a row's stored field values into a typed map (for recompute on update).
@@ -293,6 +310,103 @@ impl Db {
         let sql = format!("SELECT {} FROM {} WHERE id = $1", select_columns(model), model.table);
         let row = sqlx::query(&sql).bind(id).fetch_optional(&self.pool).await?;
         Ok(row.map(|r| record_to_values(model, &r)))
+    }
+
+    /// Loads the One2many children of `parent_id` (one entry per o2m field) for aggregate compute.
+    async fn read_children(&self, parent: &ResolvedModel, parent_id: i64) -> Result<Children, DbError> {
+        let mut children = Children::new();
+        for f in &parent.fields {
+            if let FieldKind::One2many { target, inverse } = f.kind {
+                let child = match resolve_registered(target) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+                let sql = format!(
+                    "SELECT {} FROM {} WHERE {inverse} = $1",
+                    select_columns(&child),
+                    child.table
+                );
+                let rows = sqlx::query(&sql).bind(parent_id).fetch_all(&self.pool).await?;
+                children.insert(f.name.to_string(), rows.iter().map(|r| record_to_values(&child, r)).collect());
+            }
+        }
+        Ok(children)
+    }
+
+    /// Recomputes `parent`'s aggregate computed fields from its current children (a direct UPDATE,
+    /// so it never re-enters the secured write path / re-triggers). Serialized per parent with an
+    /// advisory lock so concurrent child writes can't lose-update the aggregate.
+    async fn recompute_parent(&self, parent: &ResolvedModel, parent_id: i64) -> Result<(), DbError> {
+        if computed_fields(parent).is_empty() {
+            return Ok(());
+        }
+        // Hold a per-parent advisory lock across read+recompute+write: a concurrent recompute for
+        // the same parent blocks here until we commit, then re-reads the full child set.
+        let mut lock = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+            .bind(format!("agg:{}:{}", parent.table, parent_id))
+            .execute(&mut *lock)
+            .await?;
+        let outcome = self.recompute_parent_locked(parent, parent_id).await;
+        lock.commit().await?; // release the lock
+        outcome
+    }
+
+    async fn recompute_parent_locked(&self, parent: &ResolvedModel, parent_id: i64) -> Result<(), DbError> {
+        let computed = computed_fields(parent);
+        let mut record = match self.read_record(parent, parent_id).await? {
+            Some(r) => r,
+            None => return Ok(()),
+        };
+        let children = self.read_children(parent, parent_id).await?;
+        compute_stored(parent, &mut record, &children);
+        let set: Vec<String> =
+            computed.iter().enumerate().map(|(i, name)| format!("{} = ${}", name, i + 1)).collect();
+        let sql = format!("UPDATE {} SET {} WHERE id = ${}", parent.table, set.join(", "), computed.len() + 1);
+        let mut q = sqlx::query(&sql);
+        for name in &computed {
+            q = bind_query(q, record.get(*name).unwrap_or(&Value::Null));
+        }
+        q = bind_query(q, &Value::Int(parent_id));
+        q.execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// For a freshly inserted child, recompute the parent it points to (FK from the child values).
+    async fn recompute_parents_of(
+        &self,
+        child: &ResolvedModel,
+        child_values: &BTreeMap<String, Value>,
+    ) -> Result<(), DbError> {
+        for (parent, inverse) in parents_of(child.name) {
+            if let Some(Value::Int(pid)) = child_values.get(inverse) {
+                self.recompute_parent(&parent, *pid).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The (parent, parent_id) pairs a child currently points to (used before a delete and to
+    /// capture the old/new parents of an updated child).
+    async fn parent_targets(
+        &self,
+        child: &ResolvedModel,
+        child_id: i64,
+    ) -> Result<Vec<(ResolvedModel, i64)>, DbError> {
+        let mut out = Vec::new();
+        for (parent, inverse) in parents_of(child.name) {
+            if let Some(pid) = self.read_fk(child.table, inverse, child_id).await? {
+                out.push((parent, pid));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Reads a single FK (the inverse) column value for a child row.
+    async fn read_fk(&self, table: &str, field: &str, id: i64) -> Result<Option<i64>, DbError> {
+        let sql = format!("SELECT {field} FROM {table} WHERE id = $1");
+        let v: Option<Option<i64>> = sqlx::query_scalar(&sql).bind(id).fetch_optional(&self.pool).await?;
+        Ok(v.flatten())
     }
 
     /// Deletes row `id`, enforcing ACL Delete and the Delete record rule. Returns rows deleted.
@@ -310,6 +424,8 @@ impl Db {
                 operation: "delete",
             });
         }
+        // Capture the parents this child points to before it is gone, to recompute them after.
+        let parents = self.parent_targets(model, id).await?;
         let mut params: Vec<Value> = vec![Value::Int(id)];
         let where_sql = match record_rule_domain(Operation::Delete, model.name, ctx, rules) {
             Some(rule) => format!("id = $1 AND {}", rule.compile_into(model, &mut params)?),
@@ -320,7 +436,11 @@ impl Db {
         for v in &params {
             q = bind_query(q, v);
         }
-        Ok(q.execute(&self.pool).await?.rows_affected())
+        let affected = q.execute(&self.pool).await?.rows_affected();
+        for (parent, pid) in parents {
+            self.recompute_parent(&parent, pid).await?;
+        }
+        Ok(affected)
     }
 }
 
@@ -406,6 +526,24 @@ fn bind_query<'q>(q: Query<'q, Postgres, PgArguments>, v: &Value) -> Query<'q, P
 
 /// Builds the SELECT column list for a model. NUMERIC columns are cast to float8 so they decode
 /// into `f64` without a decimal dependency. Identifiers come from the model, never user input.
+/// Registered models that have a One2many field targeting `child_model_name`, paired with the
+/// inverse FK column — i.e. the aggregate parents to recompute when such a child changes.
+fn parents_of(child_model_name: &str) -> Vec<(ResolvedModel, &'static str)> {
+    let mut out = Vec::new();
+    if let Ok(models) = resolve_all_registered() {
+        for m in models {
+            for f in &m.fields {
+                if let FieldKind::One2many { target, inverse } = f.kind {
+                    if target == child_model_name {
+                        out.push((m.clone(), inverse));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 fn select_columns(model: &ResolvedModel) -> String {
     let mut cols = vec!["id".to_string()];
     for f in &model.fields {

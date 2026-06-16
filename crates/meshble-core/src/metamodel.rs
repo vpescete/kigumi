@@ -55,7 +55,7 @@ pub trait Model {
 
 /// RESOLVED descriptor: base + all extensions merged and validated.
 /// This is the point — absent in Odoo — where the final definition is materializable.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedModel {
     pub name: &'static str,
     pub table: &'static str,

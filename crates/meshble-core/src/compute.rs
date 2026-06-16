@@ -9,9 +9,14 @@
 use crate::{ResolvedModel, Value};
 use std::collections::BTreeMap;
 
-/// Read-only view of a record's field values, passed to a compute function.
+/// One2many children grouped by the o2m field name (each child is its own field→value map).
+pub type Children = BTreeMap<String, Vec<BTreeMap<String, Value>>>;
+
+/// Read-only view of a record (its own fields + its One2many children), passed to a compute
+/// function. Same-record computes read `int`/`float`/…; aggregate computes read `children`/`sum_float`.
 pub struct ComputeInput<'a> {
     values: &'a BTreeMap<String, Value>,
+    children: &'a Children,
 }
 
 impl ComputeInput<'_> {
@@ -39,6 +44,27 @@ impl ComputeInput<'_> {
     }
     pub fn bool(&self, field: &str) -> bool {
         matches!(self.values.get(field), Some(Value::Bool(true)))
+    }
+
+    /// The One2many children for `o2m_field` (empty if none / not loaded).
+    pub fn children(&self, o2m_field: &str) -> &[BTreeMap<String, Value>] {
+        self.children.get(o2m_field).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Sums a numeric `child_field` over the children of `o2m_field` (the classic aggregate).
+    pub fn sum_float(&self, o2m_field: &str, child_field: &str) -> f64 {
+        self.children(o2m_field)
+            .iter()
+            .map(|c| match c.get(child_field) {
+                Some(Value::Float(f)) => *f,
+                Some(Value::Int(n)) => *n as f64,
+                _ => 0.0,
+            })
+            .sum()
+    }
+
+    pub fn count(&self, o2m_field: &str) -> usize {
+        self.children(o2m_field).len()
     }
 }
 
@@ -71,10 +97,11 @@ pub fn computed_fields(model: &ResolvedModel) -> Vec<&'static str> {
         .collect()
 }
 
-/// Fills `values` with the result of each stored computed field whose function is registered.
-/// Computes from a snapshot taken BEFORE writing any result, so computes read the user-provided
-/// inputs (chained compute-on-compute is not ordered — out of scope).
-pub fn compute_stored(model: &ResolvedModel, values: &mut BTreeMap<String, Value>) {
+/// Fills `values` with the result of each stored computed field whose function is registered,
+/// given the record's own fields and its One2many `children` (for aggregate computes).
+/// Computes from a snapshot taken BEFORE writing any result, so computes read the inputs
+/// (chained compute-on-compute is not ordered — out of scope).
+pub fn compute_stored(model: &ResolvedModel, values: &mut BTreeMap<String, Value>, children: &Children) {
     let funcs: Vec<(&'static str, ComputeFn)> = model
         .fields
         .iter()
@@ -85,7 +112,7 @@ pub fn compute_stored(model: &ResolvedModel, values: &mut BTreeMap<String, Value
         return;
     }
     let snapshot = values.clone();
-    let input = ComputeInput { values: &snapshot };
+    let input = ComputeInput { values: &snapshot, children };
     for (name, func) in funcs {
         values.insert(name.to_string(), func(&input));
     }
@@ -116,7 +143,7 @@ mod tests {
         let mut values = BTreeMap::new();
         values.insert("qty".to_string(), Value::Float(3.0));
         values.insert("price".to_string(), Value::Float(5.0));
-        compute_stored(&m, &mut values);
+        compute_stored(&m, &mut values, &Children::new());
         assert_eq!(values.get("total"), Some(&Value::Float(15.0)));
     }
 
@@ -128,7 +155,34 @@ mod tests {
         };
         let m = resolve(&M2, &[]).unwrap();
         let mut values = BTreeMap::new();
-        compute_stored(&m, &mut values);
+        compute_stored(&m, &mut values, &Children::new());
         assert!(values.get("y").is_none(), "no registered fn → field left alone");
+    }
+
+    fn compute_order_total(i: &ComputeInput) -> Value {
+        Value::Float(i.sum_float("line_ids", "price"))
+    }
+    inventory::submit! { ComputeRegistration { name: "test_order_total", func: compute_order_total } }
+
+    #[test]
+    fn computes_an_aggregate_over_children() {
+        static ORDER: ModelDescriptor = ModelDescriptor {
+            name: "order", table: "order",
+            fields: &[
+                FieldDef { name: "line_ids", label: "Lines", kind: FieldKind::One2many { target: "order.line", inverse: "order_id" }, required: false, stored: false, compute: None, depends: &[] },
+                FieldDef { name: "amount_total", label: "Total", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: Some("test_order_total"), depends: &["line_ids.price"] },
+            ],
+        };
+        let m = resolve(&ORDER, &[]).unwrap();
+        let mut children = Children::new();
+        let mut line1 = BTreeMap::new();
+        line1.insert("price".to_string(), Value::Float(5.0));
+        let mut line2 = BTreeMap::new();
+        line2.insert("price".to_string(), Value::Float(3.0));
+        children.insert("line_ids".to_string(), vec![line1, line2]);
+
+        let mut values = BTreeMap::new();
+        compute_stored(&m, &mut values, &children);
+        assert_eq!(values.get("amount_total"), Some(&Value::Float(8.0)));
     }
 }
