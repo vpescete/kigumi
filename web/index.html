@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Meshble — UI mockups</title>
+    <script>
+      // Set the persisted theme/mode before first paint so the page doesn't flash the default.
+      (function () {
+        try {
+          var t = localStorage.getItem('msh-theme')
+          var m = localStorage.getItem('msh-mode')
+          var el = document.documentElement
+          if (t) el.setAttribute('data-theme', t)
+          el.setAttribute('data-mode', m === 'light' ? 'light' : 'dark')
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

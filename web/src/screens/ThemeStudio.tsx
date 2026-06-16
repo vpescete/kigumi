@@ -9,12 +9,18 @@ import {
 } from '../theme/contract'
 import { injectOne, themeToCss } from '../theme/css'
 import { isCustom, removeCustomTheme, upsertCustomTheme } from '../theme/registry'
-import { lintTheme, pairRatios } from '../theme/validate'
+import { hexToRgb, lintTheme, pairRatios } from '../theme/validate'
 import { useTheme } from '../theme'
 import { Button, Card, PageHeader, StateBadge } from '../ui'
 
 const kebab = (s: string) =>
   s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'my-theme'
+
+// <input type="color"> needs exactly #rrggbb — normalise 3/8-digit hex (and reject junk) to that.
+const toPickerHex = (v: string): string => {
+  const rgb = hexToRgb(v)
+  return rgb ? '#' + rgb.map((c) => c.toString(16).padStart(2, '0')).join('') : '#000000'
+}
 
 const PREVIEW_ID = '__draft'
 
@@ -325,7 +331,7 @@ function Select({ value, onChange, options, placeholder }: { value: string; onCh
 function ColorRow({ token, value, onChange }: { token: string; value: string; onChange: (v: string) => void }) {
   return (
     <div className="flex items-center gap-2">
-      <input type="color" value={value.slice(0, 7)} onChange={(e) => onChange(e.target.value)} className="h-7 w-7 rounded border border-border bg-transparent shrink-0" />
+      <input type="color" value={toPickerHex(value)} onChange={(e) => onChange(e.target.value)} className="h-7 w-7 rounded border border-border bg-transparent shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="t-caption text-muted truncate">{token}</div>
         <input value={value} onChange={(e) => onChange(e.target.value)} className="t-mono w-full bg-transparent text-text focus:outline-none" />

@@ -16,7 +16,14 @@ const listeners = new Set<() => void>()
 function loadCustom(): Theme[] {
   try {
     const raw = localStorage.getItem(CUSTOM_KEY)
-    return raw ? (JSON.parse(raw) as Theme[]) : []
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    // Never trust persisted shape — a hand-edited entry must pass the same lint as a fresh theme.
+    return parsed.filter(
+      (t): t is Theme =>
+        typeof t === 'object' && t !== null && lintTheme(t as Theme).every((l) => l.level !== 'error'),
+    )
   } catch {
     return []
   }
@@ -70,6 +77,7 @@ export async function loadDropInThemes(): Promise<void> {
         if (!r.ok) continue
         const t = (await r.json()) as Theme
         if (lintTheme(t).some((l) => l.level === 'error')) continue
+        if (isBuiltin(t.id)) continue // a drop-in must not shadow a built-in id
         loaded.push({ ...t, author: t.author ?? 'community' })
       } catch {
         /* skip a malformed file */

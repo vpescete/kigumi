@@ -28,6 +28,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return s === 'light' || s === 'dark' ? s : 'dark'
   })
 
+  // If the active theme disappears from the registry (deleted in the Studio), fall back to the base
+  // so the app never ends up with a data-theme that matches no CSS (which would strip all styling).
+  const ids = themes.map((t) => t.id).join(',')
+  useEffect(() => {
+    if (!themes.some((t) => t.id === theme)) setThemeState('graphite')
+  }, [ids, theme]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const el = document.documentElement
     el.dataset.theme = theme

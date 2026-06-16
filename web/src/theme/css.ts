@@ -3,6 +3,7 @@
 // behaves identically to a shipped one.
 
 import { colorVar, COLOR_TOKENS, TYPE_ROLES, type Mode, type Theme } from './contract'
+import { isSafeFontHref } from './validate'
 
 /** Generates the `[data-theme='id']` (+ light/dark) CSS block for one theme. */
 export function themeToCss(t: Theme): string {
@@ -39,6 +40,7 @@ export function ensureFontLinks(themes: Theme[]): void {
     for (const href of t.fontImports) {
       if (seen.has(href)) continue
       seen.add(href)
+      if (!isSafeFontHref(href)) continue // defense-in-depth: never link a non-allowlisted stylesheet
       // `have` holds absolute hrefs; compare loosely so we don't double-add.
       if ([...have].some((h) => h === href || h.endsWith(href))) continue
       const link = document.createElement('link')
