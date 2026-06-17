@@ -8,8 +8,7 @@ static MODEL: ModelDescriptor = ModelDescriptor {
     table: "thing_mig_test",
     fields: &[FieldDef {
         name: "name", label: "Name", kind: FieldKind::Text,
-        required: true, stored: true, compute: None, depends: &[],
-    }],
+        required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None }],
 };
 
 fn model() -> ResolvedModel {

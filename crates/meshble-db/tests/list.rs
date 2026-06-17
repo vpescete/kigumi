@@ -11,9 +11,9 @@ static ITEM: ModelDescriptor = ModelDescriptor {
     name: "lst.item",
     table: "lst_item",
     fields: &[
-        FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[] },
-        FieldDef { name: "qty", label: "Qty", kind: FieldKind::Integer, required: true, stored: true, compute: None, depends: &[] },
-        FieldDef { name: "active", label: "Active", kind: FieldKind::Bool, required: false, stored: true, compute: None, depends: &[] },
+        FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+        FieldDef { name: "qty", label: "Qty", kind: FieldKind::Integer, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+        FieldDef { name: "active", label: "Active", kind: FieldKind::Bool, required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
     ],
 };
 fn item_desc() -> &'static ModelDescriptor {

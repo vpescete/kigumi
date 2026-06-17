@@ -20,8 +20,7 @@ static MODEL: ModelDescriptor = ModelDescriptor {
     table: "auth_thing_test",
     fields: &[FieldDef {
         name: "name", label: "Name", kind: FieldKind::Text,
-        required: true, stored: true, compute: None, depends: &[],
-    }],
+        required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None }],
 };
 static ACLS: &[Acl] = &[Acl {
     model: "thing", group: "u", read: true, write: false, create: false, delete: false,

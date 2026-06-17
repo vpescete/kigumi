@@ -29,12 +29,10 @@ static MODEL: ModelDescriptor = ModelDescriptor {
     fields: &[
         FieldDef {
             name: "name", label: "Name", kind: FieldKind::Text,
-            required: true, stored: true, compute: None, depends: &[],
-        },
+            required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
         FieldDef {
             name: "active", label: "Active", kind: FieldKind::Bool,
-            required: false, stored: true, compute: None, depends: &[],
-        },
+            required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
     ],
 };
 
@@ -115,12 +113,10 @@ static WRITE_MODEL: ModelDescriptor = ModelDescriptor {
     fields: &[
         FieldDef {
             name: "name", label: "Name", kind: FieldKind::Text,
-            required: true, stored: true, compute: None, depends: &[],
-        },
+            required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
         FieldDef {
             name: "active", label: "Active", kind: FieldKind::Bool,
-            required: false, stored: true, compute: None, depends: &[],
-        },
+            required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
     ],
 };
 

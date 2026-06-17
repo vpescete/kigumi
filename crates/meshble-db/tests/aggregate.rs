@@ -11,17 +11,17 @@ static ORDER: ModelDescriptor = ModelDescriptor {
     name: "agg.order",
     table: "agg_order",
     fields: &[
-        FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[] },
-        FieldDef { name: "line_ids", label: "Lines", kind: FieldKind::One2many { target: "agg.line", inverse: "order_id" }, required: false, stored: false, compute: None, depends: &[] },
-        FieldDef { name: "amount_total", label: "Total", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: Some("agg_total"), depends: &["line_ids.price"] },
+        FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+        FieldDef { name: "line_ids", label: "Lines", kind: FieldKind::One2many { target: "agg.line", inverse: "order_id" }, required: false, stored: false, compute: None, depends: &[], default: None, unique: false, check: None },
+        FieldDef { name: "amount_total", label: "Total", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: Some("agg_total"), depends: &["line_ids.price"], default: None, unique: false, check: None },
     ],
 };
 static LINE: ModelDescriptor = ModelDescriptor {
     name: "agg.line",
     table: "agg_line",
     fields: &[
-        FieldDef { name: "order_id", label: "Order", kind: FieldKind::Many2one { target: "agg.order" }, required: true, stored: true, compute: None, depends: &[] },
-        FieldDef { name: "price", label: "Price", kind: FieldKind::Decimal { currency_field: None }, required: true, stored: true, compute: None, depends: &[] },
+        FieldDef { name: "order_id", label: "Order", kind: FieldKind::Many2one { target: "agg.order" }, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+        FieldDef { name: "price", label: "Price", kind: FieldKind::Decimal { currency_field: None }, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
     ],
 };
 

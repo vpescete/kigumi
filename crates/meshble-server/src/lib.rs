@@ -118,6 +118,7 @@ fn write_error(context: &str, e: DbError) -> Response {
     match e {
         DbError::AccessDenied { .. } => (StatusCode::FORBIDDEN, "access denied").into_response(),
         DbError::BadInput(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
+        DbError::Conflict(msg) => (StatusCode::CONFLICT, msg).into_response(),
         other => internal_error(context, other),
     }
 }
@@ -522,8 +523,7 @@ mod tests {
         fields: &[FieldDef {
             name: "state", label: "State",
             kind: FieldKind::Selection(&[("draft", "Draft"), ("done", "Done")]),
-            required: true, stored: true, compute: None, depends: &[],
-        }],
+            required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None }],
     };
 
     fn models() -> Vec<ResolvedModel> {
@@ -572,9 +572,9 @@ mod query_tests {
         name: "q.model",
         table: "q_model",
         fields: &[
-            FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[] },
-            FieldDef { name: "amount", label: "Amount", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: None, depends: &[] },
-            FieldDef { name: "state", label: "State", kind: FieldKind::Selection(&[("draft", "Draft"), ("done", "Done")]), required: false, stored: true, compute: None, depends: &[] },
+            FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+            FieldDef { name: "amount", label: "Amount", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+            FieldDef { name: "state", label: "State", kind: FieldKind::Selection(&[("draft", "Draft"), ("done", "Done")]), required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
         ],
     };
     fn model() -> ResolvedModel {

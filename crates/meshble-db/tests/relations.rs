@@ -13,15 +13,14 @@ static COMPANY: ModelDescriptor = ModelDescriptor {
     table: "rel_company",
     fields: &[FieldDef {
         name: "name", label: "Name", kind: FieldKind::Text,
-        required: true, stored: true, compute: None, depends: &[],
-    }],
+        required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None }],
 };
 static DOC: ModelDescriptor = ModelDescriptor {
     name: "rel.doc",
     table: "rel_doc",
     fields: &[
-        FieldDef { name: "title", label: "Title", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[] },
-        FieldDef { name: "company_id", label: "Company", kind: FieldKind::Many2one { target: "rel.company" }, required: true, stored: true, compute: None, depends: &[] },
+        FieldDef { name: "title", label: "Title", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+        FieldDef { name: "company_id", label: "Company", kind: FieldKind::Many2one { target: "rel.company" }, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
     ],
 };
 
@@ -88,16 +87,15 @@ static P_PARTNER: ModelDescriptor = ModelDescriptor {
     table: "p_partner",
     fields: &[FieldDef {
         name: "code", label: "Code", kind: FieldKind::Text,
-        required: true, stored: true, compute: None, depends: &[],
-    }],
+        required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None }],
 };
 static P_DOC: ModelDescriptor = ModelDescriptor {
     name: "p.doc",
     table: "p_doc",
     fields: &[
-        FieldDef { name: "title", label: "Title", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[] },
+        FieldDef { name: "title", label: "Title", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
         // Nullable (required: false) — a doc may have no partner.
-        FieldDef { name: "partner_id", label: "Partner", kind: FieldKind::Many2one { target: "p.partner" }, required: false, stored: true, compute: None, depends: &[] },
+        FieldDef { name: "partner_id", label: "Partner", kind: FieldKind::Many2one { target: "p.partner" }, required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
     ],
 };
 fn p_partner_desc() -> &'static ModelDescriptor {

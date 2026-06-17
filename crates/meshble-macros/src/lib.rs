@@ -216,6 +216,15 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
             .collect(),
         None => vec![],
     };
+    let default_tok = match meta_str(&metas, "default") {
+        Some(d) => quote! { Some(#d) },
+        None => quote! { None },
+    };
+    let unique = meta_flag(&metas, "unique");
+    let check_tok = match meta_str(&metas, "check") {
+        Some(c) => quote! { Some(#c) },
+        None => quote! { None },
+    };
 
     Ok(quote! {
         ::meshble::prelude::FieldDef {
@@ -226,6 +235,9 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
             stored: #stored,
             compute: #compute_tok,
             depends: &[ #(#depends),* ],
+            default: #default_tok,
+            unique: #unique,
+            check: #check_tok,
         }
     })
 }

@@ -600,27 +600,22 @@ mod tests {
             FieldDef {
                 name: "state", label: "State",
                 kind: FieldKind::Selection(&[("draft", "Draft"), ("done", "Done")]),
-                required: true, stored: true, compute: None, depends: &[],
-            },
+                required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
             FieldDef {
                 name: "amount_total", label: "Total",
                 kind: FieldKind::Decimal { currency_field: None },
-                required: false, stored: true, compute: None, depends: &[],
-            },
+                required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
             FieldDef {
                 name: "line_ids", label: "Lines",
                 kind: FieldKind::One2many { target: "sale.order.line", inverse: "order_id" },
-                required: false, stored: false, compute: None, depends: &[],
-            },
+                required: false, stored: false, compute: None, depends: &[], default: None, unique: false, check: None },
             FieldDef {
                 name: "flag", label: "Flag", kind: FieldKind::Bool,
-                required: false, stored: true, compute: None, depends: &[],
-            },
+                required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
             FieldDef {
                 name: "partner_id", label: "Partner",
                 kind: FieldKind::Many2one { target: "rel.partner" },
-                required: false, stored: true, compute: None, depends: &[],
-            },
+                required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
         ],
     };
 
@@ -629,8 +624,7 @@ mod tests {
         name: "rel.partner", table: "rel_partner",
         fields: &[FieldDef {
             name: "code", label: "Code", kind: FieldKind::Text,
-            required: true, stored: true, compute: None, depends: &[],
-        }],
+            required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None }],
     };
     fn partner_desc() -> &'static ModelDescriptor {
         &PARTNER

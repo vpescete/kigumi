@@ -10,15 +10,15 @@ use meshble_db::Db;
 static COMPANY: ModelDescriptor = ModelDescriptor {
     name: "mc.company",
     table: "mc_company",
-    fields: &[FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[] }],
+    fields: &[FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None }],
 };
 static DOC: ModelDescriptor = ModelDescriptor {
     name: "mc.doc",
     table: "mc_doc",
     fields: &[
-        FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[] },
+        FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
         // The company-scoping field: a Many2one named exactly `company_id`.
-        FieldDef { name: "company_id", label: "Company", kind: FieldKind::Many2one { target: "mc.company" }, required: false, stored: true, compute: None, depends: &[] },
+        FieldDef { name: "company_id", label: "Company", kind: FieldKind::Many2one { target: "mc.company" }, required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
     ],
 };
 fn company_desc() -> &'static ModelDescriptor {

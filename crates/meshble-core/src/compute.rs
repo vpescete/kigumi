@@ -153,9 +153,9 @@ mod tests {
     static MODEL: ModelDescriptor = ModelDescriptor {
         name: "line", table: "line",
         fields: &[
-            FieldDef { name: "qty", label: "Qty", kind: FieldKind::Decimal { currency_field: None }, required: true, stored: true, compute: None, depends: &[] },
-            FieldDef { name: "price", label: "Price", kind: FieldKind::Decimal { currency_field: None }, required: true, stored: true, compute: None, depends: &[] },
-            FieldDef { name: "total", label: "Total", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: Some("test_compute_total"), depends: &["qty", "price"] },
+            FieldDef { name: "qty", label: "Qty", kind: FieldKind::Decimal { currency_field: None }, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+            FieldDef { name: "price", label: "Price", kind: FieldKind::Decimal { currency_field: None }, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+            FieldDef { name: "total", label: "Total", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: Some("test_compute_total"), depends: &["qty", "price"], default: None, unique: false, check: None },
         ],
     };
 
@@ -173,7 +173,7 @@ mod tests {
     fn unregistered_compute_is_left_untouched() {
         static M2: ModelDescriptor = ModelDescriptor {
             name: "x", table: "x",
-            fields: &[FieldDef { name: "y", label: "Y", kind: FieldKind::Integer, required: false, stored: true, compute: Some("no_such_fn"), depends: &[] }],
+            fields: &[FieldDef { name: "y", label: "Y", kind: FieldKind::Integer, required: false, stored: true, compute: Some("no_such_fn"), depends: &[], default: None, unique: false, check: None }],
         };
         let m = resolve(&M2, &[]).unwrap();
         let mut values = BTreeMap::new();
@@ -191,8 +191,8 @@ mod tests {
         static ORDER: ModelDescriptor = ModelDescriptor {
             name: "order", table: "order",
             fields: &[
-                FieldDef { name: "line_ids", label: "Lines", kind: FieldKind::One2many { target: "order.line", inverse: "order_id" }, required: false, stored: false, compute: None, depends: &[] },
-                FieldDef { name: "amount_total", label: "Total", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: Some("test_order_total"), depends: &["line_ids.price"] },
+                FieldDef { name: "line_ids", label: "Lines", kind: FieldKind::One2many { target: "order.line", inverse: "order_id" }, required: false, stored: false, compute: None, depends: &[], default: None, unique: false, check: None },
+                FieldDef { name: "amount_total", label: "Total", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: Some("test_order_total"), depends: &["line_ids.price"], default: None, unique: false, check: None },
             ],
         };
         let m = resolve(&ORDER, &[]).unwrap();

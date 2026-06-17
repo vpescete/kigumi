@@ -101,18 +101,15 @@ mod tests {
         fields: &[
             FieldDef {
                 name: "name", label: "Order Reference", kind: FieldKind::Text,
-                required: true, stored: true, compute: None, depends: &[],
-            },
+                required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
             FieldDef {
                 name: "state", label: "State",
                 kind: FieldKind::Selection(&[("draft", "Draft"), ("done", "Done")]),
-                required: true, stored: true, compute: None, depends: &[],
-            },
+                required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
             FieldDef {
                 name: "line_ids", label: "Lines",
                 kind: FieldKind::One2many { target: "sale.order.line", inverse: "order_id" },
-                required: false, stored: false, compute: None, depends: &[],
-            },
+                required: false, stored: false, compute: None, depends: &[], default: None, unique: false, check: None },
         ],
     };
 

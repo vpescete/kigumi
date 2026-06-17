@@ -36,6 +36,13 @@ pub fn to_ddl(m: &ResolvedModel) -> String {
         if f.required {
             col.push_str(" NOT NULL");
         }
+        if f.unique {
+            col.push_str(" UNIQUE");
+        }
+        // A CHECK expression is trusted (compile-time, module-author-supplied), like a const SQL.
+        if let Some(expr) = f.check {
+            col.push_str(&format!(" CHECK ({expr})"));
+        }
         lines.push(col);
     }
     format!("CREATE TABLE {} (\n{}\n);", m.table, lines.join(",\n"))
@@ -106,6 +113,10 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
                     .collect();
                 parts.push(format!("\"options\": [{}]", items.join(", ")));
             }
+            // Surface the field default so a new-record form can prefill it.
+            if let Some(d) = f.default {
+                parts.push(format!("\"default\": {}", json_string(d)));
+            }
             if let Some(j) = rule_json(rules, f.name, UiRule::Invisible) {
                 parts.push(format!("\"invisible_when\": {j}"));
             }
@@ -133,8 +144,7 @@ mod tests {
         fields: &[FieldDef {
             name: "state", label: "State",
             kind: FieldKind::Selection(&[("a", "A"), ("b", "B")]),
-            required: true, stored: true, compute: None, depends: &[],
-        }],
+            required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None }],
     };
     fn model() -> ResolvedModel {
         resolve(&MODEL, &[]).unwrap()

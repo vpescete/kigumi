@@ -24,22 +24,22 @@ pub struct ResCurrency {
     #[field(label = "Name", required)]
     name: Text,
 
-    #[field(label = "Code", required)]
+    #[field(label = "Code", required, unique)]
     code: Text,
 
     #[field(label = "Symbol", required)]
     symbol: Text,
 
-    #[field(label = "Decimal Places")]
+    #[field(label = "Decimal Places", default = "2", check = "decimal_places >= 0")]
     decimal_places: Integer,
 
     #[field(label = "Rounding")]
     rounding: Decimal,
 
-    #[field(label = "Symbol Position", selection = "before:Before amount,after:After amount")]
+    #[field(label = "Symbol Position", default = "after", selection = "before:Before amount,after:After amount")]
     position: Selection,
 
-    #[field(label = "Active")]
+    #[field(label = "Active", default = "true")]
     active: Bool,
 }
 
@@ -77,7 +77,7 @@ pub struct ResPartner {
     #[field(label = "Currency", target = "res.currency")]
     currency_id: Many2one,
 
-    #[field(label = "Active")]
+    #[field(label = "Active", default = "true")]
     active: Bool,
 }
 

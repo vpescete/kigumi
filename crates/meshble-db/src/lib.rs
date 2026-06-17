@@ -35,6 +35,8 @@ pub enum DbError {
     Migration(String),
     /// Invalid write input (unknown/non-writable field, or a value incompatible with its kind).
     BadInput(String),
+    /// A constraint conflict (unique violation, FK violation) — maps to HTTP 409.
+    Conflict(String),
 }
 
 impl std::fmt::Display for DbError {
@@ -46,6 +48,18 @@ impl std::error::Error for DbError {}
 
 impl From<sqlx::Error> for DbError {
     fn from(e: sqlx::Error) -> Self {
+        // Map known Postgres constraint SQLSTATEs to typed, client-safe errors (a curated message +
+        // the constraint name — never the raw Postgres text). Everything else stays an opaque Sql.
+        if let Some(db) = e.as_database_error() {
+            let constraint = db.constraint().unwrap_or("constraint").to_string();
+            match db.code().as_deref() {
+                Some("23505") => return DbError::Conflict(format!("duplicate value violates unique constraint '{constraint}'")),
+                Some("23503") => return DbError::Conflict(format!("foreign-key constraint '{constraint}' violated (referenced row missing or still in use)")),
+                Some("23514") => return DbError::BadInput(format!("value violates check constraint '{constraint}'")),
+                Some("23502") => return DbError::BadInput("a required field is missing".to_string()),
+                _ => {}
+            }
+        }
         DbError::Sql(e)
     }
 }
@@ -329,6 +343,7 @@ impl Db {
         // Multi-company: validate the supplied company_id against the caller's scope and default it
         // on create (single chokepoint, reused for nested children + update below).
         apply_company_scope(model, ctx, &mut scalars, true)?;
+        apply_defaults(model, &mut scalars); // fill unset fields with their declared defaults
         let cols = validate_write_values(model, &scalars, true)?;
         if cols.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
@@ -386,6 +401,7 @@ impl Db {
                 let mut cvals = row.clone();
                 cvals.insert(nc.inverse.to_string(), Json::from(id)); // parent owns the FK
                 apply_company_scope(&nc.child, ctx, &mut cvals, true)?; // children are scoped too
+                apply_defaults(&nc.child, &mut cvals);
                 let ccols = validate_write_values(&nc.child, &cvals, true)?;
                 let mut crec: BTreeMap<String, Value> =
                     ccols.into_iter().map(|(c, v)| (c.to_string(), v)).collect();
@@ -808,6 +824,30 @@ fn apply_company_scope(
     Ok(())
 }
 
+/// Converts a field's static `default` string into a JSON value shaped for its kind, so a create
+/// that omits the field receives the default (then validated like any user-supplied value).
+fn default_json(field: &FieldDef) -> Option<Json> {
+    let d = field.default?;
+    Some(match field.kind {
+        FieldKind::Bool => Json::Bool(matches!(d, "true" | "1" | "t" | "yes")),
+        FieldKind::Integer | FieldKind::Many2one { .. } => Json::from(d.parse::<i64>().ok()?),
+        // Decimals travel as strings → parsed exactly by json_to_value.
+        FieldKind::Decimal { .. } | FieldKind::Text | FieldKind::Selection(_) => Json::from(d.to_string()),
+        FieldKind::One2many { .. } => return None,
+    })
+}
+
+/// Fills any unset stored field that declares a `default` (applied on create, before required check).
+fn apply_defaults(model: &ResolvedModel, payload: &mut Map<String, Json>) {
+    for f in &model.fields {
+        if f.has_column() && !f.is_computed() && !payload.contains_key(f.name) {
+            if let Some(v) = default_json(f) {
+                payload.insert(f.name.to_string(), v);
+            }
+        }
+    }
+}
+
 fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
     let bad = || {
         DbError::BadInput(format!(
@@ -1047,16 +1087,13 @@ mod tests {
         fields: &[
             FieldDef {
                 name: "name", label: "Name", kind: FieldKind::Text,
-                required: true, stored: true, compute: None, depends: &[],
-            },
+                required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
             FieldDef {
                 name: "note", label: "Note", kind: FieldKind::Text,
-                required: false, stored: true, compute: None, depends: &[],
-            },
+                required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
             FieldDef {
                 name: "total", label: "Total", kind: FieldKind::Decimal { currency_field: None },
-                required: false, stored: true, compute: Some("c"), depends: &[],
-            },
+                required: false, stored: true, compute: Some("c"), depends: &[], default: None, unique: false, check: None },
         ],
     };
 

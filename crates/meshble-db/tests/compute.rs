@@ -18,9 +18,9 @@ static MODEL: ModelDescriptor = ModelDescriptor {
     name: "line",
     table: "compute_line_test",
     fields: &[
-        FieldDef { name: "qty", label: "Qty", kind: FieldKind::Decimal { currency_field: None }, required: true, stored: true, compute: None, depends: &[] },
-        FieldDef { name: "price", label: "Price", kind: FieldKind::Decimal { currency_field: None }, required: true, stored: true, compute: None, depends: &[] },
-        FieldDef { name: "subtotal", label: "Subtotal", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: Some("compute_subtotal"), depends: &["qty", "price"] },
+        FieldDef { name: "qty", label: "Qty", kind: FieldKind::Decimal { currency_field: None }, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+        FieldDef { name: "price", label: "Price", kind: FieldKind::Decimal { currency_field: None }, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+        FieldDef { name: "subtotal", label: "Subtotal", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: Some("compute_subtotal"), depends: &["qty", "price"], default: None, unique: false, check: None },
     ],
 };
 static ACLS: &[Acl] = &[];

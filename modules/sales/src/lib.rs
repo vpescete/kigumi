@@ -30,7 +30,7 @@ pub struct SaleOrder {
     #[field(label = "Order Lines", target = "sale.order.line", inverse = "order_id")]
     line_ids: One2many,
 
-    #[field(label = "Status", required, selection = "draft:Draft,sale:Confirmed,done:Done")]
+    #[field(label = "Status", required, default = "draft", selection = "draft:Draft,sale:Confirmed,done:Done")]
     state: Selection,
 
     #[field(label = "Currency", required, target = "res.currency")]

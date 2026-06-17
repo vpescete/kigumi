@@ -28,6 +28,12 @@ pub struct FieldDef {
     pub compute: Option<&'static str>,
     /// Declared dependencies; VERIFIED by `validate_depends` (no blind N+1).
     pub depends: &'static [&'static str],
+    /// Default value applied on create when the field is unset (as a string, parsed per kind).
+    pub default: Option<&'static str>,
+    /// Generates a single-column UNIQUE constraint in the DDL.
+    pub unique: bool,
+    /// A raw SQL CHECK expression (trusted, compile-time) generating a column CHECK constraint.
+    pub check: Option<&'static str>,
 }
 
 impl FieldDef {
@@ -108,16 +114,14 @@ mod tests {
         table: "demo_model",
         fields: &[FieldDef {
             name: "name", label: "Name", kind: FieldKind::Text,
-            required: true, stored: true, compute: None, depends: &[],
-        }],
+            required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None }],
     };
 
     #[test]
     fn resolve_detects_conflict() {
         static DUP: &[FieldDef] = &[FieldDef {
             name: "name", label: "X", kind: FieldKind::Text,
-            required: false, stored: true, compute: None, depends: &[],
-        }];
+            required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None }];
         assert!(resolve(&BASE, &[DUP]).is_err());
     }
 
@@ -125,8 +129,7 @@ mod tests {
     fn depends_on_unknown_field_errors() {
         static BAD: &[FieldDef] = &[FieldDef {
             name: "x", label: "X", kind: FieldKind::Integer,
-            required: false, stored: true, compute: Some("c"), depends: &["nope"],
-        }];
+            required: false, stored: true, compute: Some("c"), depends: &["nope"], default: None, unique: false, check: None }];
         let m = resolve(&BASE, &[BAD]).unwrap();
         assert!(validate_depends(&m).is_err());
     }
