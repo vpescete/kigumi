@@ -17,10 +17,10 @@ pub use auth_store::UserRow;
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
-    action_for, check_access, compute_stored, computed_fields, field_accessible, is_mailed,
-    record_rule_domain, related_path, resolve_all_registered, resolve_registered, tracked_fields,
-    Acl, ActionInput, Children, Ctx, Domain, DomainError, FieldDef, FieldKind, Operation, RecordRule,
-    ResolvedModel, Value,
+    action_for, check_access, compute_stored, computed_fields, delegated_fields, field_accessible,
+    is_mailed, record_rule_domain, related_path, resolve_all_registered, resolve_registered,
+    tracked_fields, Acl, ActionInput, Children, Ctx, Domain, DomainError, FieldDef, FieldKind,
+    Operation, RecordRule, ResolvedModel, Value,
 };
 use meshble_schema::to_ddl;
 use serde_json::{Map, Value as Json};
@@ -1666,6 +1666,18 @@ fn select_columns(model: &ResolvedModel) -> String {
             ));
         }
     }
+    // Delegated (_inherits) fields: read from the parent through the child's `via` FK, one correlated
+    // subquery each (same shape as a related field). Not in `model.fields`, so appended here.
+    for d in delegated_fields(model.name).unwrap_or_default() {
+        let read = match d.def.kind {
+            FieldKind::Date | FieldKind::Datetime => format!("{}::text", d.def.name),
+            _ => d.def.name.to_string(),
+        };
+        cols.push(format!(
+            "(SELECT {read} FROM {ptable} WHERE id = {ctable}.{via}) AS {name}",
+            ptable = d.parent_table, ctable = model.table, via = d.via, name = d.def.name
+        ));
+    }
     cols.join(", ")
 }
 
@@ -1711,6 +1723,46 @@ fn related_subquery(model: &ResolvedModel, path: &str) -> Result<String, DbError
     unreachable!("the loop returns on the final segment")
 }
 
+/// Decodes one selected column (`name`, aliased to the field name) into a typed [`Value`] per its
+/// kind. NULL → `Value::Null`. Shared by own-field and delegated-field decoding.
+fn decode_value(row: &PgRow, name: &str, kind: &FieldKind) -> Value {
+    match kind {
+        FieldKind::Text | FieldKind::Selection(_) => {
+            row.try_get::<Option<String>, _>(name).ok().flatten().map(Value::Str).unwrap_or(Value::Null)
+        }
+        FieldKind::Integer | FieldKind::Many2one { .. } => {
+            row.try_get::<Option<i64>, _>(name).ok().flatten().map(Value::Int).unwrap_or(Value::Null)
+        }
+        FieldKind::Float => {
+            row.try_get::<Option<f64>, _>(name).ok().flatten().map(Value::Float).unwrap_or(Value::Null)
+        }
+        FieldKind::Decimal { .. } => row
+            .try_get::<Option<rust_decimal::Decimal>, _>(name)
+            .ok()
+            .flatten()
+            .map(Value::Decimal)
+            .unwrap_or(Value::Null),
+        FieldKind::Bool => {
+            row.try_get::<Option<bool>, _>(name).ok().flatten().map(Value::Bool).unwrap_or(Value::Null)
+        }
+        // Date/Datetime are selected as ::text → read as a String.
+        FieldKind::Date | FieldKind::Datetime => {
+            row.try_get::<Option<String>, _>(name).ok().flatten().map(Value::Str).unwrap_or(Value::Null)
+        }
+        // Many2many is selected as an int array (array_agg of target ids) → a list of Ints.
+        FieldKind::Many2many { .. } => Value::List(
+            row.try_get::<Option<Vec<i64>>, _>(name)
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .into_iter()
+                .map(Value::Int)
+                .collect(),
+        ),
+        FieldKind::One2many { .. } => Value::Null, // not selected; never reached
+    }
+}
+
 /// Converts a database row into a typed `Value` map keyed by field name (for the compute engine).
 fn record_to_values(model: &ResolvedModel, row: &PgRow) -> BTreeMap<String, Value> {
     let mut m = BTreeMap::new();
@@ -1719,48 +1771,44 @@ fn record_to_values(model: &ResolvedModel, row: &PgRow) -> BTreeMap<String, Valu
         if !f.has_column() && related_path(model.name, f.name).is_none() && !matches!(f.kind, FieldKind::Many2many { .. }) {
             continue;
         }
-        let v = match &f.kind {
-            FieldKind::Text | FieldKind::Selection(_) => {
-                row.try_get::<Option<String>, _>(f.name).ok().flatten().map(Value::Str).unwrap_or(Value::Null)
-            }
-            FieldKind::Integer | FieldKind::Many2one { .. } => {
-                row.try_get::<Option<i64>, _>(f.name).ok().flatten().map(Value::Int).unwrap_or(Value::Null)
-            }
-            FieldKind::Float => {
-                row.try_get::<Option<f64>, _>(f.name).ok().flatten().map(Value::Float).unwrap_or(Value::Null)
-            }
-            FieldKind::Decimal { .. } => row
-                .try_get::<Option<rust_decimal::Decimal>, _>(f.name)
-                .ok()
-                .flatten()
-                .map(Value::Decimal)
-                .unwrap_or(Value::Null),
-            FieldKind::Bool => {
-                row.try_get::<Option<bool>, _>(f.name).ok().flatten().map(Value::Bool).unwrap_or(Value::Null)
-            }
-            // Date/Datetime are selected as ::text → read as a String.
-            FieldKind::Date | FieldKind::Datetime => {
-                row.try_get::<Option<String>, _>(f.name).ok().flatten().map(Value::Str).unwrap_or(Value::Null)
-            }
-            // Many2many is selected as an int array (array_agg of target ids) → a list of Ints.
-            FieldKind::Many2many { .. } => Value::List(
-                row.try_get::<Option<Vec<i64>>, _>(f.name)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(Value::Int)
-                    .collect(),
-            ),
-            FieldKind::One2many { .. } => continue,
-        };
-        m.insert(f.name.to_string(), v);
+        m.insert(f.name.to_string(), decode_value(row, f.name, &f.kind));
+    }
+    // Delegated (_inherits) fields are selected as subqueries — decode them by the parent's kind.
+    for d in delegated_fields(model.name).unwrap_or_default() {
+        m.insert(d.def.name.to_string(), decode_value(row, d.def.name, &d.def.kind));
     }
     m
 }
 
 /// Converts a database row into a JSON object keyed by field name, decoding each column per its
 /// field kind (NULL → JSON null).
+/// Decodes one selected column (`name`) into JSON per its kind. NULL → `Json::Null`; exact Decimal →
+/// a JSON string (preserves precision). Shared by own-field and delegated-field projection.
+fn decode_json(row: &PgRow, name: &str, kind: &FieldKind) -> Result<Json, DbError> {
+    Ok(match kind {
+        FieldKind::Text | FieldKind::Selection(_) => {
+            row.try_get::<Option<String>, _>(name)?.map(Json::from).unwrap_or(Json::Null)
+        }
+        FieldKind::Integer | FieldKind::Many2one { .. } => {
+            row.try_get::<Option<i64>, _>(name)?.map(Json::from).unwrap_or(Json::Null)
+        }
+        FieldKind::Float => row.try_get::<Option<f64>, _>(name)?.map(Json::from).unwrap_or(Json::Null),
+        FieldKind::Decimal { .. } => match row.try_get::<Option<rust_decimal::Decimal>, _>(name)? {
+            Some(d) => Json::from(d.to_string()),
+            None => Json::Null,
+        },
+        FieldKind::Bool => row.try_get::<Option<bool>, _>(name)?.map(Json::from).unwrap_or(Json::Null),
+        FieldKind::Date | FieldKind::Datetime => {
+            row.try_get::<Option<String>, _>(name)?.map(Json::from).unwrap_or(Json::Null)
+        }
+        FieldKind::Many2many { .. } => {
+            let ids: Vec<i64> = row.try_get::<Option<Vec<i64>>, _>(name)?.unwrap_or_default();
+            Json::Array(ids.into_iter().map(Json::from).collect())
+        }
+        FieldKind::One2many { .. } => Json::Null, // not selected; never reached
+    })
+}
+
 fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
     let mut obj = Map::new();
     let id: i64 = row.try_get("id")?;
@@ -1770,34 +1818,11 @@ fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
         if !f.has_column() && related_path(model.name, f.name).is_none() && !matches!(f.kind, FieldKind::Many2many { .. }) {
             continue;
         }
-        let v: Json = match &f.kind {
-            FieldKind::Text | FieldKind::Selection(_) => {
-                row.try_get::<Option<String>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
-            }
-            FieldKind::Integer | FieldKind::Many2one { .. } => {
-                row.try_get::<Option<i64>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
-            }
-            FieldKind::Float => row.try_get::<Option<f64>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null),
-            // Exact decimal serialized as a JSON STRING (e.g. "1240.00") to preserve precision.
-            FieldKind::Decimal { .. } => match row.try_get::<Option<rust_decimal::Decimal>, _>(f.name)? {
-                Some(d) => Json::from(d.to_string()),
-                None => Json::Null,
-            },
-            FieldKind::Bool => {
-                row.try_get::<Option<bool>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
-            }
-            // Date/Datetime are selected as ::text → an ISO string (e.g. "2026-01-15").
-            FieldKind::Date | FieldKind::Datetime => {
-                row.try_get::<Option<String>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
-            }
-            // Many2many is selected as an int array (array_agg of target ids) → a JSON array.
-            FieldKind::Many2many { .. } => {
-                let ids: Vec<i64> = row.try_get::<Option<Vec<i64>>, _>(f.name)?.unwrap_or_default();
-                Json::Array(ids.into_iter().map(Json::from).collect())
-            }
-            FieldKind::One2many { .. } => continue,
-        };
-        obj.insert(f.name.to_string(), v);
+        obj.insert(f.name.to_string(), decode_json(row, f.name, &f.kind)?);
+    }
+    // Delegated (_inherits) fields are selected as subqueries — project them by the parent's kind.
+    for d in delegated_fields(model.name).unwrap_or_default() {
+        obj.insert(d.def.name.to_string(), decode_json(row, d.def.name, &d.def.kind)?);
     }
     Ok(Json::Object(obj))
 }
