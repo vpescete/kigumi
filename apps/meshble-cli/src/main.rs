@@ -87,6 +87,15 @@ enum UserCmd {
     },
     /// Add a group to a user.
     Grant { login: String, group: String },
+    /// Assign a user's multi-company scope: --active <id> is the default company, --allowed a CSV
+    /// of accessible company ids (the active company is always included). Empty = unrestricted.
+    Company {
+        login: String,
+        #[arg(long)]
+        active: Option<i64>,
+        #[arg(long, default_value = "")]
+        allowed: String,
+    },
 }
 
 fn config_path(cli: &Cli) -> PathBuf {
@@ -275,6 +284,11 @@ async fn user_command(db: &Db, action: UserCmd) -> Fallible {
             let gs: Vec<&str> = groups.iter().map(|g| g.as_str()).collect();
             db.upsert_user(&login, &user.password_hash, &gs).await?;
             println!("granted '{group}' to '{login}' (groups: {})", gs.join(", "));
+        }
+        UserCmd::Company { login, active, allowed } => {
+            let ids: Vec<i64> = allowed.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            db.set_user_companies(&login, active, &ids).await?;
+            println!("company scope for '{login}': active={active:?}, allowed={ids:?}");
         }
     }
     Ok(())

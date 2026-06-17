@@ -161,7 +161,12 @@ async fn me_handler(State(state): State<AppState>, headers: HeaderMap) -> Respon
         Ok(c) => c,
         Err(r) => return r,
     };
-    let body = serde_json::json!({ "uid": ctx.uid, "groups": ctx.groups });
+    let body = serde_json::json!({
+        "uid": ctx.uid,
+        "groups": ctx.groups,
+        "company_id": ctx.company_id,
+        "allowed_company_ids": ctx.allowed_company_ids,
+    });
     json_response(body.to_string())
 }
 
@@ -444,9 +449,17 @@ fn str_field<'a>(body: &'a Json2, key: &str) -> Option<&'a str> {
     body.get(key).and_then(|v| v.as_str())
 }
 
-/// Issues an access + (stored) refresh token pair for `uid` with `groups`.
-async fn issue_token_pair(backend: &DataBackend, uid: i64, groups: Vec<String>) -> Response {
-    let access = match backend.auth.issue_access(uid, groups, ACCESS_TTL) {
+/// Issues an access + (stored) refresh token pair for `uid` with `groups` and company `scope`
+/// (active, allowed). The access token bakes in the scope so each request verifies into a
+/// company-scoped Ctx with no extra DB round-trip.
+async fn issue_token_pair(
+    backend: &DataBackend,
+    uid: i64,
+    groups: Vec<String>,
+    scope: (Option<i64>, Vec<i64>),
+) -> Response {
+    let (company, companies) = scope;
+    let access = match backend.auth.issue_access(uid, groups, company, companies, ACCESS_TTL) {
         Ok(t) => t,
         Err(_) => return internal_error("token", "issue access"),
     };
@@ -489,7 +502,10 @@ async fn login_handler(State(state): State<AppState>, Json(body): Json<Json2>) -
     let hash = user.as_ref().map(|u| u.password_hash.as_str()).unwrap_or_else(|| dummy_hash());
     let ok = verify_password(password, hash);
     match user {
-        Some(u) if ok => issue_token_pair(backend, u.id, u.groups).await,
+        Some(u) if ok => {
+            let scope = (u.company_id, u.company_ids);
+            issue_token_pair(backend, u.id, u.groups, scope).await
+        }
         _ => (StatusCode::UNAUTHORIZED, "invalid credentials").into_response(),
     }
 }
@@ -512,7 +528,12 @@ async fn refresh_handler(State(state): State<AppState>, Json(body): Json<Json2>)
                 Ok(g) => g,
                 Err(e) => return internal_error("groups", e),
             };
-            issue_token_pair(backend, uid, groups).await
+            // Re-read company scope too, so reassignments take effect on refresh (like groups).
+            let scope = match backend.db.user_scope(uid).await {
+                Ok(s) => s,
+                Err(e) => return internal_error("scope", e),
+            };
+            issue_token_pair(backend, uid, groups, scope).await
         }
         Ok(_) => (StatusCode::UNAUTHORIZED, "invalid refresh token").into_response(),
         Err(e) => internal_error("refresh", e),

@@ -19,7 +19,7 @@ const SECRET: &str = "test-secret-change-me";
 /// Mints a `Bearer` header for a JWT carrying the given comma-separated groups.
 fn bearer(groups: &str) -> String {
     let g: Vec<String> = groups.split(',').filter(|s| !s.is_empty()).map(String::from).collect();
-    let token = Authenticator::new(SECRET).issue_access(1, g, 3600).unwrap();
+    let token = Authenticator::new(SECRET).issue_access(1, g, None, vec![], 3600).unwrap();
     format!("Bearer {token}")
 }
 

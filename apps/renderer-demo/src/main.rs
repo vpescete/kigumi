@@ -60,7 +60,7 @@ async fn main() {
     db.ensure_auth_schema().await.expect("auth schema");
     db.upsert_user("admin", &hash_password("admin").unwrap(), &["user"]).await.expect("seed admin");
 
-    let token = Authenticator::new(SECRET).issue_access(1, vec!["user".to_string()], 86_400).unwrap();
+    let token = Authenticator::new(SECRET).issue_access(1, vec!["user".to_string()], None, vec![], 86_400).unwrap();
     let db_app = Db::connect(&url).await.unwrap();
     let app = router_with_data(vec![model], db_app, ACLS, RULES, SECRET)
         .route("/", get(|| async { Html(UI) }));

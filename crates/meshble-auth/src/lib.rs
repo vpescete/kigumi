@@ -24,6 +24,12 @@ struct Claims {
     /// Groups (access tokens only; refresh tokens re-fetch groups at refresh time).
     #[serde(default)]
     groups: Vec<String>,
+    /// Active company (access tokens only; multi-company scope). None = unrestricted.
+    #[serde(default)]
+    company: Option<i64>,
+    /// Companies the caller may access (access tokens only). Empty = unrestricted.
+    #[serde(default)]
+    companies: Vec<i64>,
     /// Token id (refresh tokens only) — the handle the server uses to revoke/rotate.
     #[serde(default)]
     jti: String,
@@ -94,12 +100,22 @@ impl Authenticator {
         Ok(data.claims)
     }
 
-    /// Signs a short-lived ACCESS token carrying the user's groups.
-    pub fn issue_access(&self, uid: i64, groups: Vec<String>, ttl_secs: u64) -> Result<String, AuthError> {
+    /// Signs a short-lived ACCESS token carrying the user's groups + multi-company scope.
+    /// `company`/`companies` empty → the token verifies into an unrestricted (single-company) Ctx.
+    pub fn issue_access(
+        &self,
+        uid: i64,
+        groups: Vec<String>,
+        company: Option<i64>,
+        companies: Vec<i64>,
+        ttl_secs: u64,
+    ) -> Result<String, AuthError> {
         self.sign(&Claims {
             sub: uid,
             kind: ACCESS.to_string(),
             groups,
+            company,
+            companies,
             jti: String::new(),
             exp: (now_unix() + ttl_secs) as usize,
         })
@@ -111,15 +127,23 @@ impl Authenticator {
             sub: uid,
             kind: REFRESH.to_string(),
             groups: Vec::new(),
+            company: None,
+            companies: Vec::new(),
             jti: jti.to_string(),
             exp: (now_unix() + ttl_secs) as usize,
         })
     }
 
-    /// Verifies an ACCESS token into a trusted [`Ctx`]. Rejects refresh tokens.
+    /// Verifies an ACCESS token into a trusted [`Ctx`]. Rejects refresh tokens. A token carrying a
+    /// non-empty company set yields a company-scoped Ctx (active = `company`, or the first allowed
+    /// company if only the set is present); an empty set yields an unrestricted Ctx.
     pub fn verify_access(&self, token: &str) -> Result<Ctx, AuthError> {
         let c = self.decode_kind(token, ACCESS)?;
-        Ok(Ctx::new(c.sub, c.groups))
+        let ctx = Ctx::new(c.sub, c.groups);
+        match c.company.or_else(|| c.companies.first().copied()) {
+            Some(active) if !c.companies.is_empty() => Ok(ctx.in_companies(active, c.companies)),
+            _ => Ok(ctx),
+        }
     }
 
     /// Verifies a REFRESH token into its identity + token id. Rejects access tokens.
@@ -171,10 +195,24 @@ mod tests {
     #[test]
     fn access_token_verifies_to_its_claims() {
         let auth = Authenticator::new("secret");
-        let token = auth.issue_access(7, vec!["sales.user".to_string()], 3600).unwrap();
+        let token = auth.issue_access(7, vec!["sales.user".to_string()], None, vec![], 3600).unwrap();
         let ctx = auth.verify_access(&token).unwrap();
         assert_eq!(ctx.uid, 7);
         assert!(ctx.is_member("sales.user"));
+    }
+
+    #[test]
+    fn access_token_carries_company_scope() {
+        let auth = Authenticator::new("secret");
+        // A token with an allowed set yields a company-scoped Ctx (active = company).
+        let token = auth.issue_access(7, vec![], Some(2), vec![2, 5], 3600).unwrap();
+        let ctx = auth.verify_access(&token).unwrap();
+        assert_eq!(ctx.company_id, Some(2));
+        assert_eq!(ctx.allowed_company_ids, vec![2, 5]);
+        assert!(ctx.company_scoped(), "a non-empty set activates isolation");
+        // No companies → unrestricted (the single-company default).
+        let plain = auth.verify_access(&auth.issue_access(7, vec![], None, vec![], 3600).unwrap()).unwrap();
+        assert!(!plain.company_scoped());
     }
 
     #[test]
@@ -185,7 +223,7 @@ mod tests {
         assert!(matches!(auth.verify_access(&refresh), Err(AuthError::Invalid)));
         assert!(matches!(auth.verify_bearer(Some(&format!("Bearer {refresh}"))), Err(AuthError::Invalid)));
         // ...and an access token is not a valid refresh token.
-        let access = auth.issue_access(1, vec![], 3600).unwrap();
+        let access = auth.issue_access(1, vec![], None, vec![], 3600).unwrap();
         assert!(matches!(auth.verify_refresh(&access), Err(AuthError::Invalid)));
     }
 
@@ -200,14 +238,14 @@ mod tests {
 
     #[test]
     fn token_from_a_different_secret_is_rejected() {
-        let token = Authenticator::new("attacker").issue_access(1, vec!["admin".to_string()], 3600).unwrap();
+        let token = Authenticator::new("attacker").issue_access(1, vec!["admin".to_string()], None, vec![], 3600).unwrap();
         assert!(matches!(Authenticator::new("server").verify_access(&token), Err(AuthError::Invalid)));
     }
 
     #[test]
     fn tampered_and_garbage_tokens_are_rejected() {
         let auth = Authenticator::new("secret");
-        let mut token = auth.issue_access(1, vec![], 3600).unwrap();
+        let mut token = auth.issue_access(1, vec![], None, vec![], 3600).unwrap();
         token.push('x');
         assert!(matches!(auth.verify_access(&token), Err(AuthError::Invalid)));
         assert!(matches!(auth.verify_access("not-a-jwt"), Err(AuthError::Invalid)));
@@ -216,7 +254,7 @@ mod tests {
     #[test]
     fn bearer_parsing() {
         let auth = Authenticator::new("secret");
-        let token = auth.issue_access(3, vec![], 3600).unwrap();
+        let token = auth.issue_access(3, vec![], None, vec![], 3600).unwrap();
         assert!(auth.verify_bearer(Some(&format!("Bearer {token}"))).is_ok());
         assert!(matches!(auth.verify_bearer(None), Err(AuthError::Missing)));
         assert!(matches!(auth.verify_bearer(Some(&token)), Err(AuthError::Invalid)));
