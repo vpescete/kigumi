@@ -84,6 +84,17 @@ in una fetta successiva). Niente di tutto ciò serve a un ERP headless v1.
 5. **FE chatter** — widget chatter nel form generico (thread + box messaggio + activities).
 - **Retrofit**: marcare `sale.order` come mailed + tracciare `state`.
 
+## 5b. Stato implementazione
+- **Fetta 1 FATTA** (commit `4ce5eb0`): `register_mailed!` + `mail.message` + API chatter + delete-cleanup hook + `Db::now()`.
+- **Fetta 2 FATTA**: `#[field(tracked)]` + `mail.tracking` + diff nel write path + tracking embedded nel thread.
+  Il diff confronta old vs new entrambi resi da Postgres `::text` (re-SELECT del nuovo valore dopo l'UPDATE,
+  riga lockata `FOR UPDATE`): niente falsi positivi su Date/Datetime/Float, niente old/new in formati diversi.
+  Tracking = best-effort post-commit (non fa mai fallire la scrittura). Redazione D6: l'embedding del tracking
+  nel thread filtra i campi non leggibili dal chiamante (`field_accessible`). Indici mail via `ensure_mail_indexes`.
+- **Gap noti rimandati** (segnalati dalla review avversariale): paginazione del thread (verrà con la chatter FE,
+  fetta 5); guard compile-time di `#[field(tracked)]` su campi relazionali/computed (oggi no-op silenzioso);
+  quoting degli identificatori SQL per nomi-colonna riservati (es. `when`) — concerne tutto il metamodello, non solo mail.
+
 ## 6. Raccomandazione + rischi
 **Prima fetta**: la fondazione (registry opt-in + `mail.message` + post/list + cleanup hook) — è il minimo che
 rende la chatter reale ed è dove vivono le decisioni architetturali. **Rischio principale**: il link polimorfico —

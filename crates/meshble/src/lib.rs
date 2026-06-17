@@ -18,7 +18,8 @@ pub mod prelude {
         FieldGroupRegistration, FieldKind, MailedRegistration, MigrationTarget, Model,
         ModelDescriptor, ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration,
         Operation, Operator, RecordRule, RecordRuleRegistration, RelatedRegistration,
-        ResolutionError, ResolvedModel, RuleDomain, Sql, Value, FRAMEWORK_VERSION,
+        ResolutionError, ResolvedModel, RuleDomain, Sql, TrackedFieldRegistration, Value,
+        FRAMEWORK_VERSION, tracked_fields,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
@@ -125,6 +126,19 @@ macro_rules! register_mailed {
     ($model:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::MailedRegistration { model: $model }
+        }
+    };
+}
+
+/// Marks a field as tracked (Odoo's `tracking=True`): a change to it on a mailed model records a
+/// `notification` message + a typed `mail.tracking` row in the chatter. Usually emitted by
+/// `#[field(tracked)]`, but can be declared by hand:
+/// `meshble::register_tracked!("sale.order", "state");`
+#[macro_export]
+macro_rules! register_tracked {
+    ($model:expr, $field:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::TrackedFieldRegistration { model: $model, field: $field }
         }
     };
 }

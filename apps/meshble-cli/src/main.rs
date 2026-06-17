@@ -311,6 +311,9 @@ async fn migrate_installed(db: &Db) -> Fallible {
     for t in &installed_targets {
         db.create_m2m_relations(&t.model).await?;
     }
+    // Mail subsystem indexes for the polymorphic thread/tracking lookups (idempotent, tolerant if the
+    // mail module isn't installed). The metamodel has no index DDL yet, so the framework ensures these.
+    db.ensure_mail_indexes().await?;
     if installed.iter().any(|m| m == "base") {
         seed_base_data(db).await?;
     }

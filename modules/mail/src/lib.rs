@@ -56,6 +56,25 @@ pub struct MailMessage {
     parent_id: Many2one,
 }
 
+/// A field-change audit row: one tracked field went from `old_value` to `new_value`, carried by a
+/// `notification` message. ONE typed value pair (serialized from the field's `Value`), not Odoo's
+/// ~10-column sparse table. `message_id` is a plain integer (no FK), like `author_id`: the subsystem
+/// avoids hard FKs, and the record-delete cleanup removes a record's tracking via its messages.
+#[model(name = "mail.tracking", table = "mail_tracking")]
+pub struct MailTracking {
+    #[field(label = "Message", required)]
+    message_id: Integer,
+
+    #[field(label = "Field", required)]
+    field: Text,
+
+    #[field(label = "Old Value")]
+    old_value: Text,
+
+    #[field(label = "New Value")]
+    new_value: Text,
+}
+
 /// Mail ACLs: only `admin` touches `mail.message` through the GENERIC CRUD routes (moderation/debug).
 /// Normal users never read or post messages directly — that would expose every record's thread across
 /// all companies, bypassing host visibility. Instead the dedicated chatter endpoints gate on the
@@ -63,6 +82,7 @@ pub struct MailMessage {
 /// user with no mail ACL still posts/reads threads, but only of records they can already see.
 pub static ACLS: &[Acl] = &[
     Acl { model: "mail.message", group: "admin", read: true, write: false, create: true, delete: true },
+    Acl { model: "mail.tracking", group: "admin", read: true, write: false, create: false, delete: true },
 ];
 meshble::register_acls!(ACLS);
 

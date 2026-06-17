@@ -18,9 +18,9 @@ pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
     action_for, check_access, compute_stored, computed_fields, field_accessible, is_mailed,
-    record_rule_domain, related_path, resolve_all_registered, resolve_registered, Acl, ActionInput,
-    Children, Ctx, Domain, DomainError, FieldDef, FieldKind, Operation, RecordRule, ResolvedModel,
-    Value,
+    record_rule_domain, related_path, resolve_all_registered, resolve_registered, tracked_fields,
+    Acl, ActionInput, Children, Ctx, Domain, DomainError, FieldDef, FieldKind, Operation, RecordRule,
+    ResolvedModel, Value,
 };
 use meshble_schema::to_ddl;
 use serde_json::{Map, Value as Json};
@@ -493,9 +493,24 @@ impl Db {
             return Err(DbError::BadInput("no values provided".to_string()));
         }
 
+        // Field tracking (mail): the tracked scalar columns actually present in this write. Only for
+        // mailed models; computed-field tracking is deferred.
+        let track_cols: Vec<&'static str> = if is_mailed(model.name) {
+            let tracked = tracked_fields(model.name);
+            cols.iter().map(|(c, _)| *c).filter(|c| tracked.contains(c)).collect()
+        } else {
+            Vec::new()
+        };
+
         let mut tx = self.pool.begin().await?;
         // Parents this row points to BEFORE the write (re-parenting uses before + after).
         let before = self.parent_targets(model, id).await?;
+
+        // Snapshot the OLD text of tracked columns, locking the row (FOR UPDATE) so the snapshot is
+        // exactly what THIS write overwrites — no stale/lost old value under a concurrent writer. The
+        // NEW values are re-read the same way (Postgres `::text`) after the UPDATE, so old/new diff in
+        // ONE representation: no false positive from Date/Datetime/Float/Decimal text-format mismatch.
+        let old_text = snapshot_text(&mut tx, model.table, &track_cols, id, true).await?;
 
         // 1) Scalar UPDATE of the provided columns (computed columns recomputed in step 3); the Write
         //    rule + company scope are enforced in the WHERE.
@@ -557,6 +572,10 @@ impl Db {
                 .await?;
             recompute_columns_on(&mut tx, model, id).await?;
         }
+
+        // Re-read the NEW text of tracked columns on the still-locked row (same `::text` rendering as
+        // the old snapshot). Tracked columns are non-computed, so the recompute above can't touch them.
+        let new_text = snapshot_text(&mut tx, model.table, &track_cols, id, false).await?;
         tx.commit().await?;
 
         // 4) Re-parenting: if this row is itself a child whose FK moved, recompute the old + new
@@ -567,6 +586,23 @@ impl Db {
             if !seen.iter().any(|&(n, p)| n == parent.name && p == pid) {
                 seen.push((parent.name, pid));
                 self.recompute_parent(&parent, pid).await?;
+            }
+        }
+
+        // 5) Field tracking: diff old vs new for tracked columns and record a chatter audit entry.
+        //    Best-effort and post-commit — the write is already durable, so a missing mail schema or
+        //    a tracking failure is logged, never propagated (would mislead the caller into a retry).
+        if !track_cols.is_empty() {
+            let mut changes: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+            for c in &track_cols {
+                let old_t = old_text.iter().find(|(k, _)| k == c).and_then(|(_, o)| o.clone());
+                let new_t = new_text.iter().find(|(k, _)| k == c).and_then(|(_, o)| o.clone());
+                if old_t != new_t {
+                    changes.push((c.to_string(), old_t, new_t));
+                }
+            }
+            if let Err(e) = self.write_tracking(model.name, id, ctx.uid, &changes).await {
+                eprintln!("meshble-db tracking write failed (write committed): {e:?}");
             }
         }
         Ok(affected)
@@ -948,17 +984,150 @@ impl Db {
     /// Deletes a record's mail thread across all thread tables. Tolerates a thread table not being
     /// migrated yet (the mail module may be linked but not installed) — nothing to clean, not an error.
     async fn cleanup_thread(&self, model_name: &str, id: i64) -> Result<(), DbError> {
+        // mail_tracking is keyed by message_id (not res_model/res_id): remove the record's tracking
+        // rows via its messages first, then the (res_model, res_id)-keyed thread tables.
+        self.exec_tolerant(
+            "DELETE FROM mail_tracking WHERE message_id IN (SELECT id FROM mail_message WHERE res_model = $1 AND res_id = $2)",
+            model_name, id,
+        ).await?;
         for table in THREAD_TABLES {
             let sql = format!("DELETE FROM {table} WHERE res_model = $1 AND res_id = $2");
-            match sqlx::query(&sql).bind(model_name).bind(id).execute(&self.pool).await {
+            self.exec_tolerant(&sql, model_name, id).await?;
+        }
+        Ok(())
+    }
+
+    /// Runs a `(res_model, res_id)`-parameterized DELETE, tolerating a missing table (42P01 →
+    /// nothing to clean). Any other error propagates.
+    async fn exec_tolerant(&self, sql: &str, model_name: &str, id: i64) -> Result<(), DbError> {
+        match sqlx::query(sql).bind(model_name).bind(id).execute(&self.pool).await {
+            Ok(_) => Ok(()),
+            Err(e) if is_undefined_table(&e) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Records a field-change audit entry in the chatter: one `notification` message on
+    /// `(model_name, res_id)` plus a typed `mail.tracking` row per change. Best-effort and run
+    /// AFTER the business write commits, so a missing mail schema or a tracking failure never aborts
+    /// or rolls back the user's write (see the call site in `update_secured`). Atomic in itself.
+    async fn write_tracking(
+        &self,
+        model_name: &str,
+        res_id: i64,
+        author: i64,
+        changes: &[(String, Option<String>, Option<String>)],
+    ) -> Result<(), DbError> {
+        if changes.is_empty() {
+            return Ok(());
+        }
+        let mut tx = self.pool.begin().await?;
+        let mid: i64 = match sqlx::query_scalar(
+            "INSERT INTO mail_message (res_model, res_id, author_id, message_type, date) \
+             VALUES ($1, $2, $3, 'notification', now()) RETURNING id",
+        )
+        .bind(model_name)
+        .bind(res_id)
+        .bind(author)
+        .fetch_one(&mut *tx)
+        .await
+        {
+            Ok(v) => v,
+            // mail schema not migrated → skip the audit entry entirely (nothing partial written).
+            Err(e) if is_undefined_table(&e) => return Ok(()),
+            Err(e) => return Err(e.into()),
+        };
+        for (field, old, new) in changes {
+            sqlx::query("INSERT INTO mail_tracking (message_id, field, old_value, new_value) VALUES ($1, $2, $3, $4)")
+                .bind(mid)
+                .bind(field)
+                .bind(old)
+                .bind(new)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The tracking rows for the given message ids, as JSON `{message_id, field, old_value,
+    /// new_value}` (ordered). Tolerates an unmigrated `mail_tracking`. For embedding audit entries
+    /// into a thread read.
+    pub async fn tracking_for(&self, message_ids: &[i64]) -> Result<Vec<Json>, DbError> {
+        if message_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let rows = match sqlx::query(
+            "SELECT message_id, field, old_value, new_value FROM mail_tracking WHERE message_id = ANY($1) ORDER BY id",
+        )
+        .bind(message_ids)
+        .fetch_all(&self.pool)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) if is_undefined_table(&e) => return Ok(vec![]),
+            Err(e) => return Err(e.into()),
+        };
+        Ok(rows
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "message_id": r.get::<i64, _>("message_id"),
+                    "field": r.get::<String, _>("field"),
+                    "old_value": r.get::<Option<String>, _>("old_value"),
+                    "new_value": r.get::<Option<String>, _>("new_value"),
+                })
+            })
+            .collect())
+    }
+
+    /// Creates the mail subsystem's lookup indexes (idempotent, tolerant of unmigrated tables): the
+    /// polymorphic `mail_message(res_model, res_id)` thread lookup and `mail_tracking(message_id)`.
+    /// The metamodel can't express indexes yet and the mail tables are a known framework concern, so
+    /// the framework ensures them directly — like the sequence schema. Run during migrate.
+    pub async fn ensure_mail_indexes(&self) -> Result<(), DbError> {
+        for sql in [
+            "CREATE INDEX IF NOT EXISTS mail_message_res_idx ON mail_message (res_model, res_id)",
+            "CREATE INDEX IF NOT EXISTS mail_tracking_message_idx ON mail_tracking (message_id)",
+        ] {
+            match sqlx::query(sql).execute(&self.pool).await {
                 Ok(_) => {}
-                // 42P01 = undefined_table: the thread table isn't migrated; skip it.
-                Err(e) if e.as_database_error().and_then(|d| d.code()).as_deref() == Some("42P01") => {}
+                Err(e) if is_undefined_table(&e) => {}
                 Err(e) => return Err(e.into()),
             }
         }
         Ok(())
     }
+}
+
+/// True iff the error is Postgres `undefined_table` (42P01) — a mail thread table not yet migrated.
+fn is_undefined_table(e: &sqlx::Error) -> bool {
+    e.as_database_error().and_then(|d| d.code()).as_deref() == Some("42P01")
+}
+
+/// Reads the given columns of one row as Postgres `::text` (None for NULL / absent row). Used for the
+/// tracking diff: rendering old and new through the SAME `::text` cast makes the comparison
+/// representation-independent (no Date/Datetime/Float text-format mismatch). `lock` adds FOR UPDATE so
+/// the old snapshot is exactly what the subsequent UPDATE overwrites.
+async fn snapshot_text(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    table: &str,
+    cols: &[&'static str],
+    id: i64,
+    lock: bool,
+) -> Result<Vec<(&'static str, Option<String>)>, DbError> {
+    if cols.is_empty() {
+        return Ok(Vec::new());
+    }
+    let list = cols.iter().map(|c| format!("{c}::text AS {c}")).collect::<Vec<_>>().join(", ");
+    let sql = format!("SELECT {list} FROM {table} WHERE id = $1{}", if lock { " FOR UPDATE" } else { "" });
+    let mut out = Vec::new();
+    if let Some(row) = sqlx::query(&sql).bind(id).fetch_optional(&mut **tx).await? {
+        for c in cols {
+            out.push((*c, row.try_get::<Option<String>, _>(*c).ok().flatten()));
+        }
+    }
+    Ok(out)
 }
 
 /// Mail subsystem thread tables, all keyed by the polymorphic `(res_model, res_id)` link. Cleaned up

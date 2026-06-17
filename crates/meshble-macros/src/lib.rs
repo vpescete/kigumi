@@ -51,6 +51,8 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
     let group_submits = field_group_submits(&model_name, fields)?;
     // Related fields: emit a RelatedRegistration for every `#[field(related = "...")]`.
     let related_submits = related_submits(&model_name, fields)?;
+    // Tracked fields: emit a TrackedFieldRegistration for every `#[field(tracked)]`.
+    let tracked_submits = tracked_submits(&model_name, fields)?;
 
     let vis = &input.vis;
     let ident = &input.ident;
@@ -80,6 +82,7 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
 
         #(#group_submits)*
         #(#related_submits)*
+        #(#tracked_submits)*
     })
 }
 
@@ -136,6 +139,32 @@ fn related_submits(
         out.push(quote! {
             ::meshble::inventory::submit! {
                 ::meshble::prelude::RelatedRegistration { model: #model_name, field: #fname, path: #path }
+            }
+        });
+    }
+    Ok(out)
+}
+
+/// Emits a `TrackedFieldRegistration` for each field carrying the `#[field(tracked)]` flag.
+fn tracked_submits(
+    model_name: &str,
+    fields: &Punctuated<syn::Field, Token![,]>,
+) -> syn::Result<Vec<TokenStream2>> {
+    let mut out = Vec::new();
+    for f in fields {
+        let fname = f.ident.as_ref().ok_or_else(|| err(f, "field without a name"))?.to_string();
+        let mut metas: Vec<Meta> = Vec::new();
+        for a in &f.attrs {
+            if a.path().is_ident("field") {
+                metas.extend(a.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?);
+            }
+        }
+        if !meta_flag(&metas, "tracked") {
+            continue;
+        }
+        out.push(quote! {
+            ::meshble::inventory::submit! {
+                ::meshble::prelude::TrackedFieldRegistration { model: #model_name, field: #fname }
             }
         });
     }

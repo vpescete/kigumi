@@ -19,7 +19,8 @@ use axum::{
 use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{
-    is_mailed, Acl, Condition, Ctx, Domain, FieldKind, Operator, RecordRule, ResolvedModel, Value,
+    field_accessible, is_mailed, Acl, Condition, Ctx, Domain, FieldKind, Operator, RecordRule,
+    ResolvedModel, Value,
 };
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
@@ -518,7 +519,47 @@ async fn messages_handler(
     let su = ctx.sudo();
     let filter = thread_filter(&name, id);
     match backend.db.find_secured(mail, &su, backend.acls, backend.rules, Some(&filter)).await {
-        Ok(rows) => json_response(serde_json::json!({ "data": rows }).to_string()),
+        Ok(rows) => {
+            // Embed each message's field-change audit (mail.tracking) so a notification message
+            // carries its old→new diffs — one thread payload, comments and audit uniform.
+            let ids: Vec<i64> = rows.iter().filter_map(|m| m.get("id").and_then(|v| v.as_i64())).collect();
+            let tracking = match backend.db.tracking_for(&ids).await {
+                Ok(t) => t,
+                Err(e) => {
+                    // A DB error here must not be hidden as "no audit"; log it (the messages still return).
+                    eprintln!("meshble-server messages tracking enrichment failed: {e:?}");
+                    Vec::new()
+                }
+            };
+            // D6: redact tracking of fields the caller may not read (field-level security). The audit
+            // trail must not become a second, unguarded read channel for group-restricted field values.
+            let mut by_msg: HashMap<i64, Vec<Json2>> = HashMap::new();
+            for t in tracking {
+                let readable = t
+                    .get("field")
+                    .and_then(|v| v.as_str())
+                    .map(|f| field_accessible(&name, f, &ctx))
+                    .unwrap_or(false);
+                if !readable {
+                    continue;
+                }
+                if let Some(mid) = t.get("message_id").and_then(|v| v.as_i64()) {
+                    by_msg.entry(mid).or_default().push(t);
+                }
+            }
+            let enriched: Vec<Json2> = rows
+                .into_iter()
+                .map(|mut m| {
+                    if let Some(mid) = m.get("id").and_then(|v| v.as_i64()) {
+                        if let Some(obj) = m.as_object_mut() {
+                            obj.insert("tracking".into(), Json2::Array(by_msg.remove(&mid).unwrap_or_default()));
+                        }
+                    }
+                    m
+                })
+                .collect();
+            json_response(serde_json::json!({ "data": enriched }).to_string())
+        }
         Err(DbError::AccessDenied { .. }) => (StatusCode::FORBIDDEN, "access denied").into_response(),
         Err(e) => internal_error("messages", e),
     }

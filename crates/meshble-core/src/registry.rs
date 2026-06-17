@@ -80,6 +80,24 @@ pub fn is_mailed(model: &str) -> bool {
     inventory::iter::<MailedRegistration>.into_iter().any(|e| e.model == model)
 }
 
+/// A field whose changes are tracked in the chatter (Odoo's `tracking=True`). When a write changes
+/// it on a mailed model, the write path records a `notification` message + a typed `mail.tracking`
+/// row (old → new). Emitted by `#[field(tracked)]`. Compile-time, not runtime `track_visibility`.
+pub struct TrackedFieldRegistration {
+    pub model: &'static str,
+    pub field: &'static str,
+}
+inventory::collect!(TrackedFieldRegistration);
+
+/// The names of `model`'s tracked fields (changes recorded in the chatter on write).
+pub fn tracked_fields(model: &str) -> Vec<&'static str> {
+    inventory::iter::<TrackedFieldRegistration>
+        .into_iter()
+        .filter(|e| e.model == model)
+        .map(|e| e.field)
+        .collect()
+}
+
 /// A related field (Odoo `related=`): a NON-stored, read-only mirror of a value reached by following
 /// a relational `path` (e.g. `order_id.currency_id`). Registered out-of-band (emitted by
 /// `#[field(related = "...")]`) so it adds no column to the metamodel — the value is resolved at read
