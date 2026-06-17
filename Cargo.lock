@@ -940,6 +940,7 @@ dependencies = [
  "meshble-mod-base",
  "meshble-mod-sales",
  "meshble-server",
+ "serde_json",
  "tokio",
 ]
 

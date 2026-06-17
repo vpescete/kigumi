@@ -22,3 +22,4 @@ meshble-mod-sales = { path = "../../modules/sales" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 axum = "0.7"
 clap = { version = "4", features = ["derive"] }
+serde_json = "1"

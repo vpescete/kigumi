@@ -185,6 +185,34 @@ async fn migrate(db: &Db) -> Fallible {
         db.install_or_upgrade(&t.model, t.model.name, &t.version, &[]).await?;
         println!("migrated {} ({} {})", t.model.name, t.module, t.version);
     }
+    seed_base_data(db).await?;
+    Ok(())
+}
+
+/// Seeds one default currency + company on a fresh instance (multi-company needs a company to exist).
+async fn seed_base_data(db: &Db) -> Fallible {
+    let currency = match resolve_registered("res.currency") {
+        Ok(m) => m,
+        Err(_) => return Ok(()), // base module not linked → nothing to seed
+    };
+    let company = resolve_registered("res.company").map_err(|e| e.to_string())?;
+    let su = Ctx::new(0, vec![]).sudo();
+
+    let cur_id = if db.count_secured(&currency, &su, &[], &[], None).await? == 0 {
+        let v = serde_json::json!({
+            "name": "Euro", "code": "EUR", "symbol": "€",
+            "decimal_places": 2, "rounding": 0.01, "position": "after", "active": true
+        });
+        db.insert_secured(&currency, &su, &[], &[], v.as_object().unwrap()).await?
+    } else {
+        db.find_ids_secured(&currency, &su, &[], &[], None).await?[0]
+    };
+
+    if db.count_secured(&company, &su, &[], &[], None).await? == 0 {
+        let v = serde_json::json!({ "name": "Main Company", "currency_id": cur_id, "active": true });
+        db.insert_secured(&company, &su, &[], &[], v.as_object().unwrap()).await?;
+        println!("seeded default company + currency");
+    }
     Ok(())
 }
 

@@ -71,36 +71,85 @@ pub struct MigrationTarget {
     pub model: ResolvedModel,
 }
 
-/// The full migration plan in MODULE DEPENDENCY ORDER (so a model's FK targets — e.g. res.partner
-/// for sale.order — are created before the referencing table). Within a module, models are sorted
-/// by name for determinism.
+/// The full migration plan, TOPOLOGICALLY SORTED by Many2one FK dependencies (a model's FK targets
+/// — e.g. res.currency/res.partner for res.company — are created before the referencing table).
+/// Self-references are ignored (a table may reference itself in its own CREATE); a genuine FK cycle
+/// between two tables is an error. Ties break by (module dependency order, model name) for
+/// determinism. Each target carries its owning module's name + version for the migration ledger.
 pub fn migration_plan() -> Result<Vec<MigrationTarget>, String> {
-    let modules = resolve_modules().map_err(|e| format!("{e:?}"))?;
+    let modules = resolve_modules().map_err(|e| format!("{e:?}"))?; // validates the module graph
     let regs: Vec<&'static ModuleRegistration> = inventory::iter::<ModuleRegistration>.into_iter().collect();
-    let mut plan = Vec::new();
-    for m in &modules {
-        // The crate that registered this manifest; its models share its module_path prefix.
-        let crate_path = regs
-            .iter()
-            .find(|r| (r.manifest)().name == m.name)
-            .map(|r| r.crate_path)
-            .unwrap_or("");
-        let prefix = format!("{crate_path}::");
-        let mut names: Vec<&'static str> = inventory::iter::<ModelRegistration>
+
+    // Owning (module name, version) for a model, via its registration's module_path prefix.
+    let owner = |model_name: &str| -> (&'static str, String) {
+        let model_path = inventory::iter::<ModelRegistration>
             .into_iter()
-            .filter(|r| r.module == crate_path || r.module.starts_with(&prefix))
-            .map(|r| r.name)
-            .collect();
-        names.sort_unstable();
-        for n in names {
-            plan.push(MigrationTarget {
-                module: m.name,
-                version: m.version.to_string(),
-                model: resolve_registered(n)?,
-            });
+            .find(|r| r.name == model_name)
+            .map(|r| r.module)
+            .unwrap_or("");
+        for r in &regs {
+            if model_path == r.crate_path || model_path.starts_with(&format!("{}::", r.crate_path)) {
+                let m = (r.manifest)();
+                return (m.name, m.version.to_string());
+            }
+        }
+        ("", FRAMEWORK_VERSION.to_string())
+    };
+
+    let names = registered_model_names(); // sorted
+    let n = names.len();
+    let index: std::collections::HashMap<&str, usize> =
+        names.iter().enumerate().map(|(i, &nm)| (nm, i)).collect();
+    let models: Vec<ResolvedModel> =
+        names.iter().map(|nm| resolve_registered(nm)).collect::<Result<_, _>>()?;
+
+    // FK edges: model i needs each registered Many2one target created first.
+    let mut indeg = vec![0usize; n];
+    let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, m) in models.iter().enumerate() {
+        for f in &m.fields {
+            if let crate::FieldKind::Many2one { target } = f.kind {
+                if let Some(&j) = index.get(target) {
+                    if j != i {
+                        indeg[i] += 1;
+                        dependents[j].push(i);
+                    }
+                }
+            }
         }
     }
-    Ok(plan)
+
+    let module_rank: std::collections::HashMap<&str, usize> =
+        modules.iter().enumerate().map(|(i, m)| (m.name, i)).collect();
+    let rank = |i: usize| -> (usize, &'static str) {
+        (*module_rank.get(owner(names[i]).0).unwrap_or(&usize::MAX), names[i])
+    };
+
+    // Kahn's algorithm; process ready nodes smallest-rank first.
+    let mut ready: Vec<usize> = (0..n).filter(|&i| indeg[i] == 0).collect();
+    let mut order: Vec<usize> = Vec::with_capacity(n);
+    while !ready.is_empty() {
+        ready.sort_by(|&a, &b| rank(b).cmp(&rank(a))); // descending → pop() yields the smallest
+        let i = ready.pop().unwrap();
+        order.push(i);
+        for &k in &dependents[i] {
+            indeg[k] -= 1;
+            if indeg[k] == 0 {
+                ready.push(k);
+            }
+        }
+    }
+    if order.len() != n {
+        return Err("cyclic Many2one FK dependency among models (cannot order migration)".to_string());
+    }
+
+    Ok(order
+        .into_iter()
+        .map(|i| {
+            let (module, version) = owner(names[i]);
+            MigrationTarget { module, version, model: models[i].clone() }
+        })
+        .collect())
 }
 
 /// Resolves every module registered in the catalog: framework compatibility, dependency
