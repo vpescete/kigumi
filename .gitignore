@@ -5,3 +5,6 @@
 # Instance config & secrets (real files — keep only the .example)
 /meshble.toml
 .env
+
+# Local Claude session state
+.claude/
