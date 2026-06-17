@@ -48,8 +48,34 @@ enum Cmd {
         #[command(subcommand)]
         action: UserCmd,
     },
+    /// Manage runtime ACL overrides (additive on top of the compiled-in baseline).
+    Acl {
+        #[command(subcommand)]
+        action: AclCmd,
+    },
     /// Print the framework version and the linked modules.
     Version,
+}
+
+#[derive(Subcommand)]
+enum AclCmd {
+    /// Grant (or update) a runtime ACL for a group on a model. Flags pick the operations.
+    Grant {
+        model: String,
+        group: String,
+        #[arg(long)]
+        read: bool,
+        #[arg(long)]
+        write: bool,
+        #[arg(long)]
+        create: bool,
+        #[arg(long)]
+        delete: bool,
+    },
+    /// Remove a runtime ACL override for a group on a model (the static baseline is unaffected).
+    Revoke { model: String, group: String },
+    /// List the effective ACLs: the compiled-in baseline + the runtime DB overrides.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -169,6 +195,12 @@ async fn run(cli: Cli) -> Fallible {
             db.ensure_auth_schema().await?;
             user_command(&db, action).await
         }
+        Cmd::Acl { action } => {
+            let s = Settings::load(Some(&path))?;
+            let db = Db::connect(&s.secrets.database_url).await?;
+            db.ensure_access_schema().await?;
+            acl_command(&db, action).await
+        }
         Cmd::Serve => {
             let s = Settings::load(Some(&path))?;
             let db = Db::connect(&s.secrets.database_url).await?;
@@ -184,6 +216,7 @@ async fn migrate(db: &Db) -> Fallible {
     db.ensure_auth_schema().await?;
     db.ensure_sequence_schema().await?;
     db.ensure_setting_schema().await?;
+    db.ensure_access_schema().await?;
     // Install-time runtime defaults (DB is the authority; never overwrites an operator change).
     db.seed_setting("base_url", "", "string").await?;
     db.seed_setting("mode", "production", "string").await?;
@@ -259,12 +292,22 @@ async fn bootstrap_admin(db: &Db) -> Fallible {
 
 async fn serve(s: Settings) -> Fallible {
     let models = resolve_all_registered().map_err(|e| e.to_string())?;
-    // Collected once at startup and given the process lifetime (server holds them for &'static).
-    let acls: &'static [Acl] = Box::leak(registered_acls().into_boxed_slice());
-    let rules: &'static [RecordRule] = Box::leak(registered_rules().into_boxed_slice());
-
     let bind = s.config.server.bind.clone();
     let db = Db::connect(&s.secrets.database_url).await?;
+
+    // Effective ACLs = compiled-in baseline ∪ runtime DB overrides (hybrid, D12). DB grants only
+    // widen access (union), so the static baseline stays a floor. Collected once at startup and
+    // given the process lifetime (the server holds them for `'static`).
+    db.ensure_access_schema().await?;
+    let mut all_acls = registered_acls();
+    let db_acls = db.load_acls_static().await?;
+    let db_acl_count = db_acls.len();
+    all_acls.extend(db_acls);
+    let acls: &'static [Acl] = Box::leak(all_acls.into_boxed_slice());
+    let rules: &'static [RecordRule] = Box::leak(registered_rules().into_boxed_slice());
+    if db_acl_count > 0 {
+        println!("loaded {db_acl_count} runtime ACL override(s)");
+    }
     let app = router_with_data(models, db, acls, rules, s.secrets.jwt_secret.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
@@ -311,4 +354,45 @@ fn password_or_env(flag: Option<String>) -> Result<String, Box<dyn std::error::E
     flag.or_else(|| std::env::var("MESHBLE_NEW_PASSWORD").ok())
         .filter(|p| !p.is_empty())
         .ok_or_else(|| "no password: pass --password or set MESHBLE_NEW_PASSWORD".into())
+}
+
+fn flags(read: bool, write: bool, create: bool, delete: bool) -> String {
+    let mut on: Vec<&str> = Vec::new();
+    for (name, set) in [("read", read), ("write", write), ("create", create), ("delete", delete)] {
+        if set {
+            on.push(name);
+        }
+    }
+    if on.is_empty() { "none".to_string() } else { on.join(",") }
+}
+
+async fn acl_command(db: &Db, action: AclCmd) -> Fallible {
+    match action {
+        AclCmd::Grant { model, group, read, write, create, delete } => {
+            if !(read || write || create || delete) {
+                return Err("grant at least one of --read/--write/--create/--delete".into());
+            }
+            db.set_db_acl(&model, &group, read, write, create, delete).await?;
+            println!("acl: '{group}' on '{model}' = {}", flags(read, write, create, delete));
+        }
+        AclCmd::Revoke { model, group } => {
+            db.remove_db_acl(&model, &group).await?;
+            println!("acl override removed: '{group}' on '{model}' (static baseline unchanged)");
+        }
+        AclCmd::List => {
+            println!("[compiled-in baseline]");
+            for a in registered_acls() {
+                println!("  {} / {} = {}", a.model, a.group, flags(a.read, a.write, a.create, a.delete));
+            }
+            let db_acls = db.list_db_acls().await?;
+            println!("[runtime DB overrides]");
+            if db_acls.is_empty() {
+                println!("  (none)");
+            }
+            for a in db_acls {
+                println!("  {} / {} = {}", a.model, a.group, flags(a.read, a.write, a.create, a.delete));
+            }
+        }
+    }
+    Ok(())
 }

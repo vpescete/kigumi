@@ -6,10 +6,12 @@
 //! database boundary: access is checked, and the user's record-rule domain is AND-ed into the
 //! query — so a user can never read rows the rules forbid.
 
+mod access_store;
 mod auth_store;
 mod migration;
 mod sequence;
 mod settings;
+pub use access_store::AclRow;
 pub use auth_store::UserRow;
 pub use migration::{Migration, MigrationOutcome};
 
