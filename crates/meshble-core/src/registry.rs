@@ -94,7 +94,7 @@ pub fn registered_acls() -> Vec<Acl> {
 pub fn registered_rules() -> Vec<RecordRule> {
     inventory::iter::<RecordRuleRegistration>
         .into_iter()
-        .flat_map(|r| (r.rules)().iter().copied())
+        .flat_map(|r| (r.rules)().iter().cloned())
         .collect()
 }
 

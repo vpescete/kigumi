@@ -7,7 +7,7 @@ use axum::Router;
 use http_body_util::BodyExt;
 use meshble_auth::Authenticator;
 use meshble_core::{
-    resolve, Acl, Domain, FieldDef, FieldKind, ModelDescriptor, Operation, RecordRule,
+    resolve, Acl, Domain, FieldDef, FieldKind, ModelDescriptor, Operation, RecordRule, RuleDomain,
     ResolvedModel,
 };
 use meshble_db::Db;
@@ -44,7 +44,7 @@ static ACLS: &[Acl] = &[Acl {
     model: "widget", group: "u", read: true, write: false, create: false, delete: false,
 }];
 static RULES: &[RecordRule] = &[RecordRule {
-    model: "widget", groups: &["u"], ops: &[Operation::Read], domain: active_only,
+    model: "widget", groups: &["u"], ops: &[Operation::Read], domain: RuleDomain::Static(active_only),
 }];
 
 fn model() -> ResolvedModel {
@@ -124,8 +124,8 @@ static WRITE_ACLS: &[Acl] = &[Acl {
     model: "widget", group: "u", read: true, write: true, create: true, delete: true,
 }];
 static WRITE_RULES: &[RecordRule] = &[
-    RecordRule { model: "widget", groups: &["u"], ops: &[Operation::Write], domain: active_only },
-    RecordRule { model: "widget", groups: &["u"], ops: &[Operation::Delete], domain: active_only },
+    RecordRule { model: "widget", groups: &["u"], ops: &[Operation::Write], domain: RuleDomain::Static(active_only) },
+    RecordRule { model: "widget", groups: &["u"], ops: &[Operation::Delete], domain: RuleDomain::Static(active_only) },
 ];
 
 async fn req(app: Router, method: &str, uri: &str, groups: Option<&str>, body: Option<&str>) -> (StatusCode, String) {

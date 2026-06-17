@@ -4,7 +4,7 @@
 
 use meshble_core::{
     resolve, Acl, ComputeInput, Ctx, Domain, FieldDef, FieldKind, ModelDescriptor,
-    ModelRegistration, Operation, RecordRule, ResolvedModel, Value,
+    ModelRegistration, Operation, RecordRule, RuleDomain, ResolvedModel, Value,
 };
 use meshble_db::Db;
 
@@ -279,7 +279,7 @@ fn line_price_min() -> Domain {
 }
 // Create rule on the CHILD: a line is only creatable if price >= 10.
 static PRICE_RULES: &[RecordRule] = &[RecordRule {
-    model: "nst.line", groups: &["u"], ops: &[Operation::Create], domain: line_price_min,
+    model: "nst.line", groups: &["u"], ops: &[Operation::Create], domain: RuleDomain::Static(line_price_min),
 }];
 
 #[tokio::test]

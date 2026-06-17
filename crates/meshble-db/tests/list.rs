@@ -3,7 +3,7 @@
 
 use meshble_core::{
     resolve, Acl, Ctx, Domain, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, Operation,
-    RecordRule, ResolvedModel,
+    RecordRule, RuleDomain, ResolvedModel,
 };
 use meshble_db::Db;
 
@@ -73,7 +73,7 @@ async fn list_secured_filters_sorts_paginates_and_totals() {
     // The total respects the read record rule (active = true): only 4 of 5 rows are visible.
     let ctx = Ctx::new(1, vec!["u".to_string()]);
     let acls = [Acl { model: "lst.item", group: "u", read: true, write: false, create: false, delete: false }];
-    let rules = [RecordRule { model: "lst.item", groups: &["u"], ops: &[Operation::Read], domain: active_only }];
+    let rules = [RecordRule { model: "lst.item", groups: &["u"], ops: &[Operation::Read], domain: RuleDomain::Static(active_only) }];
     let p = db.list_secured(&m, &ctx, &acls, &rules, None, &[], 80, 0).await.unwrap();
     assert_eq!(p.total, 4, "total counts only rule-visible rows");
     assert_eq!(p.data.len(), 4);

@@ -11,7 +11,7 @@ mod auth_store;
 mod migration;
 mod sequence;
 mod settings;
-pub use access_store::AclRow;
+pub use access_store::{AclRow, RuleRow};
 pub use auth_store::UserRow;
 pub use migration::{Migration, MigrationOutcome};
 

@@ -53,8 +53,32 @@ enum Cmd {
         #[command(subcommand)]
         action: AclCmd,
     },
+    /// Manage runtime record rules (additive on top of the compiled-in baseline).
+    Rule {
+        #[command(subcommand)]
+        action: RuleCmd,
+    },
     /// Print the framework version and the linked modules.
     Version,
+}
+
+#[derive(Subcommand)]
+enum RuleCmd {
+    /// Add a runtime record rule. --groups is a CSV (empty = global); --ops a CSV of r/w/c/d;
+    /// --domain the portable JSON AST, e.g. '{"field":"state","op":"!=","value":"done"}'.
+    Add {
+        model: String,
+        #[arg(long, default_value = "")]
+        groups: String,
+        #[arg(long, default_value = "r")]
+        ops: String,
+        #[arg(long)]
+        domain: String,
+    },
+    /// Remove a runtime record rule by id (the static baseline is unaffected).
+    Remove { id: i64 },
+    /// List the runtime DB record rules.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -201,6 +225,12 @@ async fn run(cli: Cli) -> Fallible {
             db.ensure_access_schema().await?;
             acl_command(&db, action).await
         }
+        Cmd::Rule { action } => {
+            let s = Settings::load(Some(&path))?;
+            let db = Db::connect(&s.secrets.database_url).await?;
+            db.ensure_access_schema().await?;
+            rule_command(&db, action).await
+        }
         Cmd::Serve => {
             let s = Settings::load(Some(&path))?;
             let db = Db::connect(&s.secrets.database_url).await?;
@@ -305,8 +335,9 @@ async fn serve(s: Settings) -> Fallible {
     let bind = s.config.server.bind.clone();
     let db = Db::connect(&s.secrets.database_url).await?;
 
-    // Effective ACLs = compiled-in baseline ∪ runtime DB overrides (hybrid, D12). DB grants only
-    // widen access (union), so the static baseline stays a floor. Collected once at startup and
+    // Effective access = compiled-in baseline ∪ runtime DB overrides (hybrid, D12). For ACLs the DB
+    // rows only widen access (union); for record rules they add restrictions/alternatives through the
+    // same engine — either way the static baseline stays in force. Collected once at startup and
     // given the process lifetime (the server holds them for `'static`).
     db.ensure_access_schema().await?;
     let mut all_acls = registered_acls();
@@ -314,9 +345,15 @@ async fn serve(s: Settings) -> Fallible {
     let db_acl_count = db_acls.len();
     all_acls.extend(db_acls);
     let acls: &'static [Acl] = Box::leak(all_acls.into_boxed_slice());
-    let rules: &'static [RecordRule] = Box::leak(registered_rules().into_boxed_slice());
-    if db_acl_count > 0 {
-        println!("loaded {db_acl_count} runtime ACL override(s)");
+
+    let mut all_rules = registered_rules();
+    let db_rules = db.load_rules_static().await?;
+    let db_rule_count = db_rules.len();
+    all_rules.extend(db_rules);
+    let rules: &'static [RecordRule] = Box::leak(all_rules.into_boxed_slice());
+
+    if db_acl_count > 0 || db_rule_count > 0 {
+        println!("loaded {db_acl_count} runtime ACL override(s), {db_rule_count} runtime rule(s)");
     }
     let app = router_with_data(models, db, acls, rules, s.secrets.jwt_secret.clone());
 
@@ -401,6 +438,32 @@ async fn acl_command(db: &Db, action: AclCmd) -> Fallible {
             }
             for a in db_acls {
                 println!("  {} / {} = {}", a.model, a.group, flags(a.read, a.write, a.create, a.delete));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn rule_command(db: &Db, action: RuleCmd) -> Fallible {
+    match action {
+        RuleCmd::Add { model, groups, ops, domain } => {
+            let id = db.set_db_rule(&model, &groups, &ops, &domain).await?;
+            let scope = if groups.trim().is_empty() { "global".to_string() } else { format!("groups={groups}") };
+            println!("rule #{id} added on '{model}' ({scope}, ops={ops})");
+        }
+        RuleCmd::Remove { id } => {
+            db.remove_db_rule(id).await?;
+            println!("rule #{id} removed (static baseline unchanged)");
+        }
+        RuleCmd::List => {
+            let rules = db.list_db_rules().await?;
+            if rules.is_empty() {
+                println!("(no runtime rules)");
+            }
+            for r in rules {
+                let scope = if r.groups.trim().is_empty() { "global".to_string() } else { format!("groups={}", r.groups) };
+                let act = if r.active { "" } else { " [inactive]" };
+                println!("  #{} {} ({}, ops={}){}  {}", r.id, r.model, scope, r.ops, act, r.domain);
             }
         }
     }

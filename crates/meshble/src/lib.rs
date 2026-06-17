@@ -16,7 +16,7 @@ pub mod prelude {
         Ctx, Domain, DomainError, ExternalTable, FieldBuilder, FieldDef, FieldExtension,
         FieldGroupRegistration, FieldKind, MigrationTarget, Model, ModelDescriptor,
         ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
-        RecordRule, RecordRuleRegistration, ResolutionError, ResolvedModel, Sql, Value,
+        RecordRule, RecordRuleRegistration, ResolutionError, ResolvedModel, RuleDomain, Sql, Value,
         FRAMEWORK_VERSION,
     };
     pub use meshble_macros::{extend, model};

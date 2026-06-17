@@ -4,7 +4,7 @@
 
 use meshble_core::{
     resolve, Acl, Ctx, Domain, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, Operation,
-    RecordRule, ResolvedModel,
+    RecordRule, RuleDomain, ResolvedModel,
 };
 use meshble_db::Db;
 
@@ -40,7 +40,7 @@ static ACLS: &[Acl] = &[Acl {
     model: "rel.doc", group: "u", read: true, write: false, create: false, delete: false,
 }];
 static RULES: &[RecordRule] = &[RecordRule {
-    model: "rel.doc", groups: &["u"], ops: &[Operation::Read], domain: acme_only,
+    model: "rel.doc", groups: &["u"], ops: &[Operation::Read], domain: RuleDomain::Static(acme_only),
 }];
 
 fn doc_model() -> ResolvedModel {
@@ -115,7 +115,7 @@ static P_ACLS: &[Acl] = &[Acl {
     model: "p.doc", group: "u", read: true, write: false, create: false, delete: false,
 }];
 static P_RULES: &[RecordRule] = &[RecordRule {
-    model: "p.doc", groups: &["u"], ops: &[Operation::Read], domain: not_blocked,
+    model: "p.doc", groups: &["u"], ops: &[Operation::Read], domain: RuleDomain::Static(not_blocked),
 }];
 
 #[tokio::test]

@@ -37,14 +37,33 @@ impl Acl {
     }
 }
 
+/// The domain source of a [`RecordRule`]. A compile-time module rule uses `Static` (a thunk, because
+/// a [`Domain`] is not const-constructible); a runtime DB-loaded rule (D12) uses `Owned`, holding a
+/// domain parsed at load time. The engine treats both identically — only where the domain comes from
+/// differs, so static and DB rules merge into one list with no special-casing.
+#[derive(Clone)]
+pub enum RuleDomain {
+    Static(fn() -> Domain),
+    Owned(Domain),
+}
+
+impl RuleDomain {
+    /// Materializes the rule's domain (calls the thunk, or clones the owned value).
+    pub fn resolve(&self) -> Domain {
+        match self {
+            RuleDomain::Static(f) => f(),
+            RuleDomain::Owned(d) => d.clone(),
+        }
+    }
+}
+
 /// Row-level rule (the `ir.rule` analog). `groups` empty = global (applies to everyone).
-/// `domain` is a thunk because a [`Domain`] is not const-constructible.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct RecordRule {
     pub model: &'static str,
     pub groups: &'static [&'static str],
     pub ops: &'static [Operation],
-    pub domain: fn() -> Domain,
+    pub domain: RuleDomain,
 }
 
 /// Evaluation context: who is acting, and whether checks are bypassed.
@@ -159,9 +178,9 @@ pub fn record_rule_domain(
     let mut group_rules: Vec<Domain> = Vec::new();
     for r in applicable {
         if r.groups.is_empty() {
-            globals.push((r.domain)());
+            globals.push(r.domain.resolve());
         } else if r.groups.iter().any(|g| ctx.is_member(g)) {
-            group_rules.push((r.domain)());
+            group_rules.push(r.domain.resolve());
         }
     }
 
@@ -206,13 +225,13 @@ mod tests {
 
     static RULES: &[RecordRule] = &[
         // Global rule: nobody reads "done" orders in this view.
-        RecordRule { model: "sale.order", groups: &[], ops: &[Operation::Read], domain: not_done },
+        RecordRule { model: "sale.order", groups: &[], ops: &[Operation::Read], domain: RuleDomain::Static(not_done) },
         // Group rule: juniors only see small orders.
         RecordRule {
             model: "sale.order",
             groups: &["sales.user"],
             ops: &[Operation::Read],
-            domain: small_orders,
+            domain: RuleDomain::Static(small_orders),
         },
     ];
 

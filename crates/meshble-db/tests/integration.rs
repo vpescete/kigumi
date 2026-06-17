@@ -2,7 +2,7 @@
 //! Set `DATABASE_URL` (e.g. `postgres://user@127.0.0.1/meshble_test`) to run it; skipped otherwise.
 
 use meshble_core::{
-    resolve, Acl, Ctx, Domain, FieldDef, FieldKind, ModelDescriptor, Operation, RecordRule,
+    resolve, Acl, Ctx, Domain, FieldDef, FieldKind, ModelDescriptor, Operation, RecordRule, RuleDomain,
     ResolvedModel,
 };
 use meshble_db::{Db, DbError};
@@ -90,7 +90,7 @@ static ACLS: &[Acl] = &[Acl {
     model: "widget", group: "u", read: true, write: false, create: false, delete: false,
 }];
 static RULES: &[RecordRule] = &[RecordRule {
-    model: "widget", groups: &["u"], ops: &[Operation::Read], domain: active_only,
+    model: "widget", groups: &["u"], ops: &[Operation::Read], domain: RuleDomain::Static(active_only),
 }];
 
 #[tokio::test]

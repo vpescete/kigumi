@@ -170,20 +170,20 @@ pub static UI_RULES: &[FieldRule] = &[FieldRule {
 
 /// Row-level rules: everyone is restricted to non-"done" orders; juniors only see small ones.
 pub static RECORD_RULES: &[RecordRule] = &[
-    RecordRule { model: "sale.order", groups: &[], ops: &[Operation::Read], domain: not_done },
+    RecordRule { model: "sale.order", groups: &[], ops: &[Operation::Read], domain: RuleDomain::Static(not_done) },
     RecordRule {
         model: "sale.order",
         groups: &["sales.user"],
         ops: &[Operation::Read],
-        domain: small_orders,
+        domain: RuleDomain::Static(small_orders),
     },
     // Same restrictions on the lines, reached through their order.
-    RecordRule { model: "sale.order.line", groups: &[], ops: &[Operation::Read], domain: line_parent_not_done },
+    RecordRule { model: "sale.order.line", groups: &[], ops: &[Operation::Read], domain: RuleDomain::Static(line_parent_not_done) },
     RecordRule {
         model: "sale.order.line",
         groups: &["sales.user"],
         ops: &[Operation::Read],
-        domain: line_parent_small,
+        domain: RuleDomain::Static(line_parent_small),
     },
 ];
 
