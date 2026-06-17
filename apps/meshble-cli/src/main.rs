@@ -56,8 +56,17 @@ enum Cmd {
 enum ConfigCmd {
     /// Validate the effective configuration.
     Check,
-    /// Print the effective configuration with secrets redacted.
+    /// Print the effective configuration (secrets redacted) + runtime settings from the DB.
     Print,
+    /// Set a runtime setting (stored in the DB — the authority for runtime keys).
+    Set {
+        key: String,
+        value: String,
+        #[arg(long, default_value = "string")]
+        vtype: String,
+    },
+    /// Get a runtime setting's value.
+    Get { key: String },
 }
 
 #[derive(Subcommand)]
@@ -107,7 +116,29 @@ async fn run(cli: Cli) -> Fallible {
             let s = Settings::load(Some(&path))?;
             match action {
                 ConfigCmd::Check => println!("ok: configuration is valid"),
-                ConfigCmd::Print => print!("{}", s.redacted()),
+                ConfigCmd::Print => {
+                    print!("{}", s.redacted());
+                    let db = Db::connect(&s.secrets.database_url).await?;
+                    db.ensure_setting_schema().await?;
+                    println!("[runtime settings (DB)]");
+                    for (k, v, t) in db.all_settings().await? {
+                        println!("  {k} = {v}  ({t})");
+                    }
+                }
+                ConfigCmd::Set { key, value, vtype } => {
+                    let db = Db::connect(&s.secrets.database_url).await?;
+                    db.ensure_setting_schema().await?;
+                    db.set_setting(&key, &value, &vtype).await?;
+                    println!("set {key} = {value}");
+                }
+                ConfigCmd::Get { key } => {
+                    let db = Db::connect(&s.secrets.database_url).await?;
+                    db.ensure_setting_schema().await?;
+                    match db.get_setting(&key).await? {
+                        Some(v) => println!("{v}"),
+                        None => eprintln!("(unset)"),
+                    }
+                }
             }
             Ok(())
         }
@@ -142,6 +173,11 @@ async fn run(cli: Cli) -> Fallible {
 /// Migrates every linked module's models in dependency order (FK targets first), plus the auth schema.
 async fn migrate(db: &Db) -> Fallible {
     db.ensure_auth_schema().await?;
+    db.ensure_sequence_schema().await?;
+    db.ensure_setting_schema().await?;
+    // Install-time runtime defaults (DB is the authority; never overwrites an operator change).
+    db.seed_setting("base_url", "", "string").await?;
+    db.seed_setting("mode", "production", "string").await?;
     let plan = migration_plan().map_err(|e| e.to_string())?;
     for t in &plan {
         // Ledger key is the model name: each model/table is its own migration unit (install_or_upgrade

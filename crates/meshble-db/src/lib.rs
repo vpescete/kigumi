@@ -8,6 +8,8 @@
 
 mod auth_store;
 mod migration;
+mod sequence;
+mod settings;
 pub use auth_store::UserRow;
 pub use migration::{Migration, MigrationOutcome};
 
