@@ -624,13 +624,14 @@ impl Db {
         if cols.is_empty() {
             return Ok(());
         }
-        // Read the current child (and verify it belongs to THIS parent) for the same-record recompute.
-        let mut record = match read_record_on(&mut **tx, &nw.child, child_id).await? {
-            Some(r) => r,
-            None => return Err(DbError::BadInput(format!("line {child_id} not found"))),
-        };
+        // ONE generic error for not-found / wrong-parent / rule-denied, so the nested update path is
+        // not an oracle for enumerating child ids the caller does not own.
+        let denied = format!("cannot update line {child_id}: not found or not permitted");
+        // Read the current child (verifying ownership) for the same-record recompute.
+        let mut record =
+            read_record_on(&mut **tx, &nw.child, child_id).await?.ok_or_else(|| DbError::BadInput(denied.clone()))?;
         if record.get(nw.inverse) != Some(&Value::Int(parent_id)) {
-            return Err(DbError::BadInput(format!("line {child_id} is not a child of this record")));
+            return Err(DbError::BadInput(denied));
         }
         for (c, v) in &cols {
             record.insert(c.to_string(), v.clone());
@@ -657,13 +658,14 @@ impl Db {
         if let Some(rule) = record_rule_domain(Operation::Write, nw.child.name, ctx, rules) {
             where_sql.push_str(&format!(" AND {}", rule.compile_into(&nw.child, &mut params)?));
         }
+        where_sql.push_str(&company_clause(&nw.child, ctx, &mut params)?); // the child is company-scoped too
         let sql = format!("UPDATE {} SET {} WHERE {}", nw.child.table, set.join(", "), where_sql);
         let mut q = sqlx::query(&sql);
         for v in &params {
             q = bind_query(q, v);
         }
         if q.execute(&mut **tx).await?.rows_affected() == 0 {
-            return Err(DbError::BadInput(format!("cannot update line {child_id}: not permitted")));
+            return Err(DbError::BadInput(denied));
         }
         Ok(())
     }
@@ -682,12 +684,13 @@ impl Db {
         if !check_access(Operation::Delete, nw.child.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: nw.child.name.to_string(), operation: "delete" });
         }
-        // Ownership (child belongs to THIS parent) + the child's Delete record rule.
+        // Ownership (child belongs to THIS parent) + the child's Delete record rule + company scope.
         let mut params: Vec<Value> = vec![Value::Int(child_id), Value::Int(parent_id)];
         let mut where_sql = format!("id = $1 AND {} = $2", nw.inverse);
         if let Some(rule) = record_rule_domain(Operation::Delete, nw.child.name, ctx, rules) {
             where_sql.push_str(&format!(" AND {}", rule.compile_into(&nw.child, &mut params)?));
         }
+        where_sql.push_str(&company_clause(&nw.child, ctx, &mut params)?);
         let sql = format!("DELETE FROM {} WHERE {}", nw.child.table, where_sql);
         let mut q = sqlx::query(&sql);
         for v in &params {
@@ -836,6 +839,10 @@ fn validate_write_values(
     Ok(out)
 }
 
+/// Hard cap on child commands per One2many field in one write — bounds the work a single request
+/// can do inside one transaction (and the time the per-parent advisory lock is held).
+const MAX_O2M_COMMANDS: usize = 1000;
+
 /// One x2many child command — typed objects (decision D4), not Odoo's positional tuples.
 enum O2mCommand {
     Create(Map<String, Json>),
@@ -865,6 +872,12 @@ fn split_nested(
                 let arr = jv.as_array().ok_or_else(|| {
                     DbError::BadInput(format!("'{key}' must be an array of child commands"))
                 })?;
+                if arr.len() > MAX_O2M_COMMANDS {
+                    return Err(DbError::BadInput(format!(
+                        "'{key}': too many child commands ({}, max {MAX_O2M_COMMANDS})",
+                        arr.len()
+                    )));
+                }
                 let commands: Vec<O2mCommand> =
                     arr.iter().map(|item| parse_o2m_command(key, item)).collect::<Result<_, _>>()?;
                 if !commands.is_empty() {
