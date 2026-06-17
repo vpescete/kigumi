@@ -41,6 +41,8 @@ export type FieldMeta = {
   readonly: boolean
   options?: { value: string; label: string }[]
   default?: string
+  relation?: string // target model for many2one/one2many
+  inverse?: string // inverse FK field for one2many
   invisible_when?: unknown
   readonly_when?: unknown
 }
@@ -69,7 +71,7 @@ export type Identity = {
 export type ListQuery = {
   limit?: number
   offset?: number
-  order?: string // e.g. "name" or "name desc" — the server validates against real columns
+  order?: string // comma list of columns; prefix "-" for descending, e.g. "-id" or "name,-amount_total"
   domain?: unknown // portable domain AST; JSON-encoded into ?domain=
 }
 

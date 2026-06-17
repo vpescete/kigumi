@@ -1,6 +1,7 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
 import {
   LayoutDashboard,
+  LogOut,
   Package,
   Palette,
   Search,
@@ -10,19 +11,19 @@ import {
   Users,
 } from 'lucide-react'
 import { useTheme } from './theme'
-import { cx } from './ui'
+import { useAuth } from './auth'
+import { cx, Loading } from './ui'
 import { Dashboard } from './screens/Dashboard'
-import { Orders } from './screens/Orders'
-import { OrderDetail } from './screens/OrderDetail'
-import { Customers } from './screens/Customers'
-import { Products } from './screens/Products'
+import { ModelList } from './screens/ModelList'
+import { ModelForm } from './screens/ModelForm'
 import { ThemeStudio } from './screens/ThemeStudio'
+import { Login } from './screens/Login'
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/orders', label: 'Sales Orders', icon: ShoppingCart, end: false },
-  { to: '/customers', label: 'Customers', icon: Users, end: false },
-  { to: '/products', label: 'Products', icon: Package, end: false },
+  { to: '/m/sale.order', label: 'Sales Orders', icon: ShoppingCart, end: false },
+  { to: '/m/res.partner', label: 'Customers', icon: Users, end: false },
+  { to: '/m/product.product', label: 'Products', icon: Package, end: false },
   { to: '/theme-studio', label: 'Theme Studio', icon: Palette, end: false },
 ]
 
@@ -51,9 +52,7 @@ function Sidebar() {
             className={({ isActive }) =>
               cx(
                 't-body flex items-center gap-2.5 px-2.5 rounded-md font-medium transition-colors',
-                isActive
-                  ? 'bg-accent-soft text-accent'
-                  : 'text-muted hover:text-text hover:bg-surface2',
+                isActive ? 'bg-accent-soft text-accent' : 'text-muted hover:text-text hover:bg-surface2',
               )
             }
             style={{ height: 'var(--control-h)' }}
@@ -65,7 +64,7 @@ function Sidebar() {
       </nav>
 
       <div className="p-3 border-t border-border">
-        <div className="text-[11px] text-muted px-2">Navigable mockup · mock data</div>
+        <div className="text-[11px] text-muted px-2">Live · contract-driven</div>
       </div>
     </aside>
   )
@@ -75,7 +74,7 @@ function ThemeSwitcher() {
   const { theme, setTheme, mode, toggleMode, themes } = useTheme()
   return (
     <div className="flex items-center gap-2">
-      <div className="hidden md:flex items-center gap-0.5 p-1 rounded-md bg-surface2 border border-border max-w-[460px] overflow-x-auto">
+      <div className="hidden md:flex items-center gap-0.5 p-1 rounded-md bg-surface2 border border-border max-w-[420px] overflow-x-auto">
         {themes.map((t) => (
           <button
             key={t.id}
@@ -102,6 +101,7 @@ function ThemeSwitcher() {
 }
 
 function Topbar() {
+  const { identity, logout } = useAuth()
   return (
     <header className="h-14 shrink-0 flex items-center justify-between gap-4 px-5 border-b border-border bg-bg">
       <div className="relative w-full max-w-sm">
@@ -110,15 +110,25 @@ function Topbar() {
           className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
         />
         <input
-          placeholder="Search orders, customers…"
+          placeholder="Search…"
           className="w-full pl-8 pr-3 rounded-md bg-surface2 border border-border text-text placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:border-transparent"
           style={{ height: 'var(--control-h)' }}
         />
       </div>
       <div className="flex items-center gap-3">
         <ThemeSwitcher />
-        <div className="h-8 w-8 rounded-full bg-accent text-accent-fg grid place-items-center text-xs font-semibold">
-          VP
+        <button
+          onClick={() => void logout()}
+          title="Sign out"
+          className="h-8 w-8 grid place-items-center rounded-md text-muted hover:text-text hover:bg-surface2 border border-border"
+        >
+          <LogOut size={16} />
+        </button>
+        <div
+          className="h-8 w-8 rounded-full bg-accent text-accent-fg grid place-items-center text-xs font-semibold"
+          title={identity ? `User #${identity.uid} · ${identity.groups.join(', ')}` : ''}
+        >
+          {identity ? `#${identity.uid}` : '–'}
         </div>
       </div>
     </header>
@@ -126,6 +136,17 @@ function Topbar() {
 }
 
 export function App() {
+  const { identity, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="h-screen grid place-items-center bg-bg">
+        <Loading />
+      </div>
+    )
+  }
+  if (!identity) return <Login />
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
@@ -135,10 +156,8 @@ export function App() {
           <div className="max-w-[1100px] mx-auto px-6 py-7">
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/orders" element={<Orders />} />
-              <Route path="/orders/:id" element={<OrderDetail />} />
-              <Route path="/customers" element={<Customers />} />
-              <Route path="/products" element={<Products />} />
+              <Route path="/m/:model" element={<ModelList />} />
+              <Route path="/m/:model/:id" element={<ModelForm />} />
               <Route path="/theme-studio" element={<ThemeStudio />} />
             </Routes>
           </div>

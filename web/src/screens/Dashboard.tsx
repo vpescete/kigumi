@@ -1,93 +1,86 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CircleDollarSign, Package, ShoppingCart, Users } from 'lucide-react'
-import {
-  customers,
-  fmtDate,
-  fmtMoney,
-  orders,
-  orderTotal,
-  products,
-  type Order,
-} from '../data'
-import { Card, Column, DataTable, PageHeader, Stat, StateBadge } from '../ui'
+import { Package, ShoppingCart, Users } from 'lucide-react'
+import * as api from '../api'
+import type { Column } from '../ui'
+import { DataTable, Loading, PageHeader, Stat } from '../ui'
+import { displayValue } from '../format'
 
-const revenue = orders.filter((o) => o.state !== 'cancel').reduce((s, o) => s + orderTotal(o), 0)
-const confirmed = orders.filter((o) => o.state === 'done').length
-const avg = revenue / Math.max(1, orders.filter((o) => o.state !== 'cancel').length)
-
-// Tiny inline bar chart (revenue by order) — no chart dependency.
-const bars = orders.filter((o) => o.state !== 'cancel')
-const maxBar = Math.max(...bars.map(orderTotal))
+const PRIMARY = [
+  { model: 'sale.order', label: 'Sales Orders', icon: ShoppingCart },
+  { model: 'res.partner', label: 'Customers', icon: Users },
+  { model: 'product.product', label: 'Products', icon: Package },
+] as const
 
 export function Dashboard() {
   const nav = useNavigate()
-  const recent: Order[] = [...orders].slice(0, 5)
+  const [counts, setCounts] = useState<Record<string, number> | null>(null)
+  const [orders, setOrders] = useState<api.Page | null>(null)
+  const [contract, setContract] = useState<api.Contract | null>(null)
 
-  const cols: Column<Order>[] = [
-    { header: 'Reference', render: (o) => <span className="font-mono text-muted">{o.ref}</span>, width: '120px' },
-    { header: 'Customer', render: (o) => <span className="font-medium">{o.customer}</span> },
-    { header: 'Date', render: (o) => <span className="text-muted">{fmtDate(o.date)}</span> },
-    { header: 'Status', render: (o) => <StateBadge state={o.state} /> },
-    { header: 'Total', align: 'right', mono: true, render: (o) => fmtMoney(orderTotal(o)) },
-  ]
+  useEffect(() => {
+    let active = true
+    async function load(): Promise<void> {
+      try {
+        const pages = await Promise.all(PRIMARY.map((p) => api.list(p.model, { limit: 1 })))
+        const c: Record<string, number> = {}
+        PRIMARY.forEach((p, i) => {
+          c[p.model] = pages[i].total
+        })
+        const [recent, oc] = await Promise.all([
+          api.list('sale.order', { limit: 8, order: '-id' }),
+          api.contract('sale.order'),
+        ])
+        if (active) {
+          setCounts(c)
+          setOrders(recent)
+          setContract(oc)
+        }
+      } catch {
+        if (active) setCounts({}) // render what we can; tiles show 0
+      }
+    }
+    void load()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  if (!counts) return <Loading />
+
+  const recentCols: Column<api.Row>[] = (contract?.list.columns ?? []).slice(0, 5).map((col) => {
+    const f = contract?.fields.find((ff) => ff.name === col.name)
+    const numeric = col.widget === 'monetary' || col.widget === 'integer'
+    return {
+      header: col.label,
+      align: numeric ? 'right' : 'left',
+      mono: numeric,
+      render: (r: api.Row) => displayValue(r[col.name], col.widget, f),
+    }
+  })
 
   return (
     <div>
-      <PageHeader title="Good morning, Valerio" subtitle="Here's what's happening across Sales today." />
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <Stat label="Revenue (open)" value={fmtMoney(revenue)} delta={{ dir: 'up', text: '12.4% vs last week' }} icon={<CircleDollarSign size={16} />} />
-        <Stat label="Orders" value={String(orders.length)} delta={{ dir: 'up', text: '3 new today' }} icon={<ShoppingCart size={16} />} />
-        <Stat label="Confirmed" value={String(confirmed)} icon={<Package size={16} />} />
-        <Stat label="Avg. order" value={fmtMoney(avg)} delta={{ dir: 'down', text: '1.1%' }} icon={<Users size={16} />} />
+      <PageHeader title="Dashboard" subtitle="Live overview" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-7">
+        {PRIMARY.map((p) => (
+          <button key={p.model} onClick={() => nav(`/m/${p.model}`)} className="text-left">
+            <Stat label={p.label} value={String(counts[p.model] ?? 0)} icon={<p.icon size={16} />} />
+          </button>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <Card className="p-5 lg:col-span-2">
-          <div className="flex items-baseline justify-between mb-4">
-            <h2 className="t-h2 text-text">Revenue by order</h2>
-            <span className="t-caption text-muted">{customers.length} customers · {products.length} products</span>
-          </div>
-          <div className="flex items-end gap-3 h-40">
-            {bars.map((o) => (
-              <div key={o.id} className="flex-1 flex flex-col items-center gap-2 group">
-                <div className="w-full flex items-end h-full">
-                  <div
-                    className="w-full rounded-t-sm bg-accent group-hover:bg-accent-hover transition-all"
-                    style={{ height: `${(orderTotal(o) / maxBar) * 100}%` }}
-                    title={fmtMoney(orderTotal(o))}
-                  />
-                </div>
-                <span className="t-mono text-muted">{o.ref.replace('S000', '#')}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card className="p-5">
-          <h2 className="t-h2 text-text mb-4">Pipeline</h2>
-          <div className="space-y-3">
-            {(['draft', 'sent', 'done', 'cancel'] as const).map((st) => {
-              const n = orders.filter((o) => o.state === st).length
-              const pct = (n / orders.length) * 100
-              return (
-                <div key={st}>
-                  <div className="flex justify-between mb-1">
-                    <span className="t-caption text-muted capitalize">{st}</span>
-                    <span className="t-mono text-text">{n}</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-surface2 overflow-hidden">
-                    <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </Card>
-      </div>
-
-      <h2 className="t-h2 text-text mb-3">Recent orders</h2>
-      <DataTable columns={cols} rows={recent} rowKey={(o) => o.id} onRowClick={(o) => nav(`/orders/${o.id}`)} />
+      {orders && orders.data.length > 0 && (
+        <>
+          <h2 className="t-h2 text-text mb-3">Latest orders</h2>
+          <DataTable
+            columns={recentCols}
+            rows={orders.data}
+            rowKey={(r) => r.id}
+            onRowClick={(r) => nav(`/m/sale.order/${r.id}`)}
+          />
+        </>
+      )}
     </div>
   )
 }

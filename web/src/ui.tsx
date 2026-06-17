@@ -173,6 +173,18 @@ export function DataTable<T>({
   )
 }
 
+/* ── Loading / error states ─────────────────────────────────────────────────── */
+export function Loading({ label = 'Loading…' }: { label?: string }) {
+  return <div className="t-body text-muted py-16 text-center">{label}</div>
+}
+export function ErrorState({ message }: { message: string }) {
+  return (
+    <Card className="p-6">
+      <div className="t-body text-danger">⚠ {message}</div>
+    </Card>
+  )
+}
+
 /* ── Stat tile (dashboard) ──────────────────────────────────────────────────── */
 export function Stat({
   label,

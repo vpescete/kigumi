@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { ThemeProvider } from './theme'
+import { AuthProvider } from './auth'
 import { getAllThemes, loadDropInThemes } from './theme/registry'
 import { injectThemes } from './theme/css'
 import { App } from './App'
@@ -19,9 +20,11 @@ document.documentElement.dataset.mode = savedMode === 'light' ? 'light' : 'dark'
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </AuthProvider>
     </ThemeProvider>
   </React.StrictMode>,
 )

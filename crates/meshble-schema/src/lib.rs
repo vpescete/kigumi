@@ -113,6 +113,18 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
                     .collect();
                 parts.push(format!("\"options\": [{}]", items.join(", ")));
             }
+            // Relation target, so a frontend can fetch the related model's contract (e.g. to render
+            // an inlined One2many's columns) and resolve Many2one references.
+            match &f.kind {
+                FieldKind::Many2one { target } => {
+                    parts.push(format!("\"relation\": {}", json_string(target)));
+                }
+                FieldKind::One2many { target, inverse } => {
+                    parts.push(format!("\"relation\": {}", json_string(target)));
+                    parts.push(format!("\"inverse\": {}", json_string(inverse)));
+                }
+                _ => {}
+            }
             // Surface the field default so a new-record form can prefill it.
             if let Some(d) = f.default {
                 parts.push(format!("\"default\": {}", json_string(d)));
