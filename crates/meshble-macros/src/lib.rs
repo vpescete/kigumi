@@ -186,7 +186,10 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
     let kind = match kind_name.as_str() {
         "Text" => quote! { ::meshble::prelude::FieldKind::Text },
         "Integer" => quote! { ::meshble::prelude::FieldKind::Integer },
+        "Float" => quote! { ::meshble::prelude::FieldKind::Float },
         "Bool" => quote! { ::meshble::prelude::FieldKind::Bool },
+        "Date" => quote! { ::meshble::prelude::FieldKind::Date },
+        "Datetime" => quote! { ::meshble::prelude::FieldKind::Datetime },
         "Decimal" => {
             let cur = match meta_str(&metas, "currency") {
                 Some(c) => quote! { Some(#c) },
@@ -224,7 +227,7 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
         other => {
             return Err(err(
                 &f.ty,
-                &format!("unknown field type: `{other}` (use Text/Integer/Decimal/Bool/Selection/Many2one/One2many)"),
+                &format!("unknown field type: `{other}` (use Text/Integer/Float/Decimal/Bool/Date/Datetime/Selection/Many2one/One2many)"),
             ))
         }
     };

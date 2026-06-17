@@ -5,9 +5,16 @@
 pub enum FieldKind {
     Text,
     Integer,
+    /// Non-exact floating point (Postgres `double precision`) — quantities, weights, factors, rates.
+    /// For money use [`FieldKind::Decimal`] (exact).
+    Float,
     /// `currency_field`: monetary field → "monetary" widget + linked currency.
     Decimal { currency_field: Option<&'static str> },
     Bool,
+    /// Calendar date with no time (Postgres `date`).
+    Date,
+    /// Timestamp with time zone (Postgres `timestamptz`).
+    Datetime,
     Selection(&'static [(&'static str, &'static str)]),
     /// N→1 relation: generates an FK column.
     Many2one { target: &'static str },

@@ -60,6 +60,8 @@ impl From<sqlx::Error> for DbError {
                 Some("23503") => return DbError::Conflict(format!("foreign-key constraint '{constraint}' violated (referenced row missing or still in use)")),
                 Some("23514") => return DbError::BadInput(format!("value violates check constraint '{constraint}'")),
                 Some("23502") => return DbError::BadInput("a required field is missing".to_string()),
+                // Malformed date/time literal or out-of-range value (e.g. an invalid Date/Datetime).
+                Some("22007") | Some("22008") => return DbError::BadInput("invalid date/time value".to_string()),
                 _ => {}
             }
         }
@@ -1135,8 +1137,11 @@ fn default_json(field: &FieldDef) -> Option<Json> {
     Some(match field.kind {
         FieldKind::Bool => Json::Bool(matches!(d, "true" | "1" | "t" | "yes")),
         FieldKind::Integer | FieldKind::Many2one { .. } => Json::from(d.parse::<i64>().ok()?),
-        // Decimals travel as strings → parsed exactly by json_to_value.
-        FieldKind::Decimal { .. } | FieldKind::Text | FieldKind::Selection(_) => Json::from(d.to_string()),
+        FieldKind::Float => Json::from(d.parse::<f64>().ok()?),
+        // Decimals + dates travel as strings → parsed/validated by json_to_value.
+        FieldKind::Decimal { .. } | FieldKind::Text | FieldKind::Selection(_) | FieldKind::Date | FieldKind::Datetime => {
+            Json::from(d.to_string())
+        }
         FieldKind::One2many { .. } => return None,
     })
 }
@@ -1200,6 +1205,12 @@ fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
         (FieldKind::Decimal { .. }, Json::String(s)) => {
             Value::Decimal(s.parse().map_err(|_| bad())?)
         }
+        (FieldKind::Float, Json::Number(n)) => Value::Float(n.as_f64().ok_or_else(bad)?),
+        // Accept a numeric string for a float field too (HTML number inputs).
+        (FieldKind::Float, Json::String(s)) => Value::Float(s.trim().parse().map_err(|_| bad())?),
+        // Date/Datetime travel as ISO strings; the `::date`/`::timestamptz` placeholder cast parses +
+        // validates them in Postgres (a malformed value surfaces as a clean 400 via the SQLSTATE map).
+        (FieldKind::Date | FieldKind::Datetime, Json::String(s)) => Value::Str(s.clone()),
         (FieldKind::Bool, Json::Bool(b)) => Value::Bool(*b),
         _ => return Err(bad()),
     })
@@ -1213,8 +1224,11 @@ fn pg_cast(kind: &FieldKind) -> &'static str {
     match kind {
         FieldKind::Text | FieldKind::Selection(_) => "text",
         FieldKind::Integer | FieldKind::Many2one { .. } => "bigint",
+        FieldKind::Float => "double precision",
         FieldKind::Decimal { .. } => "numeric",
         FieldKind::Bool => "boolean",
+        FieldKind::Date => "date",
+        FieldKind::Datetime => "timestamptz",
         FieldKind::One2many { .. } => "text", // no column; never reached in a SET/VALUES clause
     }
 }
@@ -1326,9 +1340,14 @@ fn parents_of(child_model_name: &str) -> Vec<(ResolvedModel, &'static str)> {
 fn select_columns(model: &ResolvedModel) -> String {
     let mut cols = vec!["id".to_string()];
     for f in &model.fields {
-        if f.has_column() {
-            // Decimal columns are read as exact NUMERIC (decoded into rust_decimal) — no float8 cast.
-            cols.push(f.name.to_string());
+        if !f.has_column() {
+            continue;
+        }
+        match f.kind {
+            // Read date/timestamp columns as ISO text so they decode into String without a chrono
+            // decoder; Decimal stays NUMERIC (rust_decimal), Float stays float8.
+            FieldKind::Date | FieldKind::Datetime => cols.push(format!("{0}::text AS {0}", f.name)),
+            _ => cols.push(f.name.to_string()),
         }
     }
     cols.join(", ")
@@ -1348,6 +1367,9 @@ fn record_to_values(model: &ResolvedModel, row: &PgRow) -> BTreeMap<String, Valu
             FieldKind::Integer | FieldKind::Many2one { .. } => {
                 row.try_get::<Option<i64>, _>(f.name).ok().flatten().map(Value::Int).unwrap_or(Value::Null)
             }
+            FieldKind::Float => {
+                row.try_get::<Option<f64>, _>(f.name).ok().flatten().map(Value::Float).unwrap_or(Value::Null)
+            }
             FieldKind::Decimal { .. } => row
                 .try_get::<Option<rust_decimal::Decimal>, _>(f.name)
                 .ok()
@@ -1356,6 +1378,10 @@ fn record_to_values(model: &ResolvedModel, row: &PgRow) -> BTreeMap<String, Valu
                 .unwrap_or(Value::Null),
             FieldKind::Bool => {
                 row.try_get::<Option<bool>, _>(f.name).ok().flatten().map(Value::Bool).unwrap_or(Value::Null)
+            }
+            // Date/Datetime are selected as ::text → read as a String.
+            FieldKind::Date | FieldKind::Datetime => {
+                row.try_get::<Option<String>, _>(f.name).ok().flatten().map(Value::Str).unwrap_or(Value::Null)
             }
             FieldKind::One2many { .. } => continue,
         };
@@ -1381,6 +1407,7 @@ fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
             FieldKind::Integer | FieldKind::Many2one { .. } => {
                 row.try_get::<Option<i64>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
             }
+            FieldKind::Float => row.try_get::<Option<f64>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null),
             // Exact decimal serialized as a JSON STRING (e.g. "1240.00") to preserve precision.
             FieldKind::Decimal { .. } => match row.try_get::<Option<rust_decimal::Decimal>, _>(f.name)? {
                 Some(d) => Json::from(d.to_string()),
@@ -1388,6 +1415,10 @@ fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
             },
             FieldKind::Bool => {
                 row.try_get::<Option<bool>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
+            }
+            // Date/Datetime are selected as ::text → an ISO string (e.g. "2026-01-15").
+            FieldKind::Date | FieldKind::Datetime => {
+                row.try_get::<Option<String>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
             }
             FieldKind::One2many { .. } => continue,
         };

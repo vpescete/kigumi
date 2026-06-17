@@ -14,8 +14,11 @@ fn pg_type(kind: &FieldKind) -> &'static str {
     match kind {
         FieldKind::Text | FieldKind::Selection(_) => "text",
         FieldKind::Integer => "bigint",
+        FieldKind::Float => "double precision",
         FieldKind::Decimal { .. } => "numeric",
         FieldKind::Bool => "boolean",
+        FieldKind::Date => "date",
+        FieldKind::Datetime => "timestamptz",
         FieldKind::Many2one { .. } => "bigint",
         FieldKind::One2many { .. } => "", // no column
     }
@@ -53,9 +56,12 @@ fn widget(kind: &FieldKind) -> &'static str {
     match kind {
         FieldKind::Text => "char",
         FieldKind::Integer => "integer",
+        FieldKind::Float => "float",
         FieldKind::Decimal { currency_field: Some(_) } => "monetary",
         FieldKind::Decimal { currency_field: None } => "float",
         FieldKind::Bool => "boolean",
+        FieldKind::Date => "date",
+        FieldKind::Datetime => "datetime",
         FieldKind::Selection(_) => "selection",
         FieldKind::Many2one { .. } => "many2one",
         FieldKind::One2many { .. } => "one2many",

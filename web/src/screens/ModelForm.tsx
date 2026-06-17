@@ -228,12 +228,34 @@ function FieldInput({
       )
     case 'integer':
     case 'monetary':
+    case 'float':
       return (
         <input
           type="number"
-          step={field.widget === 'monetary' ? '0.01' : '1'}
+          step={field.widget === 'integer' ? '1' : 'any'}
           value={value == null ? '' : String(value)}
           onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+          className={cls}
+          style={style}
+        />
+      )
+    case 'date':
+      return (
+        <input
+          type="date"
+          value={value == null ? '' : String(value)}
+          onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
+          className={cls}
+          style={style}
+        />
+      )
+    case 'datetime':
+      // The server returns "YYYY-MM-DD HH:MM:SS+TZ"; datetime-local wants "YYYY-MM-DDTHH:MM".
+      return (
+        <input
+          type="datetime-local"
+          value={value == null ? '' : String(value).replace(' ', 'T').slice(0, 16)}
+          onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
           className={cls}
           style={style}
         />

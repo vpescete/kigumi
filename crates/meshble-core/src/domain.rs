@@ -329,7 +329,7 @@ fn emit_leaf_cond(
                 }
                 check_value_type(field, v)?;
                 params.push(v.clone());
-                placeholders.push(format!("${}", params.len()));
+                placeholders.push(format!("${}{}", params.len(), cast_suffix(&field.kind)));
             }
             let kw = if matches!(op, Operator::In) { "IN" } else { "NOT IN" };
             Ok(format!("{col} {kw} ({})", placeholders.join(", ")))
@@ -357,7 +357,7 @@ fn emit_leaf_cond(
             check_operator_kind(op, &field.kind, field_name)?;
             check_value_type(field, value)?;
             params.push(value.clone());
-            let p = format!("${}", params.len());
+            let p = format!("${}{}", params.len(), cast_suffix(&field.kind));
             let sql_op = match op {
                 Operator::Eq => "=",
                 Operator::Ne => "<>",
@@ -373,6 +373,16 @@ fn emit_leaf_cond(
             };
             Ok(format!("{col} {sql_op} {p}"))
         }
+    }
+}
+
+/// The `::date` / `::timestamptz` cast a value placeholder needs for a Date/Datetime field (whose
+/// value is bound as ISO text). Empty for kinds bound with their native Postgres type.
+fn cast_suffix(kind: &FieldKind) -> &'static str {
+    match kind {
+        FieldKind::Date => "::date",
+        FieldKind::Datetime => "::timestamptz",
+        _ => "",
     }
 }
 
@@ -404,7 +414,11 @@ fn check_value_type(field: &FieldDef, v: &Value) -> Result<(), DomainError> {
         (FieldKind::Decimal { .. }, Value::Int(_) | Value::Decimal(_)) => true,
         // NaN / Infinity cannot be stored in NUMERIC and make every comparison UNKNOWN.
         (FieldKind::Decimal { .. }, Value::Float(f)) => f.is_finite(),
+        (FieldKind::Float, Value::Int(_)) => true,
+        (FieldKind::Float, Value::Float(f)) => f.is_finite(),
         (FieldKind::Bool, Value::Bool(_)) => true,
+        // Date/Datetime values travel as ISO strings; Postgres validates the cast at query time.
+        (FieldKind::Date | FieldKind::Datetime, Value::Str(_)) => true,
         _ => false,
     };
     if ok {

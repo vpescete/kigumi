@@ -317,8 +317,12 @@ fn coerce(kind: &FieldKind, raw: &str) -> Result<Value, String> {
         FieldKind::Decimal { .. } => {
             Value::Decimal(raw.parse::<rust_decimal::Decimal>().map_err(|_| format!("'{raw}' is not a number"))?)
         }
+        FieldKind::Float => Value::Float(raw.parse::<f64>().map_err(|_| format!("'{raw}' is not a number"))?),
         FieldKind::Bool => Value::Bool(matches!(raw, "true" | "1" | "t" | "yes")),
-        FieldKind::Text | FieldKind::Selection(_) => Value::Str(raw.to_string()),
+        // Date/Datetime filters travel as ISO strings; Postgres validates the cast at query time.
+        FieldKind::Text | FieldKind::Selection(_) | FieldKind::Date | FieldKind::Datetime => {
+            Value::Str(raw.to_string())
+        }
         FieldKind::One2many { .. } => return Err("cannot filter on a One2many field".to_string()),
     })
 }
