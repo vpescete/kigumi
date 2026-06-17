@@ -1184,6 +1184,11 @@ fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
         (FieldKind::Integer | FieldKind::Many2one { .. }, Json::Number(n)) => {
             Value::Int(n.as_i64().ok_or_else(bad)?)
         }
+        // Accept a numeric STRING for an integer/relation field (HTML number inputs and some clients
+        // serialize ids as strings) — coerce at the boundary rather than fail with a type error.
+        (FieldKind::Integer | FieldKind::Many2one { .. }, Json::String(s)) => {
+            Value::Int(s.trim().parse().map_err(|_| bad())?)
+        }
         // Exact decimal: parse from the number's canonical STRING (not f64) so 0.01 etc. are exact;
         // also accept a JSON string (the canonical money representation).
         (FieldKind::Decimal { .. }, Json::Number(n)) => {
@@ -1481,6 +1486,9 @@ mod tests {
             FieldDef {
                 name: "total", label: "Total", kind: FieldKind::Decimal { currency_field: None },
                 required: false, stored: true, compute: Some("c"), depends: &[], default: None, unique: false, check: None },
+            FieldDef {
+                name: "ref_id", label: "Ref", kind: FieldKind::Many2one { target: "w" },
+                required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
         ],
     };
 
@@ -1529,5 +1537,18 @@ mod tests {
     fn accepts_valid_create_payload() {
         let m = resolve(&M, &[]).unwrap();
         assert!(validate_write_values(&m, &obj(json!({ "name": "x", "note": "y" })), true).is_ok());
+    }
+
+    #[test]
+    fn coerces_numeric_string_to_int_for_relation() {
+        // HTML number inputs / some clients serialize ids as strings; the boundary coerces "7" → 7.
+        let m = resolve(&M, &[]).unwrap();
+        let out = validate_write_values(&m, &obj(json!({ "ref_id": "7" })), false).unwrap();
+        assert_eq!(out, vec![("ref_id", Value::Int(7))]);
+        // A non-numeric string is still rejected (clean BadInput, not a Postgres type error).
+        assert!(matches!(
+            validate_write_values(&m, &obj(json!({ "ref_id": "abc" })), false),
+            Err(DbError::BadInput(_))
+        ));
     }
 }
