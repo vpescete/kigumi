@@ -58,8 +58,23 @@ enum Cmd {
         #[command(subcommand)]
         action: RuleCmd,
     },
+    /// Install/uninstall modules (only modules whose crate is linked into this binary are available).
+    Module {
+        #[command(subcommand)]
+        action: ModuleCmd,
+    },
     /// Print the framework version and the linked modules.
     Version,
+}
+
+#[derive(Subcommand)]
+enum ModuleCmd {
+    /// List the available (linked) modules and whether each is installed.
+    List,
+    /// Install a module and its dependency closure, then migrate their tables.
+    Install { name: String },
+    /// Uninstall a module (it stops being migrated/served; its tables and data are KEPT).
+    Uninstall { name: String },
 }
 
 #[derive(Subcommand)]
@@ -231,6 +246,12 @@ async fn run(cli: Cli) -> Fallible {
             db.ensure_access_schema().await?;
             rule_command(&db, action).await
         }
+        Cmd::Module { action } => {
+            let s = Settings::load(Some(&path))?;
+            let db = Db::connect(&s.secrets.database_url).await?;
+            db.ensure_module_schema().await?;
+            module_command(&db, action).await
+        }
         Cmd::Serve => {
             let s = Settings::load(Some(&path))?;
             let db = Db::connect(&s.secrets.database_url).await?;
@@ -241,23 +262,54 @@ async fn run(cli: Cli) -> Fallible {
     }
 }
 
-/// Migrates every linked module's models in dependency order (FK targets first), plus the auth schema.
+/// Ensures the framework schemas, then migrates the models of the INSTALLED modules (not every linked
+/// crate). On a fresh database nothing is installed yet, so `base` (and its dependency closure) is
+/// installed first — the rest is opt-in via `meshble module install <name>`, like Odoo's selective
+/// install rather than installing everything available.
 async fn migrate(db: &Db) -> Fallible {
     db.ensure_auth_schema().await?;
     db.ensure_sequence_schema().await?;
     db.ensure_setting_schema().await?;
     db.ensure_access_schema().await?;
+    db.ensure_module_schema().await?;
     // Install-time runtime defaults (DB is the authority; never overwrites an operator change).
     db.seed_setting("base_url", "", "string").await?;
     db.seed_setting("mode", "production", "string").await?;
+
+    // Seed the installed set if it is empty. A truly-fresh DB gets only `base` (+ its closure); a DB
+    // migrated BEFORE module-selection existed (its per-model ledger has rows) keeps ALL modules it
+    // already had, so upgrading does not silently hide previously-available models.
+    if db.installed_modules().await?.is_empty() {
+        let mods = resolve_modules().map_err(|e| format!("{e:?}"))?;
+        let want: Vec<&str> = if db.has_prior_migration().await? {
+            mods.iter().map(|m| m.name).collect()
+        } else {
+            module_closure("base").map_err(|e| e.to_string())?
+        };
+        for m in mods.iter().filter(|m| want.contains(&m.name)) {
+            db.mark_module_installed(m.name, m.version).await?;
+        }
+        println!("installed modules: {}", want.join(", "));
+    }
+
+    migrate_installed(db).await
+}
+
+/// Migrates the models that belong to currently-installed modules, in FK-dependency order, then
+/// seeds base reference data if `base` is installed.
+async fn migrate_installed(db: &Db) -> Fallible {
+    let installed = db.installed_modules().await?;
     let plan = migration_plan().map_err(|e| e.to_string())?;
     for t in &plan {
-        // Ledger key is the model name: each model/table is its own migration unit (install_or_upgrade
-        // tracks one table per key). The owning module name/version is informational here.
+        if !installed.iter().any(|m| m == t.module) {
+            continue; // model of a module that is not installed → skip (its table is not created)
+        }
         db.install_or_upgrade(&t.model, t.model.name, &t.version, &[]).await?;
         println!("migrated {} ({} {})", t.model.name, t.module, t.version);
     }
-    seed_base_data(db).await?;
+    if installed.iter().any(|m| m == "base") {
+        seed_base_data(db).await?;
+    }
     Ok(())
 }
 
@@ -331,9 +383,18 @@ async fn bootstrap_admin(db: &Db) -> Fallible {
 }
 
 async fn serve(s: Settings) -> Fallible {
-    let models = resolve_all_registered().map_err(|e| e.to_string())?;
     let bind = s.config.server.bind.clone();
     let db = Db::connect(&s.secrets.database_url).await?;
+
+    // Serve only the models of INSTALLED modules (module selection, approach B). A model whose owning
+    // module is not installed is omitted from the catalog the router exposes.
+    db.ensure_module_schema().await?;
+    let installed = db.installed_modules().await?;
+    let models: Vec<_> = resolve_all_registered()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|m| module_of(m.name).map(|owner| installed.iter().any(|i| i == owner)).unwrap_or(false))
+        .collect();
 
     // Effective access = compiled-in baseline ∪ runtime DB overrides (hybrid, D12). For ACLs the DB
     // rows only widen access (union); for record rules they add restrictions/alternatives through the
@@ -465,6 +526,55 @@ async fn rule_command(db: &Db, action: RuleCmd) -> Fallible {
                 let act = if r.active { "" } else { " [inactive]" };
                 println!("  #{} {} ({}, ops={}){}  {}", r.id, r.model, scope, r.ops, act, r.domain);
             }
+        }
+    }
+    Ok(())
+}
+
+async fn module_command(db: &Db, action: ModuleCmd) -> Fallible {
+    let mods = resolve_modules().map_err(|e| format!("{e:?}"))?;
+    match action {
+        ModuleCmd::List => {
+            let installed = db.installed_modules().await?;
+            for m in &mods {
+                let state = if installed.iter().any(|i| i == m.name) { "installed" } else { "available" };
+                println!("  {:<10} {:<8} [{state}]  {}", m.name, m.version, m.summary);
+            }
+        }
+        ModuleCmd::Install { name } => {
+            let want = module_closure(&name)?; // name + transitive dependencies, deps first
+            let mut any = false;
+            for m in mods.iter().filter(|m| want.contains(&m.name)) {
+                if !db.is_module_installed(m.name).await? {
+                    db.mark_module_installed(m.name, m.version).await?;
+                    println!("installing {} {}", m.name, m.version);
+                    any = true;
+                }
+            }
+            if !any {
+                println!("'{name}' and its dependencies are already installed");
+            }
+            migrate_installed(db).await?; // create the newly-installed modules' tables (idempotent)
+        }
+        ModuleCmd::Uninstall { name } => {
+            if name == "base" {
+                return Err("cannot uninstall 'base' (the foundational module)".into());
+            }
+            if !db.is_module_installed(&name).await? {
+                return Err(format!("module '{name}' is not installed").into());
+            }
+            // Refuse if an installed module still depends on it (downstream guard, like Odoo).
+            let installed = db.installed_modules().await?;
+            let dependents: Vec<&str> = mods
+                .iter()
+                .filter(|m| installed.iter().any(|i| i == m.name) && m.depends.iter().any(|d| d.name == name))
+                .map(|m| m.name)
+                .collect();
+            if !dependents.is_empty() {
+                return Err(format!("uninstall {dependents:?} first — they depend on '{name}'").into());
+            }
+            db.mark_module_uninstalled(&name).await?;
+            println!("uninstalled '{name}' (its tables and data are kept; re-install to restore)");
         }
     }
     Ok(())

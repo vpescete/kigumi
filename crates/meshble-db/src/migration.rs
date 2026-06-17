@@ -62,6 +62,20 @@ const UPSERT_MODULE: &str = "INSERT INTO meshble_module (name, version) VALUES (
      ON CONFLICT (name) DO UPDATE SET version = EXCLUDED.version";
 
 impl Db {
+    /// Whether this database was migrated BEFORE module-selection existed — i.e. the per-model
+    /// migration ledger `meshble_module` has rows. Used by `migrate` to tell a truly-fresh DB (install
+    /// `base` only) from an existing one upgraded to module-selection (back-fill: keep all modules that
+    /// were already installed, so nothing disappears).
+    pub async fn has_prior_migration(&self) -> Result<bool, DbError> {
+        let reg: Option<String> =
+            sqlx::query_scalar("SELECT to_regclass('meshble_module')::text").fetch_one(&self.pool).await?;
+        if reg.is_none() {
+            return Ok(false);
+        }
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM meshble_module").fetch_one(&self.pool).await?;
+        Ok(count > 0)
+    }
+
     /// Installs `model` for `module` at `target_version` (creating the table on first install), or
     /// upgrades an existing install by running the pending migration steps up to `target_version`.
     /// Atomic, serialized per module, and idempotent.

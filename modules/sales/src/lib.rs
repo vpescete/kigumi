@@ -221,6 +221,20 @@ mod tests {
     }
 
     #[test]
+    fn module_closure_and_ownership() {
+        // Link base so its manifest/models are registered in this test binary.
+        let _ = meshble_mod_base::MANIFEST;
+        // Installing sales pulls in its dependency closure (base first, then sales).
+        assert_eq!(module_closure("sales").unwrap(), vec!["base", "sales"]);
+        assert_eq!(module_closure("base").unwrap(), vec!["base"]);
+        assert!(module_closure("nope").is_err(), "unknown module errors");
+        // Each model maps to its owning module (the migration/serve gate).
+        assert_eq!(module_of("sale.order"), Some("sales"));
+        assert_eq!(module_of("product.product"), Some("sales"));
+        assert_eq!(module_of("res.partner"), Some("base"));
+    }
+
+    #[test]
     fn field_groups_macro_registers_restriction() {
         // `#[field(groups = "sales.manager")]` on purchase_price emits a FieldGroupRegistration;
         // unrestricted fields return None (D6).

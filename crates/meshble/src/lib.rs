@@ -9,9 +9,10 @@ pub mod prelude {
     pub use meshble_core::{
         action_for, check_access, check_compat, compute_fn, compute_stored, computed_fields,
         external_tables, field_accessible, field_required_groups, json_string, migration_plan,
-        record_rule_domain, registered_acls, registered_group_names, registered_model_names,
-        registered_rules, resolve, resolve_all_registered, resolve_module_set, resolve_modules,
-        resolve_registered, validate_depends, Acl, AclRegistration, ActionFn, ActionInput,
+        module_closure, module_of, record_rule_domain, registered_acls, registered_group_names,
+        registered_model_names, registered_rules, resolve, resolve_all_registered,
+        resolve_module_set, resolve_modules, resolve_registered, validate_depends, Acl,
+        AclRegistration, ActionFn, ActionInput,
         ActionOutcome, ActionRegistration, ComputeFn, ComputeInput, ComputeRegistration, Condition,
         Ctx, Domain, DomainError, ExternalTable, FieldBuilder, FieldDef, FieldExtension,
         FieldGroupRegistration, FieldKind, MigrationTarget, Model, ModelDescriptor,

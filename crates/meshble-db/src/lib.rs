@@ -9,6 +9,7 @@
 mod access_store;
 mod auth_store;
 mod migration;
+mod module_store;
 mod sequence;
 mod settings;
 pub use access_store::{AclRow, RuleRow};

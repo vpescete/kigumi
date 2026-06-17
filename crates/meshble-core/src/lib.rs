@@ -21,10 +21,10 @@ pub use domain::{json_string, Condition, Domain, DomainError, FieldBuilder, Oper
 pub use manifest::{check_compat, resolve_module_set, ModuleDep, ModuleManifest, ResolutionError};
 pub use metamodel::{resolve, validate_depends, FieldDef, FieldKind, Model, ModelDescriptor, ResolvedModel};
 pub use registry::{
-    external_tables, migration_plan, registered_acls, registered_group_names,
-    registered_model_names, registered_rules, resolve_all_registered, resolve_modules,
-    resolve_registered, AclRegistration, ExternalTable, FieldExtension, MigrationTarget,
-    ModelRegistration, ModuleRegistration, RecordRuleRegistration,
+    external_tables, migration_plan, module_closure, module_of, registered_acls,
+    registered_group_names, registered_model_names, registered_rules, resolve_all_registered,
+    resolve_modules, resolve_registered, AclRegistration, ExternalTable, FieldExtension,
+    MigrationTarget, ModelRegistration, ModuleRegistration, RecordRuleRegistration,
 };
 pub use security::{
     check_access, field_accessible, field_required_groups, record_rule_domain, Acl, Ctx,

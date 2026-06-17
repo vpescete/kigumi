@@ -200,6 +200,44 @@ pub fn resolve_modules() -> Result<Vec<ModuleManifest>, ResolutionError> {
     resolve_module_set(&modules, FRAMEWORK_VERSION)
 }
 
+/// The name of the module that owns `model`, via the model's registration crate_path → manifest
+/// mapping (the same hook `migration_plan` uses). Used to gate migration/serving by installed module.
+pub fn module_of(model: &str) -> Option<&'static str> {
+    let model_path = inventory::iter::<ModelRegistration>
+        .into_iter()
+        .find(|r| r.name == model)
+        .map(|r| r.module)?;
+    for r in inventory::iter::<ModuleRegistration> {
+        if model_path == r.crate_path || model_path.starts_with(&format!("{}::", r.crate_path)) {
+            return Some((r.manifest)().name);
+        }
+    }
+    None
+}
+
+/// A module plus its full transitive dependency closure, in dependency order (dependencies first) —
+/// the set to install when installing `name`. Errors if `name` (or a dependency) is not a linked
+/// module, or the module graph is invalid.
+pub fn module_closure(name: &str) -> Result<Vec<&'static str>, String> {
+    let mods = resolve_modules().map_err(|e| format!("{e:?}"))?; // validated + topo-sorted
+    let mut want: Vec<&'static str> = Vec::new();
+    let mut stack = vec![name.to_string()];
+    while let Some(n) = stack.pop() {
+        let m = mods
+            .iter()
+            .find(|m| m.name == n)
+            .ok_or_else(|| format!("unknown module '{n}'"))?;
+        if !want.contains(&m.name) {
+            want.push(m.name);
+            for d in m.depends {
+                stack.push(d.name.to_string());
+            }
+        }
+    }
+    // Return in the validated dependency order (dependencies before dependents).
+    Ok(mods.iter().filter(|m| want.contains(&m.name)).map(|m| m.name).collect())
+}
+
 /// Names of all models registered in the catalog (sorted, deterministic).
 pub fn registered_model_names() -> Vec<&'static str> {
     let mut names: Vec<&'static str> =
