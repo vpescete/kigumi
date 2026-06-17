@@ -24,6 +24,9 @@ pub struct SaleOrder {
     #[field(label = "Customer", required, target = "res.partner")]
     partner_id: Many2one,
 
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+
     #[field(label = "Order Lines", target = "sale.order.line", inverse = "order_id")]
     line_ids: One2many,
 
@@ -127,7 +130,7 @@ mod tests {
         // The macro must produce the SAME descriptor as the hand-written version.
         let d = SaleOrder::descriptor();
         assert_eq!(d.name, "sale.order");
-        assert_eq!(d.fields.len(), 6);
+        assert_eq!(d.fields.len(), 7); // name, partner_id, company_id, line_ids, state, currency_id, amount_total
         let total = d.fields.iter().find(|f| f.name == "amount_total").unwrap();
         assert!(total.stored, "computed with `store` must be stored");
         assert_eq!(total.compute, Some("compute_amount"));

@@ -243,10 +243,11 @@ impl Db {
         // Parent row, restricted by the Read record rule. `id` is not a domain field, so it is bound
         // raw as $1 and the rule (if any) compiles into $2.. via compile_into.
         let mut params: Vec<Value> = vec![Value::Int(id)];
-        let where_sql = match record_rule_domain(Operation::Read, model.name, ctx, rules) {
+        let mut where_sql = match record_rule_domain(Operation::Read, model.name, ctx, rules) {
             Some(rule) => format!("id = $1 AND {}", rule.compile_into(model, &mut params)?),
             None => "id = $1".to_string(),
         };
+        where_sql.push_str(&company_clause(model, ctx, &mut params)?);
         let sql =
             format!("SELECT {} FROM {} WHERE {}", select_columns(model), model.table, where_sql);
         let mut q = sqlx::query(&sql);
@@ -296,11 +297,16 @@ impl Db {
             });
         }
         let rule = record_rule_domain(Operation::Read, model.name, ctx, rules);
-        Ok(match (filter, rule) {
+        let base = match (filter, rule) {
             (Some(f), Some(r)) => f.clone().and(r),
             (Some(f), None) => f.clone(),
             (None, Some(r)) => r,
             (None, None) => Domain::True,
+        };
+        // Multi-company: restrict to the caller's companies for company-scoped models.
+        Ok(match company_filter(model, ctx) {
+            Some(cf) => base.and(cf),
+            None => base,
         })
     }
 
@@ -318,7 +324,18 @@ impl Db {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "create" });
         }
         // Split the payload: scalar columns vs One2many child-create payloads (nested writes).
-        let (scalars, nested) = split_nested(model, values)?;
+        let (mut scalars, nested) = split_nested(model, values)?;
+        // Multi-company: default company_id to the caller's active company when the model is
+        // company-scoped and the field was not supplied.
+        if let Some(cid) = ctx.company_id {
+            let scoped = model
+                .fields
+                .iter()
+                .any(|f| f.name == "company_id" && matches!(f.kind, FieldKind::Many2one { .. }));
+            if scoped && !scalars.contains_key("company_id") {
+                scalars.insert("company_id".to_string(), Json::from(cid));
+            }
+        }
         let cols = validate_write_values(model, &scalars, true)?;
         if cols.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
@@ -473,10 +490,11 @@ impl Db {
         let id_ph = set_pairs.len() + 1;
         let mut params: Vec<Value> = set_pairs.iter().map(|(_, v)| v.clone()).collect();
         params.push(Value::Int(id));
-        let where_sql = match record_rule_domain(Operation::Write, model.name, ctx, rules) {
+        let mut where_sql = match record_rule_domain(Operation::Write, model.name, ctx, rules) {
             Some(rule) => format!("id = ${id_ph} AND {}", rule.compile_into(model, &mut params)?),
             None => format!("id = ${id_ph}"),
         };
+        where_sql.push_str(&company_clause(model, ctx, &mut params)?);
         let sql = format!("UPDATE {} SET {} WHERE {}", model.table, set.join(", "), where_sql);
         let mut q = sqlx::query(&sql);
         for v in &params {
@@ -592,10 +610,11 @@ impl Db {
         // Capture the parents this child points to before it is gone, to recompute them after.
         let parents = self.parent_targets(model, id).await?;
         let mut params: Vec<Value> = vec![Value::Int(id)];
-        let where_sql = match record_rule_domain(Operation::Delete, model.name, ctx, rules) {
+        let mut where_sql = match record_rule_domain(Operation::Delete, model.name, ctx, rules) {
             Some(rule) => format!("id = $1 AND {}", rule.compile_into(model, &mut params)?),
             None => "id = $1".to_string(),
         };
+        where_sql.push_str(&company_clause(model, ctx, &mut params)?);
         let sql = format!("DELETE FROM {} WHERE {}", model.table, where_sql);
         let mut q = sqlx::query(&sql);
         for v in &params {
@@ -696,6 +715,37 @@ fn split_nested(
         }
     }
     Ok((scalars, nested))
+}
+
+/// The multi-company restriction for a company-scoped model, or None when the caller is unrestricted
+/// (sudo / empty allowed set) or the model has no `company_id`. A NULL company_id is a SHARED record,
+/// visible to every company (matching Odoo's multi-company semantics).
+fn company_filter(model: &ResolvedModel, ctx: &Ctx) -> Option<Domain> {
+    if !ctx.company_scoped() {
+        return None;
+    }
+    let scoped = model
+        .fields
+        .iter()
+        .any(|f| f.name == "company_id" && matches!(f.kind, FieldKind::Many2one { .. }));
+    if !scoped {
+        return None;
+    }
+    Some(
+        Domain::field("company_id")
+            .in_(ctx.allowed_company_ids.clone())
+            .or(Domain::field("company_id").is_null()),
+    )
+}
+
+/// SQL fragment ` AND (<company filter>)` for the id-based write / read-one paths, appending its
+/// bound params (placeholder numbering continues after `params`). Empty when the caller is
+/// unrestricted, so existing single-company behavior is unchanged.
+fn company_clause(model: &ResolvedModel, ctx: &Ctx, params: &mut Vec<Value>) -> Result<String, DbError> {
+    match company_filter(model, ctx) {
+        Some(d) => Ok(format!(" AND ({})", d.compile_into(model, params)?)),
+        None => Ok(String::new()),
+    }
 }
 
 fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {

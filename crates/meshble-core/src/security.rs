@@ -56,18 +56,33 @@ pub struct Ctx {
     pub uid: i64,
     pub groups: Vec<String>,
     su: bool,
+    /// The active company (used to default `company_id` on create).
+    pub company_id: Option<i64>,
+    /// Companies the caller may access. EMPTY means "unrestricted" (the M2 stub, until res.users
+    /// assigns per-user companies in M6); a non-empty set activates same-company data isolation.
+    pub allowed_company_ids: Vec<i64>,
 }
 
 impl Ctx {
     pub fn new(uid: i64, groups: Vec<String>) -> Self {
-        Ctx { uid, groups, su: false }
+        Ctx { uid, groups, su: false, company_id: None, allowed_company_ids: Vec::new() }
     }
     /// Returns an elevated copy that bypasses access control. Explicit and greppable.
     pub fn sudo(&self) -> Ctx {
-        Ctx { uid: self.uid, groups: self.groups.clone(), su: true }
+        Ctx { su: true, ..self.clone() }
+    }
+    /// Sets the active company and the allowed set (the multi-company scope).
+    pub fn in_companies(mut self, active: i64, allowed: Vec<i64>) -> Ctx {
+        self.company_id = Some(active);
+        self.allowed_company_ids = allowed;
+        self
     }
     pub fn is_member(&self, group: &str) -> bool {
         self.groups.iter().any(|g| g == group)
+    }
+    /// True iff the caller has a company restriction the engine should enforce (non-sudo + a set).
+    pub fn company_scoped(&self) -> bool {
+        !self.su && !self.allowed_company_ids.is_empty()
     }
 }
 
