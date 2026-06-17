@@ -18,7 +18,8 @@ meshble::register_module!(MANIFEST);
 /// The macro generates `ModelDescriptor` + `impl Model`; the field "types" are the DSL.
 #[model(name = "sale.order", table = "sale_order")]
 pub struct SaleOrder {
-    #[field(label = "Order Reference", required)]
+    // Numbered "New" until confirmed, when `confirm` assigns the SO sequence (like Odoo's draft name).
+    #[field(label = "Order Reference", default = "New")]
     name: Text,
 
     #[field(label = "Customer", required, target = "res.partner")]
@@ -44,24 +45,101 @@ pub struct SaleOrder {
 /// It auto-registers in the catalog (phase 3) — no wiring in `resolved_sale_order`.
 #[extend("sale.order")]
 pub struct SaleMargin {
-    #[field(label = "Margin", compute = "compute_margin", depends = "amount_total", currency = "currency_id", store)]
+    #[field(label = "Margin", compute = "compute_margin", depends = "line_ids.margin", currency = "currency_id", store)]
     margin: Decimal,
 }
+
+/// Product catalog — the simplest sellable unit. Variants/templates (`product.template` +
+/// attributes) come later; one flat model is enough for the quote-to-order vertical.
+// ponytail: single product model; split into template/variant only when variants are needed.
+#[model(name = "product.product", table = "product_product")]
+pub struct ProductProduct {
+    #[field(label = "Name", required)]
+    name: Text,
+
+    #[field(label = "Internal Reference")]
+    default_code: Text,
+
+    #[field(label = "Sales Price", default = "0")]
+    list_price: Decimal,
+
+    #[field(label = "Cost", default = "0")]
+    standard_price: Decimal,
+
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+}
+
+/// A line of a sale order: a product, a quantity, a unit price. `price_subtotal` and `margin` are
+/// stored same-record computes; the order rolls them up into `amount_total` / `margin` through the
+/// aggregate cascade (`recompute_parent`).
+#[model(name = "sale.order.line", table = "sale_order_line")]
+pub struct SaleOrderLine {
+    #[field(label = "Order", required, target = "sale.order")]
+    order_id: Many2one,
+
+    #[field(label = "Product", required, target = "product.product")]
+    product_id: Many2one,
+
+    // Company-scoped like the order, so direct line access honours multi-company isolation.
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+
+    #[field(label = "Description")]
+    name: Text,
+
+    #[field(label = "Quantity", required, default = "1")]
+    product_uom_qty: Decimal,
+
+    #[field(label = "Unit Price", required, default = "0")]
+    price_unit: Decimal,
+
+    // Cost captured on the line (an onchange would default it from the product; onchange is deferred).
+    #[field(label = "Cost", default = "0")]
+    purchase_price: Decimal,
+
+    #[field(label = "Subtotal", compute = "compute_line_subtotal", depends = "product_uom_qty,price_unit", store)]
+    price_subtotal: Decimal,
+
+    #[field(label = "Margin", compute = "compute_line_margin", depends = "price_unit,purchase_price,product_uom_qty", store)]
+    margin: Decimal,
+}
+
+/// `amount_total` of an order = exact sum of its lines' subtotals.
+fn compute_amount(i: &ComputeInput) -> Value {
+    Value::Decimal(i.sum_decimal("line_ids", "price_subtotal"))
+}
+/// `margin` of an order = exact sum of its lines' margins.
+fn compute_margin(i: &ComputeInput) -> Value {
+    Value::Decimal(i.sum_decimal("line_ids", "margin"))
+}
+/// A line's subtotal = quantity × unit price (exact money).
+fn compute_line_subtotal(i: &ComputeInput) -> Value {
+    Value::Decimal(i.decimal("product_uom_qty") * i.decimal("price_unit"))
+}
+/// A line's margin = (unit price − cost) × quantity. Computed from the raw inputs, NOT from
+/// `price_subtotal`, because every same-record compute reads the pre-write snapshot (no chaining).
+fn compute_line_margin(i: &ComputeInput) -> Value {
+    Value::Decimal((i.decimal("price_unit") - i.decimal("purchase_price")) * i.decimal("product_uom_qty"))
+}
+meshble::register_compute!("compute_amount", compute_amount);
+meshble::register_compute!("compute_margin", compute_margin);
+meshble::register_compute!("compute_line_subtotal", compute_line_subtotal);
+meshble::register_compute!("compute_line_margin", compute_line_margin);
 
 /// Resolves the module's complete model from the catalog (base + auto-registered extensions).
 pub fn resolved_sale_order() -> ResolvedModel {
     resolve_registered("sale.order").expect("sale.order resolution")
 }
 
-/// Access control: `sales.user` can read/write/create sale orders, but not delete.
-pub static ACLS: &[Acl] = &[Acl {
-    model: "sale.order",
-    group: "sales.user",
-    read: true,
-    write: true,
-    create: true,
-    delete: false,
-}];
+/// Access control. `sales.user` runs orders and their lines; products are read by everyone in
+/// sales and maintained by `sales.manager`.
+pub static ACLS: &[Acl] = &[
+    Acl { model: "sale.order", group: "sales.user", read: true, write: true, create: true, delete: false },
+    Acl { model: "sale.order.line", group: "sales.user", read: true, write: true, create: true, delete: true },
+    Acl { model: "product.product", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.product", group: "sales.manager", read: true, write: true, create: true, delete: true },
+];
 
 fn not_done() -> Domain {
     Domain::field("state").ne("done")
@@ -71,6 +149,14 @@ fn small_orders() -> Domain {
 }
 fn done_state() -> Domain {
     Domain::field("state").eq("done")
+}
+// Lines inherit their order's visibility (parity with the rules above), traversing order_id → the
+// order. Without these, direct line access would leak rows the caller can't see on the order itself.
+fn line_parent_not_done() -> Domain {
+    Domain::field("order_id.state").ne("done")
+}
+fn line_parent_small() -> Domain {
+    Domain::field("order_id.amount_total").lt(10_000_i64)
 }
 
 /// UI rules: the total becomes read-only once the order is "done". Emitted into the UI contract
@@ -89,6 +175,14 @@ pub static RECORD_RULES: &[RecordRule] = &[
         groups: &["sales.user"],
         ops: &[Operation::Read],
         domain: small_orders,
+    },
+    // Same restrictions on the lines, reached through their order.
+    RecordRule { model: "sale.order.line", groups: &[], ops: &[Operation::Read], domain: line_parent_not_done },
+    RecordRule {
+        model: "sale.order.line",
+        groups: &["sales.user"],
+        ops: &[Operation::Read],
+        domain: line_parent_small,
     },
 ];
 

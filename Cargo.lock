@@ -1130,7 +1130,10 @@ name = "meshble-mod-sales"
 version = "1.0.0"
 dependencies = [
  "meshble",
+ "meshble-db",
  "meshble-mod-base",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
