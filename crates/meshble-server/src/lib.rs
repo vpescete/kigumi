@@ -308,11 +308,7 @@ fn coerce(kind: &FieldKind, raw: &str) -> Result<Value, String> {
             Value::Int(raw.parse().map_err(|_| format!("'{raw}' is not an integer"))?)
         }
         FieldKind::Decimal { .. } => {
-            let f: f64 = raw.parse().map_err(|_| format!("'{raw}' is not a number"))?;
-            if !f.is_finite() {
-                return Err(format!("'{raw}' is not a finite number"));
-            }
-            Value::Float(f)
+            Value::Decimal(raw.parse::<rust_decimal::Decimal>().map_err(|_| format!("'{raw}' is not a number"))?)
         }
         FieldKind::Bool => Value::Bool(matches!(raw, "true" | "1" | "t" | "yes")),
         FieldKind::Text | FieldKind::Selection(_) => Value::Str(raw.to_string()),
@@ -594,7 +590,10 @@ mod query_tests {
     #[test]
     fn coerce_by_kind() {
         assert_eq!(coerce(&FieldKind::Integer, "5"), Ok(Value::Int(5)));
-        assert_eq!(coerce(&FieldKind::Decimal { currency_field: None }, "1.5"), Ok(Value::Float(1.5)));
+        assert_eq!(
+            coerce(&FieldKind::Decimal { currency_field: None }, "1.5"),
+            Ok(Value::Decimal("1.5".parse::<rust_decimal::Decimal>().unwrap()))
+        );
         assert_eq!(coerce(&FieldKind::Bool, "true"), Ok(Value::Bool(true)));
         assert_eq!(coerce(&FieldKind::Text, "x"), Ok(Value::Str("x".to_string())));
         assert!(coerce(&FieldKind::Integer, "nope").is_err());
@@ -604,7 +603,7 @@ mod query_tests {
     fn build_leaf_typed() {
         let m = model();
         let d = build_leaf(&m, "amount", "gte", "100").unwrap();
-        assert_eq!(d, Domain::Cond(Condition { field: "amount".into(), op: Operator::Ge, value: Value::Float(100.0) }));
+        assert_eq!(d, Domain::Cond(Condition { field: "amount".into(), op: Operator::Ge, value: Value::Decimal("100".parse().unwrap()) }));
         assert!(build_leaf(&m, "nope", "eq", "1").is_err(), "unknown field rejected");
         assert!(build_leaf(&m, "name", "weird", "1").is_err(), "unknown operator rejected");
     }

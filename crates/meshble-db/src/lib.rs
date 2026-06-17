@@ -144,6 +144,7 @@ impl Db {
                 Value::Str(s) => q.bind(s.clone()),
                 Value::Int(n) => q.bind(*n),
                 Value::Float(x) => q.bind(*x),
+                Value::Decimal(d) => q.bind(*d),
                 Value::Bool(b) => q.bind(*b),
                 Value::Null => q.bind(Option::<String>::None),
                 Value::List(_) => q,
@@ -829,8 +830,13 @@ fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
         (FieldKind::Integer | FieldKind::Many2one { .. }, Json::Number(n)) => {
             Value::Int(n.as_i64().ok_or_else(bad)?)
         }
+        // Exact decimal: parse from the number's canonical STRING (not f64) so 0.01 etc. are exact;
+        // also accept a JSON string (the canonical money representation).
         (FieldKind::Decimal { .. }, Json::Number(n)) => {
-            Value::Float(n.as_f64().filter(|x| x.is_finite()).ok_or_else(bad)?)
+            Value::Decimal(n.to_string().parse().map_err(|_| bad())?)
+        }
+        (FieldKind::Decimal { .. }, Json::String(s)) => {
+            Value::Decimal(s.parse().map_err(|_| bad())?)
         }
         (FieldKind::Bool, Json::Bool(b)) => Value::Bool(*b),
         _ => return Err(bad()),
@@ -843,6 +849,7 @@ fn bind_query<'q>(q: Query<'q, Postgres, PgArguments>, v: &Value) -> Query<'q, P
         Value::Str(s) => q.bind(s.clone()),
         Value::Int(n) => q.bind(*n),
         Value::Float(f) => q.bind(*f),
+        Value::Decimal(d) => q.bind(*d),
         Value::Bool(b) => q.bind(*b),
         Value::Null => q.bind(Option::<String>::None),
         Value::List(_) => q,
@@ -937,12 +944,8 @@ fn parents_of(child_model_name: &str) -> Vec<(ResolvedModel, &'static str)> {
 fn select_columns(model: &ResolvedModel) -> String {
     let mut cols = vec!["id".to_string()];
     for f in &model.fields {
-        if !f.has_column() {
-            continue;
-        }
-        if matches!(f.kind, FieldKind::Decimal { .. }) {
-            cols.push(format!("{}::float8 AS {}", f.name, f.name));
-        } else {
+        if f.has_column() {
+            // Decimal columns are read as exact NUMERIC (decoded into rust_decimal) — no float8 cast.
             cols.push(f.name.to_string());
         }
     }
@@ -963,9 +966,12 @@ fn record_to_values(model: &ResolvedModel, row: &PgRow) -> BTreeMap<String, Valu
             FieldKind::Integer | FieldKind::Many2one { .. } => {
                 row.try_get::<Option<i64>, _>(f.name).ok().flatten().map(Value::Int).unwrap_or(Value::Null)
             }
-            FieldKind::Decimal { .. } => {
-                row.try_get::<Option<f64>, _>(f.name).ok().flatten().map(Value::Float).unwrap_or(Value::Null)
-            }
+            FieldKind::Decimal { .. } => row
+                .try_get::<Option<rust_decimal::Decimal>, _>(f.name)
+                .ok()
+                .flatten()
+                .map(Value::Decimal)
+                .unwrap_or(Value::Null),
             FieldKind::Bool => {
                 row.try_get::<Option<bool>, _>(f.name).ok().flatten().map(Value::Bool).unwrap_or(Value::Null)
             }
@@ -993,8 +999,9 @@ fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
             FieldKind::Integer | FieldKind::Many2one { .. } => {
                 row.try_get::<Option<i64>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
             }
-            FieldKind::Decimal { .. } => match row.try_get::<Option<f64>, _>(f.name)? {
-                Some(x) => serde_json::json!(x),
+            // Exact decimal serialized as a JSON STRING (e.g. "1240.00") to preserve precision.
+            FieldKind::Decimal { .. } => match row.try_get::<Option<rust_decimal::Decimal>, _>(f.name)? {
+                Some(d) => Json::from(d.to_string()),
                 None => Json::Null,
             },
             FieldKind::Bool => {
@@ -1018,6 +1025,7 @@ fn bind_all<'q>(
             Value::Str(s) => q.bind(s.clone()),
             Value::Int(n) => q.bind(*n),
             Value::Float(f) => q.bind(*f),
+            Value::Decimal(d) => q.bind(*d),
             Value::Bool(b) => q.bind(*b),
             Value::Null => q.bind(Option::<String>::None),
             // Lists are pre-expanded into scalar params by the compiler; this is unreachable.

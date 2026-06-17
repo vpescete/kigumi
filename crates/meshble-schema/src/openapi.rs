@@ -53,7 +53,8 @@ fn field_schema(f: &FieldDef) -> Value {
         FieldKind::Integer | FieldKind::Many2one { .. } => {
             json!({ "type": "integer", "format": "int64" })
         }
-        FieldKind::Decimal { .. } => json!({ "type": "number" }),
+        // Exact decimals are serialized as strings to preserve precision (NUMERIC, not float).
+        FieldKind::Decimal { .. } => json!({ "type": "string", "format": "decimal" }),
         FieldKind::Bool => json!({ "type": "boolean" }),
         // The get-one response inlines One2many children as full child objects, so the schema
         // references the child model (not a bare id array).

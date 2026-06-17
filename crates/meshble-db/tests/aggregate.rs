@@ -35,7 +35,7 @@ meshble_core::inventory::submit! { ModelRegistration { name: "agg.order", module
 meshble_core::inventory::submit! { ModelRegistration { name: "agg.line", module: "test", descriptor: line_desc } }
 
 fn agg_total(i: &ComputeInput) -> Value {
-    Value::Float(i.sum_float("line_ids", "price"))
+    Value::Decimal(i.sum_decimal("line_ids", "price"))
 }
 meshble_core::inventory::submit! { meshble_core::ComputeRegistration { name: "agg_total", func: agg_total } }
 

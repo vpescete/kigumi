@@ -14,9 +14,18 @@ pub enum Value {
     Str(String),
     Int(i64),
     Float(f64),
+    /// Exact decimal for monetary/`Decimal` fields (stored as Postgres NUMERIC, serialized as a JSON
+    /// string to preserve precision). `Float` remains for any non-exact float use.
+    Decimal(rust_decimal::Decimal),
     Bool(bool),
     Null,
     List(Vec<Value>),
+}
+
+impl From<rust_decimal::Decimal> for Value {
+    fn from(d: rust_decimal::Decimal) -> Self {
+        Value::Decimal(d)
+    }
 }
 
 impl From<&str> for Value {
@@ -371,7 +380,7 @@ fn check_value_type(field: &FieldDef, v: &Value) -> Result<(), DomainError> {
     let ok = match (&field.kind, v) {
         (FieldKind::Text | FieldKind::Selection(_), Value::Str(_)) => true,
         (FieldKind::Integer | FieldKind::Many2one { .. }, Value::Int(_)) => true,
-        (FieldKind::Decimal { .. }, Value::Int(_)) => true,
+        (FieldKind::Decimal { .. }, Value::Int(_) | Value::Decimal(_)) => true,
         // NaN / Infinity cannot be stored in NUMERIC and make every comparison UNKNOWN.
         (FieldKind::Decimal { .. }, Value::Float(f)) => f.is_finite(),
         (FieldKind::Bool, Value::Bool(_)) => true,
@@ -549,6 +558,8 @@ fn value_to_json(v: &Value) -> String {
                 "null".to_string()
             }
         }
+        // Exact decimals serialize as a JSON STRING so precision is never lost through f64.
+        Value::Decimal(d) => json_string(&d.to_string()),
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
         Value::List(items) => {

@@ -66,6 +66,28 @@ impl ComputeInput<'_> {
     pub fn count(&self, o2m_field: &str) -> usize {
         self.children(o2m_field).len()
     }
+
+    /// An exact Decimal field value (0 if absent / not numeric).
+    pub fn decimal(&self, field: &str) -> rust_decimal::Decimal {
+        match self.values.get(field) {
+            Some(Value::Decimal(d)) => *d,
+            Some(Value::Int(n)) => rust_decimal::Decimal::from(*n),
+            _ => rust_decimal::Decimal::ZERO,
+        }
+    }
+
+    /// Sums an exact Decimal `child_field` over the children of `o2m_field` — the exact-money
+    /// aggregate (no f64 rounding), e.g. `amount_total = sum(line_ids.price_subtotal)`.
+    pub fn sum_decimal(&self, o2m_field: &str, child_field: &str) -> rust_decimal::Decimal {
+        self.children(o2m_field)
+            .iter()
+            .map(|c| match c.get(child_field) {
+                Some(Value::Decimal(d)) => *d,
+                Some(Value::Int(n)) => rust_decimal::Decimal::from(*n),
+                _ => rust_decimal::Decimal::ZERO,
+            })
+            .sum()
+    }
 }
 
 /// A registered compute function.
@@ -184,5 +206,23 @@ mod tests {
         let mut values = BTreeMap::new();
         compute_stored(&m, &mut values, &children);
         assert_eq!(values.get("amount_total"), Some(&Value::Float(8.0)));
+    }
+
+    #[test]
+    fn decimal_aggregate_is_exact() {
+        use rust_decimal::Decimal;
+        use std::str::FromStr;
+        // 0.1 + 0.1 + 0.1 must be EXACTLY 0.3 — the f64 path this replaces gives 0.30000000000000004.
+        let line = |p: &str| {
+            let mut m = BTreeMap::new();
+            m.insert("price".to_string(), Value::Decimal(Decimal::from_str(p).unwrap()));
+            m
+        };
+        let mut children = Children::new();
+        children.insert("line_ids".to_string(), vec![line("0.1"), line("0.1"), line("0.1")]);
+        let snapshot = BTreeMap::new();
+        let input = ComputeInput { values: &snapshot, children: &children };
+        assert_eq!(input.sum_decimal("line_ids", "price"), Decimal::from_str("0.3").unwrap());
+        assert_ne!(0.1_f64 + 0.1 + 0.1, 0.3, "f64 is inexact — the reason for rust_decimal");
     }
 }

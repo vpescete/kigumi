@@ -36,7 +36,7 @@ meshble_core::inventory::submit! { ModelRegistration { name: "nst.order", module
 meshble_core::inventory::submit! { ModelRegistration { name: "nst.line", module: "test", descriptor: line_desc } }
 
 fn nst_total(i: &ComputeInput) -> Value {
-    Value::Float(i.sum_float("line_ids", "price"))
+    Value::Decimal(i.sum_decimal("line_ids", "price"))
 }
 meshble_core::inventory::submit! { meshble_core::ComputeRegistration { name: "nst_total", func: nst_total } }
 
@@ -177,7 +177,8 @@ async fn reads_a_parent_with_its_children_inlined() {
     let got = db.find_one_secured(&order, &su, &[], RULES, oid).await.unwrap().expect("order visible");
     let obj = got.as_object().unwrap();
     assert_eq!(obj["name"], "O1");
-    assert_eq!(obj["amount_total"].as_f64().unwrap(), 15.0, "aggregate present on the parent");
+    // amount_total is an exact decimal, serialized as a JSON string.
+    assert_eq!(obj["amount_total"].as_str().unwrap().parse::<f64>().unwrap(), 15.0, "aggregate present on the parent");
     let lines = obj["line_ids"].as_array().expect("line_ids inlined as an array");
     assert_eq!(lines.len(), 2, "both children inlined");
     assert_eq!(lines[0]["order_id"].as_i64().unwrap(), oid, "child points back to the parent");

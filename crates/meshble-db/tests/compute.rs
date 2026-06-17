@@ -8,7 +8,7 @@ use meshble_core::{
 use meshble_db::Db;
 
 fn compute_subtotal(i: &ComputeInput) -> Value {
-    Value::Float(i.float("qty") * i.float("price"))
+    Value::Decimal(i.decimal("qty") * i.decimal("price"))
 }
 meshble_core::inventory::submit! {
     meshble_core::ComputeRegistration { name: "compute_subtotal", func: compute_subtotal }
