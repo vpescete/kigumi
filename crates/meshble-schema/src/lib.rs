@@ -7,7 +7,7 @@
 mod openapi;
 pub use openapi::openapi;
 
-use meshble_core::{json_string, Domain, DomainError, FieldKind, ResolvedModel};
+use meshble_core::{actions_for, json_string, Domain, DomainError, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
 fn pg_type(kind: &FieldKind) -> &'static str {
@@ -126,10 +126,42 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
             format!("    {{ {} }}", parts.join(", "))
         })
         .collect();
+    // List view (D7): the columns a generic list renders. Default = the scalar (column-backed)
+    // fields in declaration order; One2many relations are not columns. The frontend may subset/reorder.
+    let columns: Vec<String> = m
+        .fields
+        .iter()
+        .filter(|f| f.has_column())
+        .map(|f| {
+            format!(
+                "    {{ \"name\": {}, \"label\": {}, \"widget\": \"{}\" }}",
+                json_string(f.name),
+                json_string(f.label),
+                widget(&f.kind)
+            )
+        })
+        .collect();
+
+    // Actions (D7): the state-transition actions a form can offer (the buttons), with the groups
+    // allowed to run each (empty = everyone). The frontend hides those the caller's groups don't grant.
+    let actions: Vec<String> = actions_for(m.name)
+        .iter()
+        .map(|a| {
+            let groups: Vec<String> = a.groups.iter().map(|g| json_string(g)).collect();
+            format!(
+                "    {{ \"name\": {}, \"groups\": [{}] }}",
+                json_string(a.name),
+                groups.join(", ")
+            )
+        })
+        .collect();
+
     Ok(format!(
-        "{{\n  \"model\": {},\n  \"type\": \"form\",\n  \"fields\": [\n{}\n  ]\n}}",
+        "{{\n  \"model\": {},\n  \"type\": \"form\",\n  \"fields\": [\n{}\n  ],\n  \"list\": {{ \"columns\": [\n{}\n  ] }},\n  \"actions\": [\n{}\n  ]\n}}",
         json_string(m.name),
-        fields.join(",\n")
+        fields.join(",\n"),
+        columns.join(",\n"),
+        actions.join(",\n")
     ))
 }
 

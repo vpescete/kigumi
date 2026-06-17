@@ -84,3 +84,8 @@ inventory::collect!(ActionRegistration);
 pub fn action_for(model: &str, name: &str) -> Option<&'static ActionRegistration> {
     inventory::iter::<ActionRegistration>.into_iter().find(|a| a.model == model && a.name == name)
 }
+
+/// All actions registered on `model` (for the UI contract, so a form can render its action buttons).
+pub fn actions_for(model: &str) -> Vec<&'static ActionRegistration> {
+    inventory::iter::<ActionRegistration>.into_iter().filter(|a| a.model == model).collect()
+}

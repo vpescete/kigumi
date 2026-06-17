@@ -272,5 +272,10 @@ mod tests {
         assert!(contract.contains("\"widget\": \"monetary\""));
         // The dynamic readonly rule is emitted as a portable domain AST.
         assert!(contract.contains("\"readonly_when\": {\"field\":\"state\",\"op\":\"=\",\"value\":\"done\"}"));
+        // D7: the contract also carries the list columns and the form's actions.
+        assert!(contract.contains("\"list\": { \"columns\": ["), "list columns emitted");
+        assert!(contract.contains("\"actions\": ["), "actions emitted");
+        assert!(contract.contains("\"name\": \"confirm\""), "confirm action present");
+        assert!(contract.contains("\"groups\": [\"sales.user\"]"), "action groups present");
     }
 }
