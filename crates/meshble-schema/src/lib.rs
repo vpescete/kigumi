@@ -7,7 +7,7 @@
 mod openapi;
 pub use openapi::openapi;
 
-use meshble_core::{actions_for, is_mailed, json_string, related_path, Domain, DomainError, FieldKind, ResolvedModel};
+use meshble_core::{actions_for, delegated_fields, is_mailed, json_string, related_path, Domain, DomainError, FieldDef, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
 fn pg_type(kind: &FieldKind) -> &'static str {
@@ -103,55 +103,62 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
     for r in rules {
         (r.domain)().validate(m)?;
     }
-    let fields: Vec<String> = m
+    // Emits one field's contract JSON. `readonly` is decided by the caller (computed/related →
+    // read-only; own and delegated scalar fields → editable). UI rules are looked up by field name.
+    let emit = |f: &FieldDef, readonly: bool| -> String {
+        let mut parts = vec![
+            format!("\"name\": {}", json_string(f.name)),
+            format!("\"label\": {}", json_string(f.label)),
+            format!("\"widget\": \"{}\"", widget(&f.kind)),
+            format!("\"required\": {}", f.required),
+            format!("\"readonly\": {readonly}"),
+        ];
+        if let FieldKind::Selection(opts) = &f.kind {
+            let items: Vec<String> = opts
+                .iter()
+                .map(|(v, l)| format!("{{ \"value\": {}, \"label\": {} }}", json_string(v), json_string(l)))
+                .collect();
+            parts.push(format!("\"options\": [{}]", items.join(", ")));
+        }
+        match &f.kind {
+            FieldKind::Many2one { target } => {
+                parts.push(format!("\"relation\": {}", json_string(target)));
+            }
+            FieldKind::One2many { target, inverse } => {
+                parts.push(format!("\"relation\": {}", json_string(target)));
+                parts.push(format!("\"inverse\": {}", json_string(inverse)));
+            }
+            _ => {}
+        }
+        if let Some(d) = f.default {
+            parts.push(format!("\"default\": {}", json_string(d)));
+        }
+        if let Some(j) = rule_json(rules, f.name, UiRule::Invisible) {
+            parts.push(format!("\"invisible_when\": {j}"));
+        }
+        if let Some(j) = rule_json(rules, f.name, UiRule::Readonly) {
+            parts.push(format!("\"readonly_when\": {j}"));
+        }
+        format!("    {{ {} }}", parts.join(", "))
+    };
+    let mut fields: Vec<String> = m
         .fields
         .iter()
         .map(|f| {
             // Related fields are read-only mirrors (resolved server-side), like computed fields.
             let readonly = f.is_computed() || related_path(m.name, f.name).is_some();
-            let mut parts = vec![
-                format!("\"name\": {}", json_string(f.name)),
-                format!("\"label\": {}", json_string(f.label)),
-                format!("\"widget\": \"{}\"", widget(&f.kind)),
-                format!("\"required\": {}", f.required),
-                format!("\"readonly\": {readonly}"),
-            ];
-            if let FieldKind::Selection(opts) = &f.kind {
-                let items: Vec<String> = opts
-                    .iter()
-                    .map(|(v, l)| format!("{{ \"value\": {}, \"label\": {} }}", json_string(v), json_string(l)))
-                    .collect();
-                parts.push(format!("\"options\": [{}]", items.join(", ")));
-            }
-            // Relation target, so a frontend can fetch the related model's contract (e.g. to render
-            // an inlined One2many's columns) and resolve Many2one references.
-            match &f.kind {
-                FieldKind::Many2one { target } => {
-                    parts.push(format!("\"relation\": {}", json_string(target)));
-                }
-                FieldKind::One2many { target, inverse } => {
-                    parts.push(format!("\"relation\": {}", json_string(target)));
-                    parts.push(format!("\"inverse\": {}", json_string(inverse)));
-                }
-                _ => {}
-            }
-            // Surface the field default so a new-record form can prefill it.
-            if let Some(d) = f.default {
-                parts.push(format!("\"default\": {}", json_string(d)));
-            }
-            if let Some(j) = rule_json(rules, f.name, UiRule::Invisible) {
-                parts.push(format!("\"invisible_when\": {j}"));
-            }
-            if let Some(j) = rule_json(rules, f.name, UiRule::Readonly) {
-                parts.push(format!("\"readonly_when\": {j}"));
-            }
-            format!("    {{ {} }}", parts.join(", "))
+            emit(f, readonly)
         })
         .collect();
+    // _inherits: delegated parent fields are exposed transparently as editable fields (the write-split
+    // routes them to the parent), so the generic form/list shows them with no knowledge of the split.
+    let delegated = delegated_fields(m.name).unwrap_or_default();
+    for d in &delegated {
+        fields.push(emit(&d.def, false));
+    }
     // List view (D7): the columns a generic list renders. Default = the scalar (column-backed) fields
-    // plus related mirrors, in declaration order; One2many relations are not columns. The frontend
-    // may subset/reorder.
-    let columns: Vec<String> = m
+    // plus related mirrors and delegated parent fields, in declaration order; One2many is not a column.
+    let mut columns: Vec<String> = m
         .fields
         .iter()
         .filter(|f| f.has_column() || related_path(m.name, f.name).is_some())
@@ -164,6 +171,14 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
             )
         })
         .collect();
+    for d in &delegated {
+        columns.push(format!(
+            "    {{ \"name\": {}, \"label\": {}, \"widget\": \"{}\" }}",
+            json_string(d.def.name),
+            json_string(d.def.label),
+            widget(&d.def.kind)
+        ));
+    }
 
     // Actions (D7): the state-transition actions a form can offer (the buttons), with the groups
     // allowed to run each (empty = everyone). The frontend hides those the caller's groups don't grant.

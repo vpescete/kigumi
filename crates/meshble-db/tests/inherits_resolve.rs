@@ -8,7 +8,7 @@ use meshble_core::{
     delegated_fields, inherits_of, resolve_registered, FieldDef, FieldKind, InheritsRegistration,
     ModelDescriptor, ModelRegistration,
 };
-use meshble_schema::to_ddl;
+use meshble_schema::{to_ddl, to_ui_contract};
 
 // Parent: a product template-like model with shared scalar fields + one computed field (NOT delegated).
 static TPL: ModelDescriptor = ModelDescriptor {
@@ -101,6 +101,17 @@ fn invalid_inherits_declarations_are_rejected() {
     // An inherits cycle is rejected (resolution terminates with a clear error).
     let e = resolve_registered("inh.cyca").unwrap_err();
     assert!(e.contains("cycle"), "cycle error: {e}");
+}
+
+#[test]
+fn contract_exposes_delegated_fields_as_editable() {
+    let child = resolve_registered("inh.var").unwrap();
+    let c = to_ui_contract(&child, &[]).unwrap();
+    // The inherited parent fields appear in the contract (so the generic form/list shows them)...
+    assert!(c.contains("\"name\": \"name\""), "delegated name in contract: {c}");
+    assert!(c.contains("\"name\": \"list_price\""), "delegated list_price in contract");
+    // ...and they are editable (not read-only): the write-split routes them to the parent.
+    assert!(c.contains("\"name\": \"list_price\", \"label\": \"Price\", \"widget\": \"float\", \"required\": false, \"readonly\": false"), "delegated field editable: {c}");
 }
 
 #[test]
