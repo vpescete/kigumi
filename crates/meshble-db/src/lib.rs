@@ -109,10 +109,31 @@ impl Db {
         Ok(())
     }
 
-    /// Drops the model's table if it exists.
+    /// Drops the model's table if it exists. CASCADE so dependent objects (e.g. Many2many junction
+    /// tables that FK into it) are removed too — this is a teardown/test helper, not a data path.
     pub async fn drop_table(&self, model: &ResolvedModel) -> Result<(), DbError> {
-        let sql = format!("DROP TABLE IF EXISTS {}", model.table);
+        let sql = format!("DROP TABLE IF EXISTS {} CASCADE", model.table);
         sqlx::query(&sql).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Creates the junction tables for this model's Many2many fields (idempotent). Both the model's
+    /// and the targets' tables must already exist (the migration runs this AFTER all model tables);
+    /// each junction has FKs to both with ON DELETE CASCADE so membership rows clean up automatically.
+    pub async fn create_m2m_relations(&self, model: &ResolvedModel) -> Result<(), DbError> {
+        for f in &model.fields {
+            if let FieldKind::Many2many { target, relation, column, target_column } = f.kind {
+                let target_table = target.replace('.', "_");
+                let ddl = format!(
+                    "CREATE TABLE IF NOT EXISTS {rel} (\
+                     {col} bigint NOT NULL REFERENCES {this}(id) ON DELETE CASCADE, \
+                     {tc} bigint NOT NULL REFERENCES {tgt}(id) ON DELETE CASCADE, \
+                     PRIMARY KEY ({col}, {tc}))",
+                    rel = relation, col = column, this = model.table, tc = target_column, tgt = target_table
+                );
+                sqlx::query(&ddl).execute(&self.pool).await?;
+            }
+        }
         Ok(())
     }
 
@@ -372,8 +393,8 @@ impl Db {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "create" });
         }
         check_writable_fields(model, ctx, values)?; // D6: reject fields the caller may not write
-        // Split the payload: scalar columns vs One2many child-create payloads (nested writes).
-        let (mut scalars, nested) = split_nested(model, values)?;
+        // Split the payload: scalar columns, One2many child-create payloads, Many2many sets.
+        let (mut scalars, nested, m2m) = split_nested(model, values)?;
         // Multi-company: validate the supplied company_id against the caller's scope and default it
         // on create (single chokepoint, reused for nested children + update below).
         apply_company_scope(model, ctx, &mut scalars, true)?;
@@ -427,6 +448,10 @@ impl Db {
         if !nested.is_empty() {
             self.apply_nested_in_tx(&mut tx, ctx, acls, rules, &nested, id, false).await?;
         }
+        // Many2many sets, in the same transaction (atomic with the row + children).
+        if !m2m.is_empty() {
+            apply_m2m_in_tx(&mut tx, id, &m2m).await?;
+        }
 
         // Recompute this parent's own aggregate from the just-inserted children IN THIS TRANSACTION,
         // so the parent row, its children, and its aggregate commit atomically (no stale window, and
@@ -458,12 +483,12 @@ impl Db {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "write" });
         }
         check_writable_fields(model, ctx, values)?; // D6: reject fields the caller may not write
-        // Split scalar fields from One2many child commands (D4 typed write-through).
-        let (mut scalars, nested) = split_nested(model, values)?;
+        // Split scalar fields from One2many child commands (D4) and Many2many sets.
+        let (mut scalars, nested, m2m) = split_nested(model, values)?;
         // Multi-company: a scoped caller may not reassign a row into a foreign company or NULL.
         apply_company_scope(model, ctx, &mut scalars, false)?;
         let cols = validate_write_values(model, &scalars, false)?;
-        if cols.is_empty() && nested.is_empty() {
+        if cols.is_empty() && nested.is_empty() && m2m.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
         }
 
@@ -516,6 +541,10 @@ impl Db {
         // 2) Apply the nested child commands (create/update/delete) in the same transaction.
         if !nested.is_empty() {
             self.apply_nested_in_tx(&mut tx, ctx, acls, rules, &nested, id, true).await?;
+        }
+        // 2b) Apply Many2many sets (the row was confirmed writable above).
+        if !m2m.is_empty() {
+            apply_m2m_in_tx(&mut tx, id, &m2m).await?;
         }
 
         // 3) Recompute this row's computed columns (same-record + aggregate over its children),
@@ -963,17 +992,42 @@ struct NestedWrite {
     commands: Vec<O2mCommand>,
 }
 
-/// Splits a write payload into scalar columns and One2many child commands. Each One2many value is an
-/// array of typed commands `{op:'create',values}` / `{op:'update',id,values}` / `{op:'delete',id}`;
-/// a bare object (no `op`/`id`) is shorthand for create.
+/// A Many2many SET: the target ids the relation should contain after the write (replaces membership).
+struct M2mSet {
+    relation: &'static str,
+    column: &'static str,
+    target_column: &'static str,
+    ids: Vec<i64>,
+}
+
+/// Splits a write payload into scalar columns, One2many child commands, and Many2many sets. Each
+/// One2many value is an array of typed commands `{op:'create',values}` / `{op:'update',id,values}` /
+/// `{op:'delete',id}` (a bare object = create); each Many2many value is an array of target ids (SET
+/// semantics — it replaces the membership). A null Many2many is ignored (no change).
 fn split_nested(
     model: &ResolvedModel,
     values: &Map<String, Json>,
-) -> Result<(Map<String, Json>, Vec<NestedWrite>), DbError> {
+) -> Result<(Map<String, Json>, Vec<NestedWrite>, Vec<M2mSet>), DbError> {
     let mut scalars = Map::new();
     let mut nested = Vec::new();
+    let mut m2m = Vec::new();
     for (key, jv) in values {
         match model.fields.iter().find(|f| f.name == *key).map(|f| f.kind) {
+            Some(FieldKind::Many2many { relation, column, target_column, .. }) => {
+                if jv.is_null() {
+                    continue; // null = leave the relation unchanged
+                }
+                let arr = jv
+                    .as_array()
+                    .ok_or_else(|| DbError::BadInput(format!("'{key}' must be an array of ids")))?;
+                let mut ids = Vec::with_capacity(arr.len());
+                for v in arr {
+                    ids.push(
+                        v.as_i64().ok_or_else(|| DbError::BadInput(format!("'{key}': ids must be integers")))?,
+                    );
+                }
+                m2m.push(M2mSet { relation, column, target_column, ids });
+            }
             Some(FieldKind::One2many { target, inverse }) => {
                 let arr = jv.as_array().ok_or_else(|| {
                     DbError::BadInput(format!("'{key}' must be an array of child commands"))
@@ -999,7 +1053,33 @@ fn split_nested(
             }
         }
     }
-    Ok((scalars, nested))
+    Ok((scalars, nested, m2m))
+}
+
+/// Applies Many2many SETs in `tx`: for each, clear the record's membership then insert the given
+/// target ids (a non-existent target id raises a clean FK error; duplicate ids are coalesced).
+async fn apply_m2m_in_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    record_id: i64,
+    sets: &[M2mSet],
+) -> Result<(), DbError> {
+    for s in sets {
+        sqlx::query(&format!("DELETE FROM {} WHERE {} = $1", s.relation, s.column))
+            .bind(record_id)
+            .execute(&mut **tx)
+            .await?;
+        for &tid in &s.ids {
+            sqlx::query(&format!(
+                "INSERT INTO {} ({}, {}) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                s.relation, s.column, s.target_column
+            ))
+            .bind(record_id)
+            .bind(tid)
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 fn parse_o2m_command(field: &str, item: &Json) -> Result<O2mCommand, DbError> {
@@ -1142,7 +1222,7 @@ fn default_json(field: &FieldDef) -> Option<Json> {
         FieldKind::Decimal { .. } | FieldKind::Text | FieldKind::Selection(_) | FieldKind::Date | FieldKind::Datetime => {
             Json::from(d.to_string())
         }
-        FieldKind::One2many { .. } => return None,
+        FieldKind::One2many { .. } | FieldKind::Many2many { .. } => return None,
     })
 }
 
@@ -1229,7 +1309,8 @@ fn pg_cast(kind: &FieldKind) -> &'static str {
         FieldKind::Bool => "boolean",
         FieldKind::Date => "date",
         FieldKind::Datetime => "timestamptz",
-        FieldKind::One2many { .. } => "text", // no column; never reached in a SET/VALUES clause
+        // No column; never reached in a SET/VALUES clause.
+        FieldKind::One2many { .. } | FieldKind::Many2many { .. } => "text",
     }
 }
 
@@ -1352,6 +1433,12 @@ fn select_columns(model: &ResolvedModel) -> String {
             if let Ok(sq) = related_subquery(model, path) {
                 cols.push(format!("{sq} AS {}", f.name));
             }
+        } else if let FieldKind::Many2many { relation, column, target_column, .. } = f.kind {
+            // Many2many: an aggregated array of the target ids from the junction table.
+            cols.push(format!(
+                "(SELECT COALESCE(array_agg({tc} ORDER BY {tc}), '{{}}'::bigint[]) FROM {rel} WHERE {col} = {tbl}.id) AS {name}",
+                tc = target_column, rel = relation, col = column, tbl = model.table, name = f.name
+            ));
         }
     }
     cols.join(", ")
@@ -1404,7 +1491,7 @@ fn record_to_values(model: &ResolvedModel, row: &PgRow) -> BTreeMap<String, Valu
     let mut m = BTreeMap::new();
     for f in &model.fields {
         // Related fields have no column but ARE selected (as a subquery alias) — read them too.
-        if !f.has_column() && related_path(model.name, f.name).is_none() {
+        if !f.has_column() && related_path(model.name, f.name).is_none() && !matches!(f.kind, FieldKind::Many2many { .. }) {
             continue;
         }
         let v = match &f.kind {
@@ -1430,6 +1517,16 @@ fn record_to_values(model: &ResolvedModel, row: &PgRow) -> BTreeMap<String, Valu
             FieldKind::Date | FieldKind::Datetime => {
                 row.try_get::<Option<String>, _>(f.name).ok().flatten().map(Value::Str).unwrap_or(Value::Null)
             }
+            // Many2many is selected as an int array (array_agg of target ids) → a list of Ints.
+            FieldKind::Many2many { .. } => Value::List(
+                row.try_get::<Option<Vec<i64>>, _>(f.name)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(Value::Int)
+                    .collect(),
+            ),
             FieldKind::One2many { .. } => continue,
         };
         m.insert(f.name.to_string(), v);
@@ -1445,7 +1542,7 @@ fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
     obj.insert("id".to_string(), Json::from(id));
     for f in &model.fields {
         // Related fields have no column but ARE selected (as a subquery alias) — project them too.
-        if !f.has_column() && related_path(model.name, f.name).is_none() {
+        if !f.has_column() && related_path(model.name, f.name).is_none() && !matches!(f.kind, FieldKind::Many2many { .. }) {
             continue;
         }
         let v: Json = match &f.kind {
@@ -1467,6 +1564,11 @@ fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
             // Date/Datetime are selected as ::text → an ISO string (e.g. "2026-01-15").
             FieldKind::Date | FieldKind::Datetime => {
                 row.try_get::<Option<String>, _>(f.name)?.map(Json::from).unwrap_or(Json::Null)
+            }
+            // Many2many is selected as an int array (array_agg of target ids) → a JSON array.
+            FieldKind::Many2many { .. } => {
+                let ids: Vec<i64> = row.try_get::<Option<Vec<i64>>, _>(f.name)?.unwrap_or_default();
+                Json::Array(ids.into_iter().map(Json::from).collect())
             }
             FieldKind::One2many { .. } => continue,
         };

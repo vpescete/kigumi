@@ -57,8 +57,10 @@ export function ModelForm() {
         o2m.map(async (f) => [f.name, await api.contract(f.relation as string)] as const),
       )
       setChildContracts(Object.fromEntries(children))
-      // Fetch selectable records for each Many2one, so the field is a name picker, not a raw id input.
-      const m2o = c.fields.filter((f) => f.widget === 'many2one' && f.relation)
+      // Fetch selectable records for each Many2one/Many2many, so the field is a name picker.
+      const m2o = c.fields.filter(
+        (f) => (f.widget === 'many2one' || f.widget === 'many2many') && f.relation,
+      )
       const opts = await Promise.all(
         m2o.map(async (f) => {
           try {
@@ -260,6 +262,24 @@ function FieldInput({
           style={style}
         />
       )
+    case 'many2many': {
+      // SET semantics: the value is the full array of selected target ids.
+      const selected = Array.isArray(value) ? (value as number[]).map(String) : []
+      return (
+        <select
+          multiple
+          value={selected}
+          onChange={(e) => onChange(Array.from(e.target.selectedOptions).map((o) => Number(o.value)))}
+          className={`${cls} min-h-[5rem] py-1.5`}
+        >
+          {(options ?? []).map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )
+    }
     case 'many2one':
       // A name picker when we have the related records; raw id input only as a fallback.
       if (options) {

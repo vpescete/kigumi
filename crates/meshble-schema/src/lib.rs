@@ -20,7 +20,8 @@ fn pg_type(kind: &FieldKind) -> &'static str {
         FieldKind::Date => "date",
         FieldKind::Datetime => "timestamptz",
         FieldKind::Many2one { .. } => "bigint",
-        FieldKind::One2many { .. } => "", // no column
+        // No column on this model: One2many lives on the inverse, Many2many in a junction table.
+        FieldKind::One2many { .. } | FieldKind::Many2many { .. } => "",
     }
 }
 
@@ -65,6 +66,7 @@ fn widget(kind: &FieldKind) -> &'static str {
         FieldKind::Selection(_) => "selection",
         FieldKind::Many2one { .. } => "many2one",
         FieldKind::One2many { .. } => "one2many",
+        FieldKind::Many2many { .. } => "many2many",
     }
 }
 

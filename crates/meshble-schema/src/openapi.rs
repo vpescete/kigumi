@@ -64,6 +64,10 @@ fn field_schema(f: &FieldDef) -> Value {
         FieldKind::One2many { target, .. } => {
             json!({ "type": "array", "items": { "$ref": format!("#/components/schemas/{target}") } })
         }
+        // Many2many is read/written as an array of target ids (SET semantics).
+        FieldKind::Many2many { .. } => {
+            json!({ "type": "array", "items": { "type": "integer", "format": "int64" } })
+        }
     };
     let obj = s.as_object_mut().expect("field schema is an object");
     obj.insert("title".into(), Value::from(f.label));

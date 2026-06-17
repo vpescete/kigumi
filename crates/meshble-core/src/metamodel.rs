@@ -20,6 +20,15 @@ pub enum FieldKind {
     Many2one { target: &'static str },
     /// 1→N relation: does NOT generate a column (lives on the inverse).
     One2many { target: &'static str, inverse: &'static str },
+    /// N↔N relation through a junction table. No column on this model; the set lives in `relation`
+    /// (a table with `column` → this model's id and `target_column` → the target's id). Read as an
+    /// array of target ids; written with SET semantics (an array of ids replaces the membership).
+    Many2many {
+        target: &'static str,
+        relation: &'static str,
+        column: &'static str,
+        target_column: &'static str,
+    },
 }
 
 /// Definition of a single field.
@@ -44,9 +53,11 @@ pub struct FieldDef {
 }
 
 impl FieldDef {
-    /// A field has a column in the table iff it is stored and is not a one2many.
+    /// A field has a column in the table iff it is stored and is not a one2many or many2many (those
+    /// live on the inverse / a junction table).
     pub fn has_column(&self) -> bool {
-        self.stored && !matches!(self.kind, FieldKind::One2many { .. })
+        self.stored
+            && !matches!(self.kind, FieldKind::One2many { .. } | FieldKind::Many2many { .. })
     }
     pub fn is_computed(&self) -> bool {
         self.compute.is_some()

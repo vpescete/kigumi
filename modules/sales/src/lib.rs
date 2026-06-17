@@ -66,8 +66,19 @@ pub struct ProductProduct {
     #[field(label = "Cost", default = "0")]
     standard_price: Decimal,
 
+    // First-class Many2many: product tags through a junction table.
+    #[field(label = "Tags", target = "product.tag", relation = "product_product_tag_rel", column = "product_id", target_column = "tag_id")]
+    tag_ids: Many2many,
+
     #[field(label = "Active", default = "true")]
     active: Bool,
+}
+
+/// A product tag/label (the comodel of `product.product.tag_ids`).
+#[model(name = "product.tag", table = "product_tag")]
+pub struct ProductTag {
+    #[field(label = "Name", required, unique)]
+    name: Text,
 }
 
 /// A line of a sale order: a product, a quantity, a unit price. `price_subtotal` and `margin` are
@@ -144,6 +155,8 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "sale.order.line", group: "sales.user", read: true, write: true, create: true, delete: true },
     Acl { model: "product.product", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "product.product", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "product.tag", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.tag", group: "sales.manager", read: true, write: true, create: true, delete: true },
 ];
 
 fn not_done() -> Domain {
@@ -236,6 +249,19 @@ mod tests {
         assert_eq!(module_of("sale.order"), Some("sales"));
         assert_eq!(module_of("product.product"), Some("sales"));
         assert_eq!(module_of("res.partner"), Some("base"));
+    }
+
+    #[test]
+    fn many2many_macro_builds_descriptor() {
+        // `#[field(target=…, relation=…, column=…, target_column=…)] tag_ids: Many2many` builds the
+        // Many2many kind (no column on the model — the membership lives in the junction).
+        let m = resolve_registered("product.product").unwrap();
+        let tags = m.fields.iter().find(|f| f.name == "tag_ids").unwrap();
+        assert!(!tags.has_column(), "Many2many has no column on the model");
+        assert!(matches!(
+            tags.kind,
+            FieldKind::Many2many { target: "product.tag", relation: "product_product_tag_rel", column: "product_id", target_column: "tag_id" }
+        ));
     }
 
     #[test]

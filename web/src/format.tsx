@@ -31,6 +31,10 @@ export function displayValue(value: unknown, widget: string, field?: FieldMeta):
     case 'many2one':
       // Without name resolution the server returns the FK id; show it as a reference for now.
       return <span className="text-muted">#{String(value)}</span>
+    case 'many2many': {
+      const n = Array.isArray(value) ? value.length : 0
+      return <span className="text-muted">{n === 0 ? '—' : `${n} selected`}</span>
+    }
     default:
       return String(value)
   }

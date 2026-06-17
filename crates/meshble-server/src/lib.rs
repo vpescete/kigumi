@@ -323,7 +323,9 @@ fn coerce(kind: &FieldKind, raw: &str) -> Result<Value, String> {
         FieldKind::Text | FieldKind::Selection(_) | FieldKind::Date | FieldKind::Datetime => {
             Value::Str(raw.to_string())
         }
-        FieldKind::One2many { .. } => return Err("cannot filter on a One2many field".to_string()),
+        FieldKind::One2many { .. } | FieldKind::Many2many { .. } => {
+            return Err("cannot filter on a One2many/Many2many field directly".to_string())
+        }
     })
 }
 

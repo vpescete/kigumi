@@ -38,6 +38,9 @@ async fn quote_to_order_rolls_up_and_confirms() {
     for t in &plan {
         db.create_table(&t.model).await.unwrap();
     }
+    for t in &plan {
+        db.create_m2m_relations(&t.model).await.unwrap(); // Many2many junctions (e.g. product tags)
+    }
     db.ensure_sequence_schema().await.unwrap();
     db.ensure_sequence("SO", "SO/", "", 5).await.unwrap();
 

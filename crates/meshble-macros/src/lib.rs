@@ -254,10 +254,18 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
                 .ok_or_else(|| err(&f.ty, "One2many requires `inverse = \"...\"`"))?;
             quote! { ::meshble::prelude::FieldKind::One2many { target: #target, inverse: #inverse } }
         }
+        "Many2many" => {
+            let m = |k: &str| {
+                meta_str(&metas, k).ok_or_else(|| err(&f.ty, &format!("Many2many requires `{k} = \"...\"`")))
+            };
+            let (target, relation, column, target_column) =
+                (m("target")?, m("relation")?, m("column")?, m("target_column")?);
+            quote! { ::meshble::prelude::FieldKind::Many2many { target: #target, relation: #relation, column: #column, target_column: #target_column } }
+        }
         other => {
             return Err(err(
                 &f.ty,
-                &format!("unknown field type: `{other}` (use Text/Integer/Float/Decimal/Bool/Date/Datetime/Selection/Many2one/One2many)"),
+                &format!("unknown field type: `{other}` (use Text/Integer/Float/Decimal/Bool/Date/Datetime/Selection/Many2one/One2many/Many2many)"),
             ))
         }
     };
@@ -267,7 +275,7 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
     let compute = meta_str(&metas, "compute");
     // stored: never for one2many or a related field (no column — resolved at read time); computed
     // only with `store`; otherwise yes.
-    let stored = if kind_name == "One2many" || meta_str(&metas, "related").is_some() {
+    let stored = if kind_name == "One2many" || kind_name == "Many2many" || meta_str(&metas, "related").is_some() {
         false
     } else if compute.is_some() {
         meta_flag(&metas, "store")

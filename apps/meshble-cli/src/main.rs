@@ -300,12 +300,15 @@ async fn migrate(db: &Db) -> Fallible {
 async fn migrate_installed(db: &Db) -> Fallible {
     let installed = db.installed_modules().await?;
     let plan = migration_plan().map_err(|e| e.to_string())?;
-    for t in &plan {
-        if !installed.iter().any(|m| m == t.module) {
-            continue; // model of a module that is not installed → skip (its table is not created)
-        }
+    let installed_targets: Vec<_> =
+        plan.iter().filter(|t| installed.iter().any(|m| m == t.module)).collect();
+    for t in &installed_targets {
         db.install_or_upgrade(&t.model, t.model.name, &t.version, &[]).await?;
         println!("migrated {} ({} {})", t.model.name, t.module, t.version);
+    }
+    // Second pass: Many2many junction tables, once every model table exists (their FKs need both ends).
+    for t in &installed_targets {
+        db.create_m2m_relations(&t.model).await?;
     }
     if installed.iter().any(|m| m == "base") {
         seed_base_data(db).await?;
