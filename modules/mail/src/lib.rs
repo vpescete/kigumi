@@ -75,6 +75,32 @@ pub struct MailTracking {
     new_value: Text,
 }
 
+/// A scheduled to-do on a record (Odoo's `mail.activity`): a deadline + an assignee, attached via the
+/// polymorphic `(res_model, res_id)` link. The `state` (overdue/today/planned) is DERIVED from
+/// `date_deadline` at read time — never stored — so it can't drift and needs no "aging" cron (Odoo
+/// derives it too, but writes the rule THREE times; here it lives once, in the activities endpoint).
+/// `user_id` is a plain integer (assignee), FK-light like `author_id`. Done = `active` goes false.
+#[model(name = "mail.activity", table = "mail_activity")]
+pub struct MailActivity {
+    #[field(label = "Document Model", required)]
+    res_model: Text,
+
+    #[field(label = "Document ID", required)]
+    res_id: Integer,
+
+    #[field(label = "Summary", required)]
+    summary: Text,
+
+    #[field(label = "Deadline")]
+    date_deadline: Date,
+
+    #[field(label = "Assigned To")]
+    user_id: Integer,
+
+    #[field(label = "Open", default = "true")]
+    active: Bool,
+}
+
 /// Mail ACLs: only `admin` touches `mail.message` through the GENERIC CRUD routes (moderation/debug).
 /// Normal users never read or post messages directly — that would expose every record's thread across
 /// all companies, bypassing host visibility. Instead the dedicated chatter endpoints gate on the
@@ -83,6 +109,7 @@ pub struct MailTracking {
 pub static ACLS: &[Acl] = &[
     Acl { model: "mail.message", group: "admin", read: true, write: false, create: true, delete: true },
     Acl { model: "mail.tracking", group: "admin", read: true, write: false, create: false, delete: true },
+    Acl { model: "mail.activity", group: "admin", read: true, write: true, create: true, delete: true },
 ];
 meshble::register_acls!(ACLS);
 
@@ -106,5 +133,21 @@ mod tests {
         assert!(!ddl.contains("res_id bigint NOT NULL REFERENCES"));
         // parent_id IS a real self-FK (threading within one table).
         assert!(ddl.contains("REFERENCES mail_message(id)"));
+    }
+
+    #[test]
+    fn tracking_and_activity_models_resolve() {
+        let tr = to_ddl(&resolve_registered("mail.tracking").unwrap());
+        assert!(tr.contains("CREATE TABLE mail_tracking"));
+        // message_id is FK-light (plain bigint, no REFERENCES) — like author_id.
+        assert!(tr.contains("message_id bigint NOT NULL"));
+        assert!(!tr.contains("REFERENCES"));
+
+        let act = to_ddl(&resolve_registered("mail.activity").unwrap());
+        assert!(act.contains("CREATE TABLE mail_activity"));
+        assert!(act.contains("date_deadline date"));
+        assert!(act.contains("res_id bigint NOT NULL"));
+        // state is NOT a column — it is derived at read time from date_deadline.
+        assert!(!act.contains(" state "));
     }
 }

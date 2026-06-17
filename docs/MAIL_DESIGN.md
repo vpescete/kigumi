@@ -91,9 +91,18 @@ in una fetta successiva). Niente di tutto ciò serve a un ERP headless v1.
   riga lockata `FOR UPDATE`): niente falsi positivi su Date/Datetime/Float, niente old/new in formati diversi.
   Tracking = best-effort post-commit (non fa mai fallire la scrittura). Redazione D6: l'embedding del tracking
   nel thread filtra i campi non leggibili dal chiamante (`field_accessible`). Indici mail via `ensure_mail_indexes`.
-- **Gap noti rimandati** (segnalati dalla review avversariale): paginazione del thread (verrà con la chatter FE,
+- **Fetta 3 FATTA**: `mail.activity` (owner polimorfico, `user_id` int senza FK) + API
+  `GET .../activities` · `POST .../activity` · `POST .../activities/:aid/done`. Lo **state è DERIVATO**
+  (overdue/today/planned) in un solo punto (`activity_state`), confronto lessicale su date ISO. Per garantire
+  l'invariante ISO il pool fissa `DateStyle = 'ISO, YMD'` su ogni connessione (`after_connect`) — vale anche
+  per i `::text` di date/datetime usati altrove (tracking, FE). `done` verifica l'appartenenza all'host.
+  Cleanup già coperto (mail_activity in THREAD_TABLES). Indurito contro review avversariale (7 finding: pin
+  DateStyle, validazione `user_id`, deadline vuota = nessuna scadenza, `done` veritiero su 0 righe, helper
+  `served_model` unificato).
+- **Gap noti rimandati** (segnalati dalle review avversariali): paginazione del thread (verrà con la chatter FE,
   fetta 5); guard compile-time di `#[field(tracked)]` su campi relazionali/computed (oggi no-op silenzioso);
-  quoting degli identificatori SQL per nomi-colonna riservati (es. `when`) — concerne tutto il metamodello, non solo mail.
+  quoting degli identificatori SQL per nomi-colonna riservati (es. `when`) — concerne tutto il metamodello, non solo mail;
+  modello mail "served ma non migrato" → 500 invece di degradare (coerente con tutti i served model; non accade col migrate normale).
 
 ## 6. Raccomandazione + rischi
 **Prima fetta**: la fondazione (registry opt-in + `mail.message` + post/list + cleanup hook) — è il minimo che

@@ -88,8 +88,22 @@ pub struct ListPage {
 
 impl Db {
     /// Connects to `url` (e.g. `postgres://user@host/db`).
+    ///
+    /// Pins `DateStyle = ISO, YMD` on every pooled connection: the codebase renders dates/datetimes
+    /// as `::text` and assumes ISO `YYYY-MM-DD` (big-endian, so lexical order == chronological) — for
+    /// activity-state derivation, tracking diffs, and the frontend's date parsing. A server/role
+    /// default of `SQL`/`Postgres`/`German` would otherwise silently break those; don't inherit it.
     pub async fn connect(url: &str) -> Result<Db, DbError> {
-        let pool = PgPoolOptions::new().max_connections(5).connect(url).await?;
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    sqlx::query("SET DateStyle = 'ISO, YMD'").execute(&mut *conn).await?;
+                    Ok(())
+                })
+            })
+            .connect(url)
+            .await?;
         Ok(Db { pool })
     }
 
@@ -979,6 +993,12 @@ impl Db {
     /// One clock (the DB) for every mail row, so ordering is consistent regardless of caller.
     pub async fn now(&self) -> Result<String, DbError> {
         Ok(sqlx::query_scalar::<_, String>("SELECT now()::text").fetch_one(&self.pool).await?)
+    }
+
+    /// The database's current date as `YYYY-MM-DD`, for deriving an activity's state (overdue/today/
+    /// planned) by lexical comparison against its ISO `date_deadline`. One clock = one source of truth.
+    pub async fn today(&self) -> Result<String, DbError> {
+        Ok(sqlx::query_scalar::<_, String>("SELECT current_date::text").fetch_one(&self.pool).await?)
     }
 
     /// Deletes a record's mail thread across all thread tables. Tolerates a thread table not being

@@ -80,6 +80,10 @@ pub fn router_with_data(
         // Chatter (mail subsystem): a record's message thread. Gated by read access to the host.
         .route("/api/:name/:id/messages", get(messages_handler))
         .route("/api/:name/:id/message", post(post_message_handler))
+        // Activities (to-dos) on a record: list open ones (state derived), schedule, mark done.
+        .route("/api/:name/:id/activities", get(activities_handler))
+        .route("/api/:name/:id/activity", post(schedule_activity_handler))
+        .route("/api/:name/:id/activities/:aid/done", post(activity_done_handler))
         .with_state(AppState {
             models: Arc::new(models),
             data: Some(DataBackend {
@@ -459,13 +463,14 @@ fn str_field<'a>(body: &'a Json2, key: &str) -> Option<&'a str> {
     body.get(key).and_then(|v| v.as_str())
 }
 
-/// Resolves the served `mail.message` model, or a 500 (the mail module isn't installed/served).
-fn mail_message_model(state: &AppState) -> Result<&ResolvedModel, Response> {
+/// Resolves a served model by exact name, or a 500 (the owning module isn't installed/served). Used
+/// for the mail subsystem's internal models (mail.message, mail.activity) the chatter endpoints act on.
+fn served_model<'a>(state: &'a AppState, name: &str) -> Result<&'a ResolvedModel, Response> {
     state
         .models
         .iter()
-        .find(|m| m.name == "mail.message")
-        .ok_or_else(|| internal_error("mail", "mail.message not served (mail module not installed)"))
+        .find(|m| m.name == name)
+        .ok_or_else(|| internal_error("mail", format!("{name} not served (mail module not installed)")))
 }
 
 /// Gates a chatter request: the host model must opt into mail, AND the caller must be able to READ
@@ -510,7 +515,7 @@ async fn messages_handler(
     if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
         return r;
     }
-    let mail = match mail_message_model(&state) {
+    let mail = match served_model(&state, "mail.message") {
         Ok(m) => m,
         Err(r) => return r,
     };
@@ -582,7 +587,7 @@ async fn post_message_handler(
     if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
         return r;
     }
-    let mail = match mail_message_model(&state) {
+    let mail = match served_model(&state, "mail.message") {
         Ok(m) => m,
         Err(r) => return r,
     };
@@ -612,6 +617,156 @@ async fn post_message_handler(
     match backend.db.insert_secured(mail, &su, backend.acls, backend.rules, &values).await {
         Ok(mid) => json_status(StatusCode::CREATED, format!("{{\"id\": {mid}}}")),
         Err(e) => write_error("message", e),
+    }
+}
+
+/// An activity's state DERIVED from its deadline vs the DB's current date (ISO strings compare
+/// lexically). The single place this rule lives (Odoo writes it three times).
+fn activity_state(deadline: Option<&str>, today: &str) -> &'static str {
+    match deadline {
+        Some(d) if d < today => "overdue",
+        Some(d) if d == today => "today",
+        _ => "planned", // future deadline or none
+    }
+}
+
+/// `GET /api/:name/:id/activities` — open to-dos on the record, each with a derived state.
+async fn activities_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
+        return r;
+    }
+    let act = match served_model(&state, "mail.activity") {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let today = match backend.db.today().await {
+        Ok(t) => t,
+        Err(e) => return internal_error("clock", e),
+    };
+    let su = ctx.sudo();
+    let filter = thread_filter(&name, id).and(Domain::Cond(Condition {
+        field: "active".into(),
+        op: Operator::Eq,
+        value: Value::Bool(true),
+    }));
+    match backend.db.find_secured(act, &su, backend.acls, backend.rules, Some(&filter)).await {
+        Ok(rows) => {
+            let enriched: Vec<Json2> = rows
+                .into_iter()
+                .map(|mut a| {
+                    let deadline = a.get("date_deadline").and_then(|v| v.as_str()).map(str::to_string);
+                    if let Some(obj) = a.as_object_mut() {
+                        obj.insert("state".into(), Json2::String(activity_state(deadline.as_deref(), &today).to_string()));
+                    }
+                    a
+                })
+                .collect();
+            json_response(serde_json::json!({ "data": enriched }).to_string())
+        }
+        Err(DbError::AccessDenied { .. }) => (StatusCode::FORBIDDEN, "access denied").into_response(),
+        Err(e) => internal_error("activities", e),
+    }
+}
+
+/// `POST /api/:name/:id/activity` — schedule a to-do `{summary, date_deadline?, user_id?}`. The
+/// assignee defaults to the caller. Gated on read access to the host.
+async fn schedule_activity_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+    Json(body): Json<Json2>,
+) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
+        return r;
+    }
+    let act = match served_model(&state, "mail.activity") {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let summary = match str_field(&body, "summary") {
+        Some(s) if !s.trim().is_empty() => s.to_string(),
+        _ => return (StatusCode::BAD_REQUEST, "activity summary is required").into_response(),
+    };
+    // Assignee defaults to the caller; a present-but-non-integer user_id is a client error (don't
+    // silently self-assign).
+    let assignee = match body.get("user_id") {
+        None | Some(Json2::Null) => ctx.uid,
+        Some(v) => match v.as_i64() {
+            Some(n) => n,
+            None => return (StatusCode::BAD_REQUEST, "user_id must be an integer").into_response(),
+        },
+    };
+    let mut values = serde_json::Map::new();
+    values.insert("res_model".into(), Json2::String(name.clone()));
+    values.insert("res_id".into(), Json2::Number(id.into()));
+    values.insert("summary".into(), Json2::String(summary));
+    // An empty/whitespace deadline means "no deadline" (a planned to-do), not a 400.
+    if let Some(d) = str_field(&body, "date_deadline").filter(|d| !d.trim().is_empty()) {
+        values.insert("date_deadline".into(), Json2::String(d.to_string()));
+    }
+    values.insert("user_id".into(), Json2::Number(assignee.into()));
+    values.insert("active".into(), Json2::Bool(true));
+    let su = ctx.sudo();
+    match backend.db.insert_secured(act, &su, backend.acls, backend.rules, &values).await {
+        Ok(aid) => json_status(StatusCode::CREATED, format!("{{\"id\": {aid}}}")),
+        Err(e) => write_error("activity", e),
+    }
+}
+
+/// `POST /api/:name/:id/activities/:aid/done` — mark a to-do done (`active` → false). The activity
+/// must belong to the gated host record (you can't close another record's to-do via a host you can read).
+async fn activity_done_handler(
+    State(state): State<AppState>,
+    Path((name, id, aid)): Path<(String, i64, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
+        return r;
+    }
+    let act = match served_model(&state, "mail.activity") {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let su = ctx.sudo();
+    // The activity must exist AND belong to this host record.
+    let belongs = match backend.db.find_one_secured(act, &su, backend.acls, backend.rules, aid).await {
+        Ok(Some(a)) => {
+            a.get("res_model").and_then(|v| v.as_str()) == Some(name.as_str())
+                && a.get("res_id").and_then(|v| v.as_i64()) == Some(id)
+        }
+        Ok(None) => false,
+        Err(e) => return internal_error("activity-done", e),
+    };
+    if !belongs {
+        return (StatusCode::NOT_FOUND, "activity not found on this record").into_response();
+    }
+    let mut values = serde_json::Map::new();
+    values.insert("active".into(), Json2::Bool(false));
+    match backend.db.update_secured(act, &su, backend.acls, backend.rules, aid, &values).await {
+        // 0 rows = the activity vanished between the belongs-check and the update (e.g. the host was
+        // concurrently deleted, cascading the cleanup). Report it truthfully, don't claim success.
+        Ok(0) => (StatusCode::NOT_FOUND, "activity not found on this record").into_response(),
+        Ok(_) => json_response("{\"ok\":true}".to_string()),
+        Err(e) => write_error("activity-done", e),
     }
 }
 
@@ -794,6 +949,15 @@ mod query_tests {
     fn suffix_split() {
         assert_eq!(split_suffix("amount__gte"), ("amount", "gte"));
         assert_eq!(split_suffix("name"), ("name", "eq")); // bare field defaults to eq
+    }
+
+    #[test]
+    fn activity_state_derivation() {
+        // Derived purely from deadline vs today (ISO strings compare lexically).
+        assert_eq!(activity_state(Some("2026-06-16"), "2026-06-17"), "overdue");
+        assert_eq!(activity_state(Some("2026-06-17"), "2026-06-17"), "today");
+        assert_eq!(activity_state(Some("2026-06-18"), "2026-06-17"), "planned");
+        assert_eq!(activity_state(None, "2026-06-17"), "planned"); // no deadline
     }
 
     #[test]
