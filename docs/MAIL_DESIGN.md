@@ -111,6 +111,13 @@ in una fetta successiva). Niente di tutto ciò serve a un ERP headless v1.
   quoting degli identificatori SQL per nomi-colonna riservati (es. `when`) — concerne tutto il metamodello, non solo mail;
   modello mail "served ma non migrato" → 500 invece di degradare (coerente con tutti i served model; non accade col migrate normale).
 
+- **Fetta 5 FATTA (mail subsystem COMPLETO)**: widget chatter nel FE generico. Contract espone `mailed`
+  (`to_ui_contract`); client tipizzato in `api.ts` (messages/post, activities/schedule/done, followers/
+  follow/unfollow); componente `Chatter` (thread con commenti/note/audit-tracking, activities con badge di
+  stato derivato + schedule/done, follow toggle + conteggio) montato da `ModelForm` per i record mailed.
+  Indurito vs review FE (6 finding: gating `busy` su follow + done, stato di loading, helper `expectOk`,
+  narrowing errori uniforme, rimozione `.replace` morto). `tsc --noEmit` pulito, build verde.
+
 ## 6. Raccomandazione + rischi
 **Prima fetta**: la fondazione (registry opt-in + `mail.message` + post/list + cleanup hook) — è il minimo che
 rende la chatter reale ed è dove vivono le decisioni architetturali. **Rischio principale**: il link polimorfico —

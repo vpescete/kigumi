@@ -53,10 +53,38 @@ export type ActionMeta = { name: string; groups: string[] }
 export type Contract = {
   model: string
   type: string
+  mailed?: boolean // model has a chatter thread (messages/activities/followers)
   fields: FieldMeta[]
   list: { columns: ColumnMeta[] }
   actions: ActionMeta[]
 }
+
+// ---- Chatter (mail subsystem) ----
+
+export type TrackingChange = {
+  field: string
+  old_value: string | null
+  new_value: string | null
+}
+export type Message = {
+  id: number
+  res_model: string
+  res_id: number
+  author_id: number | null
+  message_type: 'comment' | 'note' | 'notification'
+  body: string | null
+  date: string | null
+  tracking: TrackingChange[]
+}
+export type ActivityState = 'overdue' | 'today' | 'planned'
+export type Activity = {
+  id: number
+  summary: string
+  date_deadline: string | null
+  user_id: number | null
+  state: ActivityState
+}
+export type Follower = { id: number; user_id: number }
 
 export type Row = { id: number } & Record<string, unknown>
 export type Page = { data: Row[]; total: number; limit: number; offset: number }
@@ -91,6 +119,11 @@ async function request(path: string, init?: RequestInit, allowRetry = true): Pro
 async function asJson<T>(res: Response): Promise<T> {
   if (!res.ok) throw new ApiError(res.status, (await res.text()) || res.statusText)
   return (await res.json()) as T
+}
+
+/// Throws an ApiError (the response body, or `msg`) on a non-2xx response; for endpoints with no body.
+async function expectOk(res: Response, msg: string): Promise<void> {
+  if (!res.ok) throw new ApiError(res.status, (await res.text()) || msg)
 }
 
 async function tryRefresh(): Promise<boolean> {
@@ -208,4 +241,63 @@ export function canRun(action: ActionMeta, identity: Identity | null): boolean {
   if (action.groups.length === 0) return true
   if (!identity) return false
   return action.groups.some((g) => identity.groups.includes(g))
+}
+
+// ---- Chatter endpoints (gated on read access to the host record) ----
+
+export async function messages(model: string, id: number): Promise<Message[]> {
+  const { data } = await asJson<{ data: Message[] }>(await request(`/api/${model}/${id}/messages`))
+  return data
+}
+
+export async function postMessage(
+  model: string,
+  id: number,
+  body: string,
+  messageType: 'comment' | 'note' = 'comment',
+): Promise<void> {
+  const res = await request(`/api/${model}/${id}/message`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ body, message_type: messageType }),
+  })
+  await expectOk(res, 'post failed')
+}
+
+export async function activities(model: string, id: number): Promise<Activity[]> {
+  const { data } = await asJson<{ data: Activity[] }>(await request(`/api/${model}/${id}/activities`))
+  return data
+}
+
+export async function scheduleActivity(
+  model: string,
+  id: number,
+  summary: string,
+  dateDeadline?: string,
+): Promise<void> {
+  const res = await request(`/api/${model}/${id}/activity`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ summary, date_deadline: dateDeadline ?? '' }),
+  })
+  await expectOk(res, 'schedule failed')
+}
+
+export async function activityDone(model: string, id: number, activityId: number): Promise<void> {
+  const res = await request(`/api/${model}/${id}/activities/${activityId}/done`, { method: 'POST' })
+  await expectOk(res, 'done failed')
+}
+
+export async function followers(model: string, id: number): Promise<Follower[]> {
+  const { data } = await asJson<{ data: Follower[] }>(await request(`/api/${model}/${id}/followers`))
+  return data
+}
+
+export async function setFollow(model: string, id: number, follow: boolean): Promise<void> {
+  const res = await request(`/api/${model}/${id}/${follow ? 'follow' : 'unfollow'}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  })
+  await expectOk(res, 'follow failed')
 }

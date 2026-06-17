@@ -11,12 +11,14 @@ export function Button({
   icon,
   onClick,
   className,
+  disabled,
 }: {
   children?: ReactNode
   variant?: BtnVariant
   icon?: ReactNode
   onClick?: () => void
   className?: string
+  disabled?: boolean
 }) {
   const base =
     'inline-flex items-center justify-center gap-2 rounded-md px-3 font-medium whitespace-nowrap ' +
@@ -30,6 +32,7 @@ export function Button({
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={cx(base, variants[variant], className)}
       style={{ height: 'var(--control-h)' }}
     >

@@ -7,6 +7,7 @@ import { useAuth } from '../auth'
 import type { Column } from '../ui'
 import { Button, Card, DataTable, ErrorState, Loading, PageHeader } from '../ui'
 import { displayValue, modelTitle, relLabel } from '../format'
+import { Chatter } from './Chatter'
 
 type FormValues = Record<string, unknown>
 type RelOption = { id: number; label: string }
@@ -188,6 +189,8 @@ export function ModelForm() {
         relationFields.map((f) => (
           <InlineRelation key={f.name} field={f} rows={(record?.[f.name] as api.Row[]) ?? []} child={childContracts[f.name]} />
         ))}
+
+      {!isNew && contract.mailed && <Chatter model={model} id={Number(id)} />}
     </div>
   )
 }

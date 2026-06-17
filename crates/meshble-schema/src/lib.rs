@@ -7,7 +7,7 @@
 mod openapi;
 pub use openapi::openapi;
 
-use meshble_core::{actions_for, json_string, related_path, Domain, DomainError, FieldKind, ResolvedModel};
+use meshble_core::{actions_for, is_mailed, json_string, related_path, Domain, DomainError, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
 fn pg_type(kind: &FieldKind) -> &'static str {
@@ -180,8 +180,9 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
         .collect();
 
     Ok(format!(
-        "{{\n  \"model\": {},\n  \"type\": \"form\",\n  \"fields\": [\n{}\n  ],\n  \"list\": {{ \"columns\": [\n{}\n  ] }},\n  \"actions\": [\n{}\n  ]\n}}",
+        "{{\n  \"model\": {},\n  \"type\": \"form\",\n  \"mailed\": {},\n  \"fields\": [\n{}\n  ],\n  \"list\": {{ \"columns\": [\n{}\n  ] }},\n  \"actions\": [\n{}\n  ]\n}}",
         json_string(m.name),
+        is_mailed(m.name),
         fields.join(",\n"),
         columns.join(",\n"),
         actions.join(",\n")
