@@ -48,6 +48,40 @@ pub struct RecordRuleRegistration {
 }
 inventory::collect!(RecordRuleRegistration);
 
+/// A model whose table is owned OUTSIDE the metamodel (e.g. the auth subsystem's `meshble_user`, or
+/// a SQL view): registered so it is resolved/served like any model, but EXCLUDED from migration — the
+/// metamodel never creates or alters its table. Odoo's `_auto = False`. Emitted by `register_external!`.
+pub struct ExternalTable {
+    pub model: &'static str,
+}
+inventory::collect!(ExternalTable);
+
+/// Names of models whose tables the metamodel must NOT migrate (owned externally).
+pub fn external_tables() -> Vec<&'static str> {
+    inventory::iter::<ExternalTable>.into_iter().map(|e| e.model).collect()
+}
+
+/// Distinct group names referenced by any registered ACL or record rule — the catalog's known
+/// groups (the source for seeding the read-only `res.groups` list). Sorted, deterministic.
+pub fn registered_group_names() -> Vec<String> {
+    let mut g: Vec<String> = Vec::new();
+    let mut push = |name: &str| {
+        if !g.iter().any(|x| x == name) {
+            g.push(name.to_string());
+        }
+    };
+    for a in registered_acls() {
+        push(a.group);
+    }
+    for r in registered_rules() {
+        for gr in r.groups {
+            push(gr);
+        }
+    }
+    g.sort();
+    g
+}
+
 /// All ACLs registered across linked modules (the union a server enforces).
 pub fn registered_acls() -> Vec<Acl> {
     inventory::iter::<AclRegistration>
@@ -96,7 +130,10 @@ pub fn migration_plan() -> Result<Vec<MigrationTarget>, String> {
         ("", FRAMEWORK_VERSION.to_string())
     };
 
-    let names = registered_model_names(); // sorted
+    // External-table models (Odoo `_auto = False`) are served/resolved but never migrated.
+    let external = external_tables();
+    let names: Vec<&'static str> =
+        registered_model_names().into_iter().filter(|n| !external.contains(n)).collect();
     let n = names.len();
     let index: std::collections::HashMap<&str, usize> =
         names.iter().enumerate().map(|(i, &nm)| (nm, i)).collect();

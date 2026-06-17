@@ -225,6 +225,19 @@ async fn seed_base_data(db: &Db) -> Fallible {
         db.insert_secured(&company, &su, &[], &[], v.as_object().unwrap()).await?;
         println!("seeded default company + currency");
     }
+
+    // Seed the read-only res.groups list from every group referenced by registered ACLs/rules
+    // (idempotent: insert only the ones not already present).
+    if let Ok(groups) = resolve_registered("res.groups") {
+        for name in registered_group_names() {
+            let by_name = Domain::field("name").eq(name.as_str());
+            let exists = db.count_secured(&groups, &su, &[], &[], Some(&by_name)).await? > 0;
+            if !exists {
+                let v = serde_json::json!({ "name": name });
+                db.insert_secured(&groups, &su, &[], &[], v.as_object().unwrap()).await?;
+            }
+        }
+    }
     Ok(())
 }
 

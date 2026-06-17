@@ -1123,6 +1123,10 @@ name = "meshble-mod-base"
 version = "1.0.0"
 dependencies = [
  "meshble",
+ "meshble-auth",
+ "meshble-db",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

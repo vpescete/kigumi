@@ -97,11 +97,40 @@ pub struct ResCompany {
     active: Bool,
 }
 
-/// Base ACLs: the everyday `user` group reads the foundational reference data.
+/// Group (the `res.groups` analog): a named access group. READ-ONLY in the metamodel — authoritative
+/// membership lives in the auth subsystem; this seeded list exists so the UI can show/relate groups
+/// (pickers, filters). Seeded at migrate from the groups referenced by registered ACLs/rules.
+#[model(name = "res.groups", table = "res_groups")]
+pub struct ResGroups {
+    #[field(label = "Name", required, unique)]
+    name: Text,
+}
+
+/// User (the `res.users` analog): a READ-ONLY projection of the auth subsystem's `meshble_user`
+/// table. An EXTERNAL table — the metamodel never migrates it (the auth subsystem owns it). The
+/// password hash is simply not a field here, so it is never selected; credentials, refresh tokens
+/// and the company scope stay in the auth subsystem. Exposes identity for the UI (user lists/pickers).
+#[model(name = "res.users", table = "meshble_user")]
+pub struct ResUsers {
+    #[field(label = "Login", required, unique)]
+    login: Text,
+
+    #[field(label = "Groups")]
+    groups: Text,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+}
+meshble::register_external!("res.users");
+
+/// Base ACLs: the everyday `user` group reads the foundational reference data and the group list;
+/// the user directory (`res.users`) is admin-only (read-only — account changes go through auth).
 pub static ACLS: &[Acl] = &[
     Acl { model: "res.currency", group: "user", read: true, write: false, create: false, delete: false },
     Acl { model: "res.partner", group: "user", read: true, write: true, create: true, delete: false },
     Acl { model: "res.company", group: "user", read: true, write: false, create: false, delete: false },
+    Acl { model: "res.groups", group: "user", read: true, write: false, create: false, delete: false },
+    Acl { model: "res.users", group: "admin", read: true, write: false, create: false, delete: false },
 ];
 meshble::register_acls!(ACLS);
 

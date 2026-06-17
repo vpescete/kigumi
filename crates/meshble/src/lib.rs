@@ -8,14 +8,15 @@ pub use meshble_core::inventory;
 pub mod prelude {
     pub use meshble_core::{
         action_for, check_access, check_compat, compute_fn, compute_stored, computed_fields,
-        json_string, migration_plan, record_rule_domain, registered_acls, registered_model_names,
-        registered_rules, resolve, resolve_all_registered, resolve_module_set, resolve_modules,
-        resolve_registered, validate_depends, Acl, AclRegistration, ActionFn, ActionInput,
-        ActionOutcome, ActionRegistration, ComputeFn, ComputeInput, ComputeRegistration, Condition,
-        Ctx, Domain, DomainError, FieldBuilder, FieldDef, FieldExtension, FieldKind, MigrationTarget,
-        Model, ModelDescriptor, ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration,
-        Operation, Operator, RecordRule, RecordRuleRegistration, ResolutionError, ResolvedModel,
-        Sql, Value, FRAMEWORK_VERSION,
+        external_tables, json_string, migration_plan, record_rule_domain, registered_acls,
+        registered_group_names, registered_model_names, registered_rules, resolve,
+        resolve_all_registered, resolve_module_set, resolve_modules, resolve_registered,
+        validate_depends, Acl, AclRegistration, ActionFn, ActionInput, ActionOutcome,
+        ActionRegistration, ComputeFn, ComputeInput, ComputeRegistration, Condition, Ctx, Domain,
+        DomainError, ExternalTable, FieldBuilder, FieldDef, FieldExtension, FieldKind,
+        MigrationTarget, Model, ModelDescriptor, ModelRegistration, ModuleDep, ModuleManifest,
+        ModuleRegistration, Operation, Operator, RecordRule, RecordRuleRegistration,
+        ResolutionError, ResolvedModel, Sql, Value, FRAMEWORK_VERSION,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
@@ -39,6 +40,19 @@ macro_rules! register_module {
     ($manifest:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::ModuleRegistration { manifest: || $manifest, crate_path: ::core::module_path!() }
+        }
+    };
+}
+
+/// Marks a model's table as owned outside the metamodel (Odoo's `_auto = False`): the model is
+/// resolved/served normally but migration never creates or alters its table. For models mapped onto
+/// a pre-existing table (e.g. `res.users` onto the auth subsystem's `meshble_user`) or a SQL view.
+/// Use at module top level: `meshble::register_external!("res.users");`
+#[macro_export]
+macro_rules! register_external {
+    ($model:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::ExternalTable { model: $model }
         }
     };
 }
