@@ -1109,6 +1109,9 @@ impl Db {
         for sql in [
             "CREATE INDEX IF NOT EXISTS mail_message_res_idx ON mail_message (res_model, res_id)",
             "CREATE INDEX IF NOT EXISTS mail_tracking_message_idx ON mail_tracking (message_id)",
+            // Composite UNIQUE makes following idempotent (one subscription per user per record) and
+            // indexes the follower lookup. The metamodel can't express composite uniqueness yet.
+            "CREATE UNIQUE INDEX IF NOT EXISTS mail_follower_uniq ON mail_follower (res_model, res_id, user_id)",
         ] {
             match sqlx::query(sql).execute(&self.pool).await {
                 Ok(_) => {}

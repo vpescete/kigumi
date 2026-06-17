@@ -84,6 +84,10 @@ pub fn router_with_data(
         .route("/api/:name/:id/activities", get(activities_handler))
         .route("/api/:name/:id/activity", post(schedule_activity_handler))
         .route("/api/:name/:id/activities/:aid/done", post(activity_done_handler))
+        // Followers: who is subscribed to a record's thread. Follow/unfollow are idempotent.
+        .route("/api/:name/:id/followers", get(followers_handler))
+        .route("/api/:name/:id/follow", post(follow_handler))
+        .route("/api/:name/:id/unfollow", post(unfollow_handler))
         .with_state(AppState {
             models: Arc::new(models),
             data: Some(DataBackend {
@@ -463,6 +467,27 @@ fn str_field<'a>(body: &'a Json2, key: &str) -> Option<&'a str> {
     body.get(key).and_then(|v| v.as_str())
 }
 
+/// The target user id from a request body's optional `user_id` (defaulting to `default`, the caller).
+/// A present-but-non-integer value is a 400 — never silently fall back to the caller.
+fn body_user_id(body: &Json2, default: i64) -> Result<i64, Response> {
+    match body.get("user_id") {
+        None | Some(Json2::Null) => Ok(default),
+        Some(v) => v
+            .as_i64()
+            .ok_or_else(|| (StatusCode::BAD_REQUEST, "user_id must be an integer").into_response()),
+    }
+}
+
+/// Authorizes acting on another user's behalf: only the `admin` group may target a `uid` other than
+/// the caller's own. Prevents a normal user from force-(un)subscribing arbitrary users (IDOR).
+fn ensure_self_or_admin(ctx: &Ctx, uid: i64) -> Result<(), Response> {
+    if uid == ctx.uid || ctx.is_member("admin") {
+        Ok(())
+    } else {
+        Err((StatusCode::FORBIDDEN, "cannot manage another user's subscription").into_response())
+    }
+}
+
 /// Resolves a served model by exact name, or a 500 (the owning module isn't installed/served). Used
 /// for the mail subsystem's internal models (mail.message, mail.activity) the chatter endpoints act on.
 fn served_model<'a>(state: &'a AppState, name: &str) -> Result<&'a ResolvedModel, Response> {
@@ -471,6 +496,24 @@ fn served_model<'a>(state: &'a AppState, name: &str) -> Result<&'a ResolvedModel
         .iter()
         .find(|m| m.name == name)
         .ok_or_else(|| internal_error("mail", format!("{name} not served (mail module not installed)")))
+}
+
+/// The shared opening of every chatter/activity/follower endpoint: take the data backend,
+/// authenticate the caller, gate on READ access to the host record `(name, id)`, and resolve the
+/// served mail model to act on. Returns `(backend, ctx, model)` or the `Response` to return. One
+/// place for the access decision, so no handler can forget the host-read gate.
+async fn chatter_setup<'a>(
+    state: &'a AppState,
+    headers: &HeaderMap,
+    name: &str,
+    id: i64,
+    model_name: &str,
+) -> Result<(&'a DataBackend, Ctx, &'a ResolvedModel), Response> {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = authenticate(backend, headers)?;
+    chatter_gate(state, backend, &ctx, name, id).await?;
+    let model = served_model(state, model_name)?;
+    Ok((backend, ctx, model))
 }
 
 /// Gates a chatter request: the host model must opt into mail, AND the caller must be able to READ
@@ -507,16 +550,8 @@ async fn messages_handler(
     Path((name, id)): Path<(String, i64)>,
     headers: HeaderMap,
 ) -> Response {
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
-        return r;
-    }
-    let mail = match served_model(&state, "mail.message") {
-        Ok(m) => m,
+    let (backend, ctx, mail) = match chatter_setup(&state, &headers, &name, id, "mail.message").await {
+        Ok(t) => t,
         Err(r) => return r,
     };
     // The gate (host readable) IS the access decision; read the thread elevated so the framework
@@ -579,16 +614,8 @@ async fn post_message_handler(
     headers: HeaderMap,
     Json(body): Json<Json2>,
 ) -> Response {
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
-        return r;
-    }
-    let mail = match served_model(&state, "mail.message") {
-        Ok(m) => m,
+    let (backend, ctx, mail) = match chatter_setup(&state, &headers, &name, id, "mail.message").await {
+        Ok(t) => t,
         Err(r) => return r,
     };
     let text = match str_field(&body, "body") {
@@ -636,16 +663,8 @@ async fn activities_handler(
     Path((name, id)): Path<(String, i64)>,
     headers: HeaderMap,
 ) -> Response {
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
-        return r;
-    }
-    let act = match served_model(&state, "mail.activity") {
-        Ok(m) => m,
+    let (backend, ctx, act) = match chatter_setup(&state, &headers, &name, id, "mail.activity").await {
+        Ok(t) => t,
         Err(r) => return r,
     };
     let today = match backend.db.today().await {
@@ -685,30 +704,18 @@ async fn schedule_activity_handler(
     headers: HeaderMap,
     Json(body): Json<Json2>,
 ) -> Response {
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
-        return r;
-    }
-    let act = match served_model(&state, "mail.activity") {
-        Ok(m) => m,
+    let (backend, ctx, act) = match chatter_setup(&state, &headers, &name, id, "mail.activity").await {
+        Ok(t) => t,
         Err(r) => return r,
     };
     let summary = match str_field(&body, "summary") {
         Some(s) if !s.trim().is_empty() => s.to_string(),
         _ => return (StatusCode::BAD_REQUEST, "activity summary is required").into_response(),
     };
-    // Assignee defaults to the caller; a present-but-non-integer user_id is a client error (don't
-    // silently self-assign).
-    let assignee = match body.get("user_id") {
-        None | Some(Json2::Null) => ctx.uid,
-        Some(v) => match v.as_i64() {
-            Some(n) => n,
-            None => return (StatusCode::BAD_REQUEST, "user_id must be an integer").into_response(),
-        },
+    // Assignee defaults to the caller; a present-but-non-integer user_id is a client error.
+    let assignee = match body_user_id(&body, ctx.uid) {
+        Ok(u) => u,
+        Err(r) => return r,
     };
     let mut values = serde_json::Map::new();
     values.insert("res_model".into(), Json2::String(name.clone()));
@@ -734,16 +741,8 @@ async fn activity_done_handler(
     Path((name, id, aid)): Path<(String, i64, i64)>,
     headers: HeaderMap,
 ) -> Response {
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
-        return r;
-    }
-    let act = match served_model(&state, "mail.activity") {
-        Ok(m) => m,
+    let (backend, ctx, act) = match chatter_setup(&state, &headers, &name, id, "mail.activity").await {
+        Ok(t) => t,
         Err(r) => return r,
     };
     let su = ctx.sudo();
@@ -768,6 +767,100 @@ async fn activity_done_handler(
         Ok(_) => json_response("{\"ok\":true}".to_string()),
         Err(e) => write_error("activity-done", e),
     }
+}
+
+/// The polymorphic filter for one record's followers, optionally narrowed to a single `user_id`.
+fn follower_filter(name: &str, id: i64, user_id: Option<i64>) -> Domain {
+    let mut d = thread_filter(name, id);
+    if let Some(uid) = user_id {
+        d = d.and(Domain::Cond(Condition { field: "user_id".into(), op: Operator::Eq, value: Value::Int(uid) }));
+    }
+    d
+}
+
+/// `GET /api/:name/:id/followers` — the users subscribed to the record's thread.
+async fn followers_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    let (backend, ctx, foll) = match chatter_setup(&state, &headers, &name, id, "mail.follower").await {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
+    let su = ctx.sudo();
+    let filter = follower_filter(&name, id, None);
+    match backend.db.find_secured(foll, &su, backend.acls, backend.rules, Some(&filter)).await {
+        Ok(rows) => json_response(serde_json::json!({ "data": rows }).to_string()),
+        Err(DbError::AccessDenied { .. }) => (StatusCode::FORBIDDEN, "access denied").into_response(),
+        Err(e) => internal_error("followers", e),
+    }
+}
+
+/// `POST /api/:name/:id/follow` — subscribe a user (default the caller) to the record. Idempotent:
+/// re-following an already-followed record is a success, not a conflict (the composite unique index
+/// guarantees one subscription per user per record).
+async fn follow_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+    Json(body): Json<Json2>,
+) -> Response {
+    let (backend, ctx, foll) = match chatter_setup(&state, &headers, &name, id, "mail.follower").await {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
+    let uid = match body_user_id(&body, ctx.uid) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    if let Err(r) = ensure_self_or_admin(&ctx, uid) {
+        return r;
+    }
+    let mut values = serde_json::Map::new();
+    values.insert("res_model".into(), Json2::String(name.clone()));
+    values.insert("res_id".into(), Json2::Number(id.into()));
+    values.insert("user_id".into(), Json2::Number(uid.into()));
+    let su = ctx.sudo();
+    match backend.db.insert_secured(foll, &su, backend.acls, backend.rules, &values).await {
+        Ok(_) => json_status(StatusCode::CREATED, "{\"ok\":true}".to_string()),
+        // Already following — the unique index rejected the duplicate. Idempotent success.
+        Err(DbError::Conflict(_)) => json_response("{\"ok\":true,\"already\":true}".to_string()),
+        Err(e) => write_error("follow", e),
+    }
+}
+
+/// `POST /api/:name/:id/unfollow` — unsubscribe a user (default the caller). Idempotent: unfollowing
+/// when not a follower is a success (nothing to remove).
+async fn unfollow_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+    Json(body): Json<Json2>,
+) -> Response {
+    let (backend, ctx, foll) = match chatter_setup(&state, &headers, &name, id, "mail.follower").await {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
+    let uid = match body_user_id(&body, ctx.uid) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    if let Err(r) = ensure_self_or_admin(&ctx, uid) {
+        return r;
+    }
+    let su = ctx.sudo();
+    let filter = follower_filter(&name, id, Some(uid));
+    let ids = match backend.db.find_ids_secured(foll, &su, backend.acls, backend.rules, Some(&filter)).await {
+        Ok(v) => v,
+        Err(e) => return internal_error("unfollow", e),
+    };
+    for fid in ids {
+        if let Err(e) = backend.db.delete_secured(foll, &su, backend.acls, backend.rules, fid).await {
+            return write_error("unfollow", e);
+        }
+    }
+    json_response("{\"ok\":true}".to_string())
 }
 
 /// Issues an access + (stored) refresh token pair for `uid` with `groups` and company `scope`

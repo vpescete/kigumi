@@ -99,6 +99,13 @@ in una fetta successiva). Niente di tutto ciò serve a un ERP headless v1.
   Cleanup già coperto (mail_activity in THREAD_TABLES). Indurito contro review avversariale (7 finding: pin
   DateStyle, validazione `user_id`, deadline vuota = nessuna scadenza, `done` veritiero su 0 righe, helper
   `served_model` unificato).
+- **Fetta 4 FATTA**: `mail.follower` (owner polimorfico, `user_id` int senza FK) + API
+  `GET .../followers` · `POST .../follow` · `POST .../unfollow`. Idempotenza via indice UNICO composito
+  `(res_model, res_id, user_id)` (`ensure_mail_indexes`): follow tollera il Conflict (23505) come successo,
+  unfollow è no-op se non segui. **Sicurezza**: solo il gruppo `admin` può (un)seguire PER ALTRI utenti
+  (`ensure_self_or_admin`) — un utente normale agisce solo su se stesso (fix IDOR da security review).
+  Subtype/opt-in per-evento rimandati (v1 = follow-all). Preambolo auth+gate+modello dei chatter handler
+  centralizzato in `chatter_setup` (un solo punto per la decisione d'accesso). Test idempotenza+cleanup.
 - **Gap noti rimandati** (segnalati dalle review avversariali): paginazione del thread (verrà con la chatter FE,
   fetta 5); guard compile-time di `#[field(tracked)]` su campi relazionali/computed (oggi no-op silenzioso);
   quoting degli identificatori SQL per nomi-colonna riservati (es. `when`) — concerne tutto il metamodello, non solo mail;

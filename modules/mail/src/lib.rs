@@ -101,6 +101,22 @@ pub struct MailActivity {
     active: Bool,
 }
 
+/// A subscription: a user follows a record's thread (Odoo's `mail.followers`), via the polymorphic
+/// `(res_model, res_id)` link. `user_id` is a plain integer (FK-light, like `author_id`). Uniqueness
+/// of `(res_model, res_id, user_id)` is enforced by a composite index (see `ensure_mail_indexes`) so
+/// following is idempotent. Per-subtype opt-in (Odoo's notorious complexity) is deferred: v1 = follow-all.
+#[model(name = "mail.follower", table = "mail_follower")]
+pub struct MailFollower {
+    #[field(label = "Document Model", required)]
+    res_model: Text,
+
+    #[field(label = "Document ID", required)]
+    res_id: Integer,
+
+    #[field(label = "Follower", required)]
+    user_id: Integer,
+}
+
 /// Mail ACLs: only `admin` touches `mail.message` through the GENERIC CRUD routes (moderation/debug).
 /// Normal users never read or post messages directly — that would expose every record's thread across
 /// all companies, bypassing host visibility. Instead the dedicated chatter endpoints gate on the
@@ -110,6 +126,7 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "mail.message", group: "admin", read: true, write: false, create: true, delete: true },
     Acl { model: "mail.tracking", group: "admin", read: true, write: false, create: false, delete: true },
     Acl { model: "mail.activity", group: "admin", read: true, write: true, create: true, delete: true },
+    Acl { model: "mail.follower", group: "admin", read: true, write: false, create: true, delete: true },
 ];
 meshble::register_acls!(ACLS);
 
@@ -149,5 +166,11 @@ mod tests {
         assert!(act.contains("res_id bigint NOT NULL"));
         // state is NOT a column — it is derived at read time from date_deadline.
         assert!(!act.contains(" state "));
+
+        let foll = to_ddl(&resolve_registered("mail.follower").unwrap());
+        assert!(foll.contains("CREATE TABLE mail_follower"));
+        assert!(foll.contains("user_id bigint NOT NULL"));
+        // FK-light: user_id is a plain integer; uniqueness is a composite index, not a column UNIQUE.
+        assert!(!foll.contains("REFERENCES"));
     }
 }
