@@ -74,6 +74,13 @@ async fn fresh(db: &Db, order: &ResolvedModel, line: &ResolvedModel) {
     db.create_table(line).await.unwrap();
 }
 
+/// These tests all drop/create the SAME `nst_order`/`nst_line` tables, so they must not run
+/// concurrently — serialize them on a shared async lock.
+fn serial() -> &'static tokio::sync::Mutex<()> {
+    static L: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    L.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 #[tokio::test]
 async fn creates_a_parent_with_its_children_in_one_write() {
     let url = match url_or_skip() {
@@ -81,6 +88,7 @@ async fn creates_a_parent_with_its_children_in_one_write() {
         None => return,
     };
     let db = Db::connect(&url).await.unwrap();
+    let _serial = serial().lock().await;
     let order = order_model();
     let line = line_model();
     let su = Ctx::new(0, vec![]).sudo();
@@ -115,6 +123,7 @@ async fn child_acl_denial_rolls_back_the_parent() {
         None => return,
     };
     let db = Db::connect(&url).await.unwrap();
+    let _serial = serial().lock().await;
     let order = order_model();
     let line = line_model();
     fresh(&db, &order, &line).await;
@@ -146,6 +155,7 @@ async fn reads_a_parent_with_its_children_inlined() {
         None => return,
     };
     let db = Db::connect(&url).await.unwrap();
+    let _serial = serial().lock().await;
     let order = order_model();
     let line = line_model();
     let su = Ctx::new(0, vec![]).sudo();
@@ -183,6 +193,7 @@ async fn child_model_not_readable_is_omitted_from_inline() {
         None => return,
     };
     let db = Db::connect(&url).await.unwrap();
+    let _serial = serial().lock().await;
     let order = order_model();
     let line = line_model();
     let su = Ctx::new(0, vec![]).sudo();
@@ -225,6 +236,7 @@ async fn child_create_rule_violation_rolls_back_the_parent() {
         None => return,
     };
     let db = Db::connect(&url).await.unwrap();
+    let _serial = serial().lock().await;
     let order = order_model();
     let line = line_model();
     fresh(&db, &order, &line).await;

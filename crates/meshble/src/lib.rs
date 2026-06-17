@@ -8,12 +8,13 @@ pub use meshble_core::inventory;
 pub mod prelude {
     pub use meshble_core::{
         check_access, check_compat, compute_fn, compute_stored, computed_fields, json_string,
-        record_rule_domain, registered_model_names, resolve, resolve_all_registered,
-        resolve_module_set, resolve_modules, resolve_registered, validate_depends, Acl,
-        ComputeFn, ComputeInput, ComputeRegistration, Condition, Ctx, Domain, DomainError,
-        FieldBuilder, FieldDef, FieldExtension, FieldKind, Model, ModelDescriptor,
-        ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
-        RecordRule, ResolutionError, ResolvedModel, Sql, Value, FRAMEWORK_VERSION,
+        migration_plan, record_rule_domain, registered_acls, registered_model_names,
+        registered_rules, resolve, resolve_all_registered, resolve_module_set, resolve_modules,
+        resolve_registered, validate_depends, Acl, AclRegistration, ComputeFn, ComputeInput,
+        ComputeRegistration, Condition, Ctx, Domain, DomainError, FieldBuilder, FieldDef,
+        FieldExtension, FieldKind, MigrationTarget, Model, ModelDescriptor, ModelRegistration,
+        ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator, RecordRule,
+        RecordRuleRegistration, ResolutionError, ResolvedModel, Sql, Value, FRAMEWORK_VERSION,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
@@ -36,7 +37,29 @@ macro_rules! register_compute {
 macro_rules! register_module {
     ($manifest:expr) => {
         $crate::inventory::submit! {
-            $crate::prelude::ModuleRegistration { manifest: || $manifest }
+            $crate::prelude::ModuleRegistration { manifest: || $manifest, crate_path: ::core::module_path!() }
+        }
+    };
+}
+
+/// Registers a module's ACLs so a server collects them via `registered_acls()`.
+/// Use at module top level: `meshble::register_acls!(ACLS);` where `ACLS: &'static [Acl]`.
+#[macro_export]
+macro_rules! register_acls {
+    ($acls:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::AclRegistration { acls: || $acls }
+        }
+    };
+}
+
+/// Registers a module's record rules so a server collects them via `registered_rules()`.
+/// Use at module top level: `meshble::register_rules!(RULES);` where `RULES: &'static [RecordRule]`.
+#[macro_export]
+macro_rules! register_rules {
+    ($rules:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::RecordRuleRegistration { rules: || $rules }
         }
     };
 }

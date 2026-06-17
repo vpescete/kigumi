@@ -42,6 +42,16 @@ pub enum AuthError {
     Invalid,
 }
 
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthError::Missing => write!(f, "no bearer token presented"),
+            AuthError::Invalid => write!(f, "invalid or expired token"),
+        }
+    }
+}
+impl std::error::Error for AuthError {}
+
 /// The verified identity carried by a refresh token.
 #[derive(Debug, Clone)]
 pub struct RefreshClaims {

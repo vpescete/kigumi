@@ -175,9 +175,17 @@ un nuovo dev fa clone → compose up → bootstrap admin → prima chiamata API 
 | **D9** | basso | Gate coverage CI: 80% globale, **80% sui crate di logica + carve-out per ops IO**, o track-senza-gate | M10 | **80% logica + carve-out ratchet** |
 | **D10** | basso | Blob/cifratura v1: solo Fs non cifrato, **Fs + envelope age** (S3 dopo), o S3+cifratura | M8 | **Fs + age**, S3 dietro feature flag |
 
-### Note di decisione (autonomia)
-Per la regola "procedi su ciò che puoi decidere da solo", **D1** (junction models) e **D3**
-(rust_decimal) sono decisioni tecniche con risposta chiara: le adotto come da raccomandazione salvo tua
-obiezione. Restano da scegliere insieme le decisioni di **prodotto/contratto/infra**: D2, D4, D5, D7 (le
-più precoci e impattanti) ora; D6, D8, D9, D10 si confermano alla rispettiva milestone (raccomandazione
-già fissata in memoria).
+### Decisioni prese (2026-06-17)
+- **D1 → junction models ora** (tecnica, decisa da me; M2M reale come miglioramento dopo).
+- **D2 → MULTI-COMPANY COMPLETO** (scelta utente, ≠ raccomandazione). Implica: `res.company` con
+  switcher di company + regole di condivisione cross-company + `Ctx.company_id` con company attiva
+  selezionabile. Scope ampliato in **M2** (modello + convenzione + sharing rules) e **M9** (switcher UI).
+- **D3 → rust_decimal→NUMERIC** (tecnica, decisa da me).
+- **D4 → oggetti tipizzati** `{op,id,values}` per i comandi x2many.
+- **D5 → entrambi** (operatori suffisso default + JSON domain escape).
+- **D7 → TUTTO NEL CONTRACT SERVER** (scelta utente, ≠ raccomandazione). Implica: estendere
+  `meshble-schema` per emettere **list-view, menu (`ir.ui.menu`-like) e azioni (`ir.actions`-like)**
+  dai modelli/moduli Rust → fonte di verità unica. Lavoro aggiunto al layer schema (i moduli
+  dichiarano menu/azioni/colonne), consumato in **M9**; il renderer FE non ha mappe per-modello.
+- **D6, D8, D9, D10** → si confermano alla rispettiva milestone (raccomandazione in memoria
+  `[[v1-open-decisions]]`).

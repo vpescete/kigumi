@@ -17,8 +17,9 @@ pub use domain::{json_string, Condition, Domain, DomainError, FieldBuilder, Oper
 pub use manifest::{check_compat, resolve_module_set, ModuleDep, ModuleManifest, ResolutionError};
 pub use metamodel::{resolve, validate_depends, FieldDef, FieldKind, Model, ModelDescriptor, ResolvedModel};
 pub use registry::{
-    registered_model_names, resolve_all_registered, resolve_modules, resolve_registered,
-    FieldExtension, ModelRegistration, ModuleRegistration,
+    migration_plan, registered_acls, registered_model_names, registered_rules,
+    resolve_all_registered, resolve_modules, resolve_registered, AclRegistration, FieldExtension,
+    MigrationTarget, ModelRegistration, ModuleRegistration, RecordRuleRegistration,
 };
 pub use security::{check_access, record_rule_domain, Acl, Ctx, Operation, RecordRule};
 

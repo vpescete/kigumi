@@ -89,6 +89,9 @@ pub static RECORD_RULES: &[RecordRule] = &[
     },
 ];
 
+meshble::register_acls!(ACLS);
+meshble::register_rules!(RECORD_RULES);
+
 #[cfg(test)]
 mod tests {
     use super::*;

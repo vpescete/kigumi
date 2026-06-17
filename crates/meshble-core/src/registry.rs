@@ -6,8 +6,8 @@
 //! monkey-patch that mutates a class at runtime.
 
 use crate::{
-    resolve, resolve_module_set, validate_depends, FieldDef, ModelDescriptor, ModuleManifest,
-    ResolutionError, ResolvedModel, FRAMEWORK_VERSION,
+    resolve, resolve_module_set, validate_depends, Acl, FieldDef, ModelDescriptor, ModuleManifest,
+    RecordRule, ResolutionError, ResolvedModel, FRAMEWORK_VERSION,
 };
 
 /// Registration of a base model (emitted by `#[model]`).
@@ -26,11 +26,82 @@ pub struct FieldExtension {
 }
 inventory::collect!(FieldExtension);
 
-/// Registration of a module manifest (emitted by `register_module!`).
+/// Registration of a module manifest (emitted by `register_module!`). `crate_path` is the Rust
+/// module path of the registering crate (`module_path!()`), used to map a model — whose own
+/// registration carries `module_path!()` — back to its owning manifest (name + version).
 pub struct ModuleRegistration {
     pub manifest: fn() -> ModuleManifest,
+    pub crate_path: &'static str,
 }
 inventory::collect!(ModuleRegistration);
+
+/// Registration of a module's ACLs (emitted by `register_acls!`). Compile-time security data; M6
+/// adds a DB-backed loader on top, but the in-code registry stays the bootstrap/default source.
+pub struct AclRegistration {
+    pub acls: fn() -> &'static [Acl],
+}
+inventory::collect!(AclRegistration);
+
+/// Registration of a module's record rules (emitted by `register_rules!`).
+pub struct RecordRuleRegistration {
+    pub rules: fn() -> &'static [RecordRule],
+}
+inventory::collect!(RecordRuleRegistration);
+
+/// All ACLs registered across linked modules (the union a server enforces).
+pub fn registered_acls() -> Vec<Acl> {
+    inventory::iter::<AclRegistration>
+        .into_iter()
+        .flat_map(|r| (r.acls)().iter().copied())
+        .collect()
+}
+
+/// All record rules registered across linked modules.
+pub fn registered_rules() -> Vec<RecordRule> {
+    inventory::iter::<RecordRuleRegistration>
+        .into_iter()
+        .flat_map(|r| (r.rules)().iter().copied())
+        .collect()
+}
+
+/// One model to migrate, with the owning module's name + version (for the migration ledger).
+pub struct MigrationTarget {
+    pub module: &'static str,
+    pub version: String,
+    pub model: ResolvedModel,
+}
+
+/// The full migration plan in MODULE DEPENDENCY ORDER (so a model's FK targets — e.g. res.partner
+/// for sale.order — are created before the referencing table). Within a module, models are sorted
+/// by name for determinism.
+pub fn migration_plan() -> Result<Vec<MigrationTarget>, String> {
+    let modules = resolve_modules().map_err(|e| format!("{e:?}"))?;
+    let regs: Vec<&'static ModuleRegistration> = inventory::iter::<ModuleRegistration>.into_iter().collect();
+    let mut plan = Vec::new();
+    for m in &modules {
+        // The crate that registered this manifest; its models share its module_path prefix.
+        let crate_path = regs
+            .iter()
+            .find(|r| (r.manifest)().name == m.name)
+            .map(|r| r.crate_path)
+            .unwrap_or("");
+        let prefix = format!("{crate_path}::");
+        let mut names: Vec<&'static str> = inventory::iter::<ModelRegistration>
+            .into_iter()
+            .filter(|r| r.module == crate_path || r.module.starts_with(&prefix))
+            .map(|r| r.name)
+            .collect();
+        names.sort_unstable();
+        for n in names {
+            plan.push(MigrationTarget {
+                module: m.name,
+                version: m.version.to_string(),
+                model: resolve_registered(n)?,
+            });
+        }
+    }
+    Ok(plan)
+}
 
 /// Resolves every module registered in the catalog: framework compatibility, dependency
 /// version ranges, no duplicates, no cycles — returning them in dependency order.

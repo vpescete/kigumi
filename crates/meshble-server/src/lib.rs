@@ -64,6 +64,9 @@ pub fn router_with_data(
         .route("/auth/login", post(login_handler))
         .route("/auth/refresh", post(refresh_handler))
         .route("/auth/logout", post(logout_handler))
+        .route("/auth/me", get(me_handler))
+        .route("/health", get(health_handler))
+        .route("/ready", get(ready_handler))
         .route("/api/:name", get(list_handler).post(create_handler))
         .route(
             "/api/:name/:id",
@@ -130,6 +133,31 @@ async fn models_handler(State(state): State<AppState>) -> Json<Vec<String>> {
 fn internal_error(context: &str, detail: impl std::fmt::Debug) -> Response {
     eprintln!("meshble-server {context} error: {detail:?}");
     (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+}
+
+/// Liveness: the process is up. No DB touch — safe for a fast container health probe.
+async fn health_handler() -> Response {
+    json_response("{\"status\":\"ok\"}".to_string())
+}
+
+/// Readiness: the process can serve traffic (database reachable). 503 until it can.
+async fn ready_handler(State(state): State<AppState>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    match backend.db.ping().await {
+        Ok(_) => json_response("{\"status\":\"ready\"}".to_string()),
+        Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "{\"status\":\"not_ready\"}").into_response(),
+    }
+}
+
+/// The authenticated caller's own identity — the trusted `Ctx` derived from the bearer token.
+async fn me_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let body = serde_json::json!({ "uid": ctx.uid, "groups": ctx.groups });
+    json_response(body.to_string())
 }
 
 async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -> Response {

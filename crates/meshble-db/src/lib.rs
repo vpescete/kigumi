@@ -35,6 +35,13 @@ pub enum DbError {
     BadInput(String),
 }
 
+impl std::fmt::Display for DbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for DbError {}
+
 impl From<sqlx::Error> for DbError {
     fn from(e: sqlx::Error) -> Self {
         DbError::Sql(e)
@@ -56,6 +63,12 @@ impl Db {
     pub async fn connect(url: &str) -> Result<Db, DbError> {
         let pool = PgPoolOptions::new().max_connections(5).connect(url).await?;
         Ok(Db { pool })
+    }
+
+    /// Lightweight reachability check for readiness probes.
+    pub async fn ping(&self) -> Result<(), DbError> {
+        sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&self.pool).await?;
+        Ok(())
     }
 
     /// Access to the underlying pool (e.g. for raw inserts in tests).

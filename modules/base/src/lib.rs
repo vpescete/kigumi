@@ -33,6 +33,13 @@ pub struct ResCurrency {
     symbol: Text,
 }
 
+/// Base ACLs: the everyday `user` group can read the foundational reference data.
+pub static ACLS: &[Acl] = &[
+    Acl { model: "res.partner", group: "user", read: true, write: false, create: false, delete: false },
+    Acl { model: "res.currency", group: "user", read: true, write: false, create: false, delete: false },
+];
+meshble::register_acls!(ACLS);
+
 #[cfg(test)]
 mod tests {
     use super::*;
