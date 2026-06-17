@@ -198,6 +198,9 @@ async fn seed_base_data(db: &Db) -> Fallible {
     let company = resolve_registered("res.company").map_err(|e| e.to_string())?;
     let su = Ctx::new(0, vec![]).sudo();
 
+    // Document-numbering sequences used by registered actions (e.g. sale.order confirm → SO/00001).
+    db.ensure_sequence("SO", "SO/", "", 5).await?;
+
     let cur_id = if db.count_secured(&currency, &su, &[], &[], None).await? == 0 {
         let v = serde_json::json!({
             "name": "Euro", "code": "EUR", "symbol": "€",

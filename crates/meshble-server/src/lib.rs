@@ -75,6 +75,7 @@ pub fn router_with_data(
             "/api/:name/:id",
             get(get_one_handler).patch(update_handler).delete(delete_handler),
         )
+        .route("/api/:name/:id/action/:action", post(action_handler))
         .with_state(AppState {
             models: Arc::new(models),
             data: Some(DataBackend {
@@ -394,6 +395,27 @@ async fn update_handler(
         Ok(0) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
         Ok(n) => json_status(StatusCode::OK, format!("{{\"updated\": {n}}}")),
         Err(e) => write_error("update", e),
+    }
+}
+
+/// Runs a registered state-transition action on a record (e.g. confirm a draft order).
+async fn action_handler(
+    State(state): State<AppState>,
+    Path((name, id, action)): Path<(String, i64, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.run_action(model, &ctx, backend.acls, backend.rules, id, &action).await {
+        Ok(()) => json_response(format!("{{\"ok\":true,\"action\":{}}}", serde_json::to_string(&action).unwrap_or_default())),
+        Err(e) => write_error("action", e),
     }
 }
 

@@ -14,9 +14,9 @@ pub use auth_store::UserRow;
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
-    check_access, compute_stored, computed_fields, record_rule_domain, resolve_all_registered,
-    resolve_registered, Acl, Children, Ctx, Domain, DomainError, FieldDef, FieldKind, Operation,
-    RecordRule, ResolvedModel, Value,
+    action_for, check_access, compute_stored, computed_fields, record_rule_domain,
+    resolve_all_registered, resolve_registered, Acl, ActionInput, Children, Ctx, Domain, DomainError,
+    FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
 };
 use meshble_schema::to_ddl;
 use serde_json::{Map, Value as Json};
@@ -704,25 +704,89 @@ impl Db {
         Ok(())
     }
 
+    /// Runs a registered state-transition action on row `id`: enforces ACL Write + the action's group
+    /// guard + record-rule visibility, runs the pure action fn over the current record, resolves any
+    /// sequence assignment (gapless numbering), and applies the resulting updates through the secured
+    /// write path (so record rules + company scope are re-checked on the write).
+    pub async fn run_action(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        id: i64,
+        action_name: &str,
+    ) -> Result<(), DbError> {
+        let action = action_for(model.name, action_name).ok_or_else(|| {
+            DbError::BadInput(format!("unknown action '{action_name}' on '{}'", model.name))
+        })?;
+        if !check_access(Operation::Write, model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "action" });
+        }
+        if !action.groups.is_empty() && !ctx.is_su() && !action.groups.iter().any(|g| ctx.is_member(g)) {
+            return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "action (group)" });
+        }
+        // The row must be visible to the caller (so the action's guards read real values).
+        if self.find_one_secured(model, ctx, acls, rules, id).await?.is_none() {
+            return Err(DbError::BadInput("record not found or not permitted".to_string()));
+        }
+        let mut conn = self.pool.acquire().await?;
+        let record = read_record_on(&mut conn, model, id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("record not found".to_string()))?;
+        drop(conn);
+
+        let outcome = (action.func)(&ActionInput::new(&record)).map_err(DbError::BadInput)?;
+        let mut updates: Map<String, Json> =
+            outcome.set.iter().map(|(k, v)| (k.clone(), value_to_json(v))).collect();
+        if let Some((field, code)) = &outcome.assign_sequence {
+            updates.insert(field.clone(), Json::from(self.next_value(code).await?));
+        }
+        if updates.is_empty() {
+            return Ok(()); // a guard-only / no-op action
+        }
+        if self.update_secured(model, ctx, acls, rules, id, &updates).await? == 0 {
+            return Err(DbError::BadInput("record not found or not permitted".to_string()));
+        }
+        Ok(())
+    }
+
     /// Recomputes `parent`'s aggregate computed columns from its current children (a direct UPDATE,
     /// so it never re-enters the secured write path / re-triggers). Serialized per parent with an
     /// advisory lock so concurrent child writes can't lose-update the aggregate. All reads and the
     /// write run on the SAME locked connection, so holding the lock never contends for a second
     /// pool connection.
     async fn recompute_parent(&self, parent: &ResolvedModel, parent_id: i64) -> Result<(), DbError> {
-        if computed_fields(parent).is_empty() {
-            return Ok(());
+        // Multi-level cascade: recompute this aggregate parent, then propagate to ITS aggregate
+        // parents (line → order → customer rollups). Iterative with a depth cap + a visited set so a
+        // cyclic or deep model graph can never loop forever.
+        let mut work: Vec<(ResolvedModel, i64, usize)> = vec![(parent.clone(), parent_id, 0)];
+        let mut seen: Vec<(&'static str, i64)> = Vec::new();
+        while let Some((m, pid, depth)) = work.pop() {
+            if depth > MAX_CASCADE_DEPTH || seen.iter().any(|&(n, i)| n == m.name && i == pid) {
+                continue;
+            }
+            seen.push((m.name, pid));
+            if computed_fields(&m).is_empty() {
+                continue;
+            }
+            // Per-row advisory lock across read+recompute+write, so concurrent recomputes of the
+            // same row serialize and the final aggregate is correct.
+            let mut lock = self.pool.begin().await?;
+            sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+                .bind(format!("agg:{}:{}", m.table, pid))
+                .execute(&mut *lock)
+                .await?;
+            recompute_columns_on(&mut lock, &m, pid).await?;
+            lock.commit().await?;
+            // Propagate upward: if m is itself a child of a higher aggregate, enqueue that grandparent.
+            for (gp, inverse) in parents_of(m.name) {
+                if let Some(gpid) = self.read_fk(m.table, inverse, pid).await? {
+                    work.push((gp, gpid, depth + 1));
+                }
+            }
         }
-        // Hold a per-parent advisory lock across read+recompute+write: a concurrent recompute for
-        // the same parent blocks here until we commit, then re-reads the full child set.
-        let mut lock = self.pool.begin().await?;
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
-            .bind(format!("agg:{}:{}", parent.table, parent_id))
-            .execute(&mut *lock)
-            .await?;
-        let outcome = recompute_columns_on(&mut lock, parent, parent_id).await;
-        lock.commit().await?; // release the lock
-        outcome
+        Ok(())
     }
     // ponytail: aggregate recompute on a child UPDATE/DELETE still runs post-commit (advisory-locked
     // and idempotent); a process crash in that window leaves a stale parent total until the next
@@ -842,6 +906,9 @@ fn validate_write_values(
 /// Hard cap on child commands per One2many field in one write — bounds the work a single request
 /// can do inside one transaction (and the time the per-parent advisory lock is held).
 const MAX_O2M_COMMANDS: usize = 1000;
+
+/// Maximum aggregate-cascade depth (line → order → customer …), guarding deep/cyclic model graphs.
+const MAX_CASCADE_DEPTH: usize = 8;
 
 /// One x2many child command — typed objects (decision D4), not Odoo's positional tuples.
 enum O2mCommand {
@@ -1032,6 +1099,19 @@ fn default_json(field: &FieldDef) -> Option<Json> {
         FieldKind::Decimal { .. } | FieldKind::Text | FieldKind::Selection(_) => Json::from(d.to_string()),
         FieldKind::One2many { .. } => return None,
     })
+}
+
+/// Serde JSON for a typed Value — feeds an action's typed outputs back through the secured write path.
+fn value_to_json(v: &Value) -> Json {
+    match v {
+        Value::Str(s) => Json::from(s.clone()),
+        Value::Int(n) => Json::from(*n),
+        Value::Float(f) => serde_json::json!(f),
+        Value::Decimal(d) => Json::from(d.to_string()),
+        Value::Bool(b) => Json::from(*b),
+        Value::Null => Json::Null,
+        Value::List(_) => Json::Null,
+    }
 }
 
 /// Fills any unset stored field that declares a `default` (applied on create, before required check).

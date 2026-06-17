@@ -7,14 +7,15 @@ pub use meshble_core::inventory;
 /// Everything needed to define a module: `use meshble::prelude::*;`
 pub mod prelude {
     pub use meshble_core::{
-        check_access, check_compat, compute_fn, compute_stored, computed_fields, json_string,
-        migration_plan, record_rule_domain, registered_acls, registered_model_names,
+        action_for, check_access, check_compat, compute_fn, compute_stored, computed_fields,
+        json_string, migration_plan, record_rule_domain, registered_acls, registered_model_names,
         registered_rules, resolve, resolve_all_registered, resolve_module_set, resolve_modules,
-        resolve_registered, validate_depends, Acl, AclRegistration, ComputeFn, ComputeInput,
-        ComputeRegistration, Condition, Ctx, Domain, DomainError, FieldBuilder, FieldDef,
-        FieldExtension, FieldKind, MigrationTarget, Model, ModelDescriptor, ModelRegistration,
-        ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator, RecordRule,
-        RecordRuleRegistration, ResolutionError, ResolvedModel, Sql, Value, FRAMEWORK_VERSION,
+        resolve_registered, validate_depends, Acl, AclRegistration, ActionFn, ActionInput,
+        ActionOutcome, ActionRegistration, ComputeFn, ComputeInput, ComputeRegistration, Condition,
+        Ctx, Domain, DomainError, FieldBuilder, FieldDef, FieldExtension, FieldKind, MigrationTarget,
+        Model, ModelDescriptor, ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration,
+        Operation, Operator, RecordRule, RecordRuleRegistration, ResolutionError, ResolvedModel,
+        Sql, Value, FRAMEWORK_VERSION,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
@@ -60,6 +61,17 @@ macro_rules! register_rules {
     ($rules:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::RecordRuleRegistration { rules: || $rules }
+        }
+    };
+}
+
+/// Registers a state-transition action on a model, runnable via `POST /api/<model>/<id>/action/<name>`.
+/// `meshble::register_action!("sale.order", "confirm", confirm_order, &["sales.user"]);`
+#[macro_export]
+macro_rules! register_action {
+    ($model:expr, $name:expr, $func:expr, $groups:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::ActionRegistration { model: $model, name: $name, func: $func, groups: $groups }
         }
     };
 }

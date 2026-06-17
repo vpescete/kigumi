@@ -5,6 +5,7 @@
 //! extension is a VERIFIED MERGE, not a global monkey-patch; dependencies between
 //! modules have verified VERSION RANGES (Odoo does not have them — see `docs/VERSIONING.md`).
 
+mod action;
 mod compute;
 mod domain;
 mod manifest;
@@ -12,6 +13,7 @@ mod metamodel;
 mod registry;
 mod security;
 
+pub use action::{action_for, ActionFn, ActionInput, ActionOutcome, ActionRegistration};
 pub use compute::{compute_fn, compute_stored, computed_fields, Children, ComputeFn, ComputeInput, ComputeRegistration};
 pub use domain::{json_string, Condition, Domain, DomainError, FieldBuilder, Operator, Sql, Value};
 pub use manifest::{check_compat, resolve_module_set, ModuleDep, ModuleManifest, ResolutionError};

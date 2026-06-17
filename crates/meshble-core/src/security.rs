@@ -80,6 +80,10 @@ impl Ctx {
     pub fn is_member(&self, group: &str) -> bool {
         self.groups.iter().any(|g| g == group)
     }
+    /// True iff this is an elevated (superuser) context. Read-only view of the private `su` flag.
+    pub fn is_su(&self) -> bool {
+        self.su
+    }
     /// True iff the caller has a company restriction the engine should enforce (non-sudo + a set).
     pub fn company_scoped(&self) -> bool {
         !self.su && !self.allowed_company_ids.is_empty()

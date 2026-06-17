@@ -95,6 +95,26 @@ pub static RECORD_RULES: &[RecordRule] = &[
 meshble::register_acls!(ACLS);
 meshble::register_rules!(RECORD_RULES);
 
+/// `confirm`: a draft order becomes a confirmed sale and is assigned its SO number from the sequence.
+fn confirm_order(i: &ActionInput) -> Result<ActionOutcome, String> {
+    match i.str("state") {
+        "draft" => Ok(ActionOutcome::new()
+            .set("state", Value::Str("sale".to_string()))
+            .assign_sequence("name", "SO")),
+        s => Err(format!("can only confirm a draft order (state is '{s}')")),
+    }
+}
+meshble::register_action!("sale.order", "confirm", confirm_order, &["sales.user"]);
+
+/// `done`: a confirmed sale is locked as done (its total then becomes read-only via the UI rule).
+fn set_done(i: &ActionInput) -> Result<ActionOutcome, String> {
+    match i.str("state") {
+        "sale" => Ok(ActionOutcome::new().set("state", Value::Str("done".to_string()))),
+        s => Err(format!("can only finish a confirmed order (state is '{s}')")),
+    }
+}
+meshble::register_action!("sale.order", "done", set_done, &["sales.user"]);
+
 #[cfg(test)]
 mod tests {
     use super::*;
