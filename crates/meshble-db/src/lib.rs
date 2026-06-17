@@ -387,58 +387,10 @@ impl Db {
             }
         }
 
-        // Nested One2many children: create each in the SAME transaction with its inverse FK pointed
-        // at the new parent, so the parent+children are all-or-nothing. ACL Create is enforced on
-        // the child model too; a denial drops the tx and rolls back the parent.
-        for nc in &nested {
-            if !check_access(Operation::Create, nc.child.name, ctx, acls) {
-                return Err(DbError::AccessDenied {
-                    model: nc.child.name.to_string(),
-                    operation: "create",
-                });
-            }
-            for row in &nc.rows {
-                let mut cvals = row.clone();
-                cvals.insert(nc.inverse.to_string(), Json::from(id)); // parent owns the FK
-                apply_company_scope(&nc.child, ctx, &mut cvals, true)?; // children are scoped too
-                apply_defaults(&nc.child, &mut cvals);
-                let ccols = validate_write_values(&nc.child, &cvals, true)?;
-                let mut crec: BTreeMap<String, Value> =
-                    ccols.into_iter().map(|(c, v)| (c.to_string(), v)).collect();
-                compute_stored(&nc.child, &mut crec, &Children::new());
-                let (cn, cv): (Vec<&str>, Vec<Value>) =
-                    crec.iter().map(|(k, v)| (k.as_str(), v.clone())).unzip();
-                let cph: Vec<String> = (1..=cn.len()).map(|i| format!("${i}")).collect();
-                let csql = format!(
-                    "INSERT INTO {} ({}) VALUES ({}) RETURNING id",
-                    nc.child.table,
-                    cn.join(", "),
-                    cph.join(", ")
-                );
-                let mut cq = sqlx::query_scalar::<Postgres, i64>(&csql);
-                cq = bind_all(cq, &cv);
-                let child_id: i64 = cq.fetch_one(&mut *tx).await?;
-
-                // The child's own Create record rule must hold too — otherwise nesting would be a
-                // weaker path than the child's own endpoint (record-rule bypass). Violation rolls
-                // back the whole parent+children tx.
-                if let Some(rule) = record_rule_domain(Operation::Create, nc.child.name, ctx, rules) {
-                    let mut params: Vec<Value> = vec![Value::Int(child_id)];
-                    let where_sql = rule.compile_into(&nc.child, &mut params)?;
-                    let check =
-                        format!("SELECT 1 FROM {} WHERE id = $1 AND {}", nc.child.table, where_sql);
-                    let mut chk = sqlx::query(&check);
-                    for v in &params {
-                        chk = bind_query(chk, v);
-                    }
-                    if chk.fetch_optional(&mut *tx).await?.is_none() {
-                        return Err(DbError::AccessDenied {
-                            model: nc.child.name.to_string(),
-                            operation: "create (record rule)",
-                        });
-                    }
-                }
-            }
+        // Nested One2many children: create-only on a brand-new parent, in the SAME transaction with
+        // child ACL + record rules re-checked — parent + children are all-or-nothing.
+        if !nested.is_empty() {
+            self.apply_nested_in_tx(&mut tx, ctx, acls, rules, &nested, id, false).await?;
         }
 
         // Recompute this parent's own aggregate from the just-inserted children IN THIS TRANSACTION,
@@ -470,53 +422,79 @@ impl Db {
         if !check_access(Operation::Write, model.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "write" });
         }
+        // Split scalar fields from One2many child commands (D4 typed write-through).
+        let (mut scalars, nested) = split_nested(model, values)?;
         // Multi-company: a scoped caller may not reassign a row into a foreign company or NULL.
-        let mut values = values.clone();
-        apply_company_scope(model, ctx, &mut values, false)?;
-        let cols = validate_write_values(model, &values, false)?;
-        if cols.is_empty() {
+        apply_company_scope(model, ctx, &mut scalars, false)?;
+        let cols = validate_write_values(model, &scalars, false)?;
+        if cols.is_empty() && nested.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
         }
-        // Recompute stored computed fields from the merged record (current row + this update).
-        let computed = computed_fields(model);
-        let mut set_pairs: Vec<(String, Value)> =
-            cols.iter().map(|(c, v)| (c.to_string(), v.clone())).collect();
-        if !computed.is_empty() {
-            let mut record = match self.read_record(model, id).await? {
-                Some(r) => r,
-                None => return Ok(0), // no such row
+
+        let mut tx = self.pool.begin().await?;
+        // Parents this row points to BEFORE the write (re-parenting uses before + after).
+        let before = self.parent_targets(model, id).await?;
+
+        // 1) Scalar UPDATE of the provided columns (computed columns recomputed in step 3); the Write
+        //    rule + company scope are enforced in the WHERE.
+        let mut affected = 1u64;
+        if !cols.is_empty() {
+            let set: Vec<String> =
+                cols.iter().enumerate().map(|(i, (c, _))| format!("{} = ${}", c, i + 1)).collect();
+            let id_ph = cols.len() + 1;
+            let mut params: Vec<Value> = cols.iter().map(|(_, v)| v.clone()).collect();
+            params.push(Value::Int(id));
+            let mut where_sql = match record_rule_domain(Operation::Write, model.name, ctx, rules) {
+                Some(rule) => format!("id = ${id_ph} AND {}", rule.compile_into(model, &mut params)?),
+                None => format!("id = ${id_ph}"),
             };
-            for (c, v) in &cols {
-                record.insert(c.to_string(), v.clone());
+            where_sql.push_str(&company_clause(model, ctx, &mut params)?);
+            let sql = format!("UPDATE {} SET {} WHERE {}", model.table, set.join(", "), where_sql);
+            let mut q = sqlx::query(&sql);
+            for v in &params {
+                q = bind_query(q, v);
             }
-            let children = self.read_children(model, id).await?;
-            compute_stored(model, &mut record, &children);
-            for name in &computed {
-                if let Some(v) = record.get(*name) {
-                    set_pairs.push((name.to_string(), v.clone()));
-                }
+            affected = q.execute(&mut *tx).await?.rows_affected();
+            if affected == 0 {
+                return Ok(0); // no such row / not permitted → tx rolls back on drop
+            }
+        } else {
+            // Nested-only write: confirm the parent is writable by this caller before touching its
+            // children.
+            let mut params: Vec<Value> = vec![Value::Int(id)];
+            let mut where_sql = match record_rule_domain(Operation::Write, model.name, ctx, rules) {
+                Some(rule) => format!("id = $1 AND {}", rule.compile_into(model, &mut params)?),
+                None => "id = $1".to_string(),
+            };
+            where_sql.push_str(&company_clause(model, ctx, &mut params)?);
+            let check = format!("SELECT 1 FROM {} WHERE {}", model.table, where_sql);
+            let mut q = sqlx::query(&check);
+            for v in &params {
+                q = bind_query(q, v);
+            }
+            if q.fetch_optional(&mut *tx).await?.is_none() {
+                return Ok(0);
             }
         }
 
-        let set: Vec<String> =
-            set_pairs.iter().enumerate().map(|(i, (c, _))| format!("{} = ${}", c, i + 1)).collect();
-        let id_ph = set_pairs.len() + 1;
-        let mut params: Vec<Value> = set_pairs.iter().map(|(_, v)| v.clone()).collect();
-        params.push(Value::Int(id));
-        let mut where_sql = match record_rule_domain(Operation::Write, model.name, ctx, rules) {
-            Some(rule) => format!("id = ${id_ph} AND {}", rule.compile_into(model, &mut params)?),
-            None => format!("id = ${id_ph}"),
-        };
-        where_sql.push_str(&company_clause(model, ctx, &mut params)?);
-        let sql = format!("UPDATE {} SET {} WHERE {}", model.table, set.join(", "), where_sql);
-        let mut q = sqlx::query(&sql);
-        for v in &params {
-            q = bind_query(q, v);
+        // 2) Apply the nested child commands (create/update/delete) in the same transaction.
+        if !nested.is_empty() {
+            self.apply_nested_in_tx(&mut tx, ctx, acls, rules, &nested, id, true).await?;
         }
-        // Capture the parents the child pointed to BEFORE the update, run it, then capture the new
-        // parents — so re-parenting a child recomputes BOTH the old and the new aggregate.
-        let before = self.parent_targets(model, id).await?;
-        let affected = q.execute(&self.pool).await?.rows_affected();
+
+        // 3) Recompute this row's computed columns (same-record + aggregate over its children),
+        //    in-tx and serialized per row so concurrent child writes cannot lose-update the aggregate.
+        if !computed_fields(model).is_empty() {
+            sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+                .bind(format!("agg:{}:{}", model.table, id))
+                .execute(&mut *tx)
+                .await?;
+            recompute_columns_on(&mut tx, model, id).await?;
+        }
+        tx.commit().await?;
+
+        // 4) Re-parenting: if this row is itself a child whose FK moved, recompute the old + new
+        //    aggregate parents (deduped).
         let after = self.parent_targets(model, id).await?;
         let mut seen: Vec<(&'static str, i64)> = Vec::new();
         for (parent, pid) in before.into_iter().chain(after) {
@@ -528,20 +506,199 @@ impl Db {
         Ok(affected)
     }
 
-    /// Reads a row's stored field values into a typed map (for recompute on update).
-    async fn read_record(
+    /// Applies a parent's One2many child commands in `tx`. Create is always allowed; Update/Delete
+    /// only when `allow_existing` (a brand-new parent has no children to edit). Each command
+    /// re-checks the child model's ACL + record rules, and Update/Delete verify the child belongs to
+    /// THIS parent (so nesting can't reach another parent's rows).
+    #[allow(clippy::too_many_arguments)]
+    async fn apply_nested_in_tx(
         &self,
-        model: &ResolvedModel,
-        id: i64,
-    ) -> Result<Option<BTreeMap<String, Value>>, DbError> {
-        let mut c = self.pool.acquire().await?;
-        read_record_on(&mut c, model, id).await
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        nested: &[NestedWrite],
+        parent_id: i64,
+        allow_existing: bool,
+    ) -> Result<(), DbError> {
+        for nw in nested {
+            for cmd in &nw.commands {
+                match cmd {
+                    O2mCommand::Create(values) => {
+                        self.create_child_in_tx(tx, nw, parent_id, ctx, acls, rules, values.clone())
+                            .await?
+                    }
+                    O2mCommand::Update(cid, values) => {
+                        if !allow_existing {
+                            return Err(DbError::BadInput(
+                                "a new record's children can only be created".to_string(),
+                            ));
+                        }
+                        self.update_child_in_tx(tx, nw, parent_id, ctx, acls, rules, *cid, values.clone())
+                            .await?
+                    }
+                    O2mCommand::Delete(cid) => {
+                        if !allow_existing {
+                            return Err(DbError::BadInput(
+                                "a new record's children can only be created".to_string(),
+                            ));
+                        }
+                        self.delete_child_in_tx(tx, nw, parent_id, ctx, acls, rules, *cid).await?
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
-    /// Loads the One2many children of `parent_id` (one entry per o2m field) for aggregate compute.
-    async fn read_children(&self, parent: &ResolvedModel, parent_id: i64) -> Result<Children, DbError> {
-        let mut c = self.pool.acquire().await?;
-        read_children_on(&mut c, parent, parent_id).await
+    #[allow(clippy::too_many_arguments)]
+    async fn create_child_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        nw: &NestedWrite,
+        parent_id: i64,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        mut cvals: Map<String, Json>,
+    ) -> Result<(), DbError> {
+        if !check_access(Operation::Create, nw.child.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: nw.child.name.to_string(), operation: "create" });
+        }
+        cvals.insert(nw.inverse.to_string(), Json::from(parent_id)); // parent owns the FK
+        apply_company_scope(&nw.child, ctx, &mut cvals, true)?;
+        apply_defaults(&nw.child, &mut cvals);
+        let ccols = validate_write_values(&nw.child, &cvals, true)?;
+        let mut crec: BTreeMap<String, Value> =
+            ccols.into_iter().map(|(c, v)| (c.to_string(), v)).collect();
+        compute_stored(&nw.child, &mut crec, &Children::new());
+        let (cn, cv): (Vec<&str>, Vec<Value>) =
+            crec.iter().map(|(k, v)| (k.as_str(), v.clone())).unzip();
+        let cph: Vec<String> = (1..=cn.len()).map(|i| format!("${i}")).collect();
+        let csql = format!(
+            "INSERT INTO {} ({}) VALUES ({}) RETURNING id",
+            nw.child.table,
+            cn.join(", "),
+            cph.join(", ")
+        );
+        let mut cq = sqlx::query_scalar::<Postgres, i64>(&csql);
+        cq = bind_all(cq, &cv);
+        let child_id: i64 = cq.fetch_one(&mut **tx).await?;
+        // The child's own Create record rule must hold too (nesting is not a weaker path).
+        if let Some(rule) = record_rule_domain(Operation::Create, nw.child.name, ctx, rules) {
+            let mut params: Vec<Value> = vec![Value::Int(child_id)];
+            let where_sql = rule.compile_into(&nw.child, &mut params)?;
+            let check = format!("SELECT 1 FROM {} WHERE id = $1 AND {}", nw.child.table, where_sql);
+            let mut chk = sqlx::query(&check);
+            for v in &params {
+                chk = bind_query(chk, v);
+            }
+            if chk.fetch_optional(&mut **tx).await?.is_none() {
+                return Err(DbError::AccessDenied {
+                    model: nw.child.name.to_string(),
+                    operation: "create (record rule)",
+                });
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn update_child_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        nw: &NestedWrite,
+        parent_id: i64,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        child_id: i64,
+        mut cvals: Map<String, Json>,
+    ) -> Result<(), DbError> {
+        if !check_access(Operation::Write, nw.child.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: nw.child.name.to_string(), operation: "write" });
+        }
+        cvals.remove(nw.inverse); // the parent owns the link; re-parenting via nesting is not allowed
+        apply_company_scope(&nw.child, ctx, &mut cvals, false)?;
+        let cols = validate_write_values(&nw.child, &cvals, false)?;
+        if cols.is_empty() {
+            return Ok(());
+        }
+        // Read the current child (and verify it belongs to THIS parent) for the same-record recompute.
+        let mut record = match read_record_on(&mut **tx, &nw.child, child_id).await? {
+            Some(r) => r,
+            None => return Err(DbError::BadInput(format!("line {child_id} not found"))),
+        };
+        if record.get(nw.inverse) != Some(&Value::Int(parent_id)) {
+            return Err(DbError::BadInput(format!("line {child_id} is not a child of this record")));
+        }
+        for (c, v) in &cols {
+            record.insert(c.to_string(), v.clone());
+        }
+        let computed = computed_fields(&nw.child);
+        if !computed.is_empty() {
+            let gchildren = read_children_on(&mut **tx, &nw.child, child_id).await?;
+            compute_stored(&nw.child, &mut record, &gchildren);
+        }
+        let mut set_pairs: Vec<(String, Value)> =
+            cols.iter().map(|(c, v)| (c.to_string(), v.clone())).collect();
+        for name in &computed {
+            if let Some(v) = record.get(*name) {
+                set_pairs.push((name.to_string(), v.clone()));
+            }
+        }
+        let set: Vec<String> =
+            set_pairs.iter().enumerate().map(|(i, (c, _))| format!("{} = ${}", c, i + 1)).collect();
+        let id_ph = set_pairs.len() + 1;
+        let mut params: Vec<Value> = set_pairs.iter().map(|(_, v)| v.clone()).collect();
+        params.push(Value::Int(child_id));
+        params.push(Value::Int(parent_id));
+        let mut where_sql = format!("id = ${id_ph} AND {} = ${}", nw.inverse, id_ph + 1);
+        if let Some(rule) = record_rule_domain(Operation::Write, nw.child.name, ctx, rules) {
+            where_sql.push_str(&format!(" AND {}", rule.compile_into(&nw.child, &mut params)?));
+        }
+        let sql = format!("UPDATE {} SET {} WHERE {}", nw.child.table, set.join(", "), where_sql);
+        let mut q = sqlx::query(&sql);
+        for v in &params {
+            q = bind_query(q, v);
+        }
+        if q.execute(&mut **tx).await?.rows_affected() == 0 {
+            return Err(DbError::BadInput(format!("cannot update line {child_id}: not permitted")));
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn delete_child_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        nw: &NestedWrite,
+        parent_id: i64,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        child_id: i64,
+    ) -> Result<(), DbError> {
+        if !check_access(Operation::Delete, nw.child.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: nw.child.name.to_string(), operation: "delete" });
+        }
+        // Ownership (child belongs to THIS parent) + the child's Delete record rule.
+        let mut params: Vec<Value> = vec![Value::Int(child_id), Value::Int(parent_id)];
+        let mut where_sql = format!("id = $1 AND {} = $2", nw.inverse);
+        if let Some(rule) = record_rule_domain(Operation::Delete, nw.child.name, ctx, rules) {
+            where_sql.push_str(&format!(" AND {}", rule.compile_into(&nw.child, &mut params)?));
+        }
+        let sql = format!("DELETE FROM {} WHERE {}", nw.child.table, where_sql);
+        let mut q = sqlx::query(&sql);
+        for v in &params {
+            q = bind_query(q, v);
+        }
+        if q.execute(&mut **tx).await?.rows_affected() == 0 {
+            return Err(DbError::BadInput(format!(
+                "cannot delete line {child_id}: not a child of this record or not permitted"
+            )));
+        }
+        Ok(())
     }
 
     /// Recomputes `parent`'s aggregate computed columns from its current children (a direct UPDATE,
@@ -679,46 +836,42 @@ fn validate_write_values(
     Ok(out)
 }
 
-/// A One2many field's child create-payloads, extracted from a write `values` map.
-struct NestedCreate {
-    child: ResolvedModel,
-    inverse: &'static str,
-    rows: Vec<Map<String, Json>>,
+/// One x2many child command — typed objects (decision D4), not Odoo's positional tuples.
+enum O2mCommand {
+    Create(Map<String, Json>),
+    Update(i64, Map<String, Json>),
+    Delete(i64),
 }
 
-/// Splits a write payload into scalar columns and One2many child-create payloads. A One2many value
-/// must be an array of objects; each object is a NEW child to create. Only the create form is
-/// supported through a parent write — an item carrying an `id` is rejected (linking/updating
-/// existing children goes through the child's own CRUD endpoints).
+/// A One2many field's extracted child commands.
+struct NestedWrite {
+    child: ResolvedModel,
+    inverse: &'static str,
+    commands: Vec<O2mCommand>,
+}
+
+/// Splits a write payload into scalar columns and One2many child commands. Each One2many value is an
+/// array of typed commands `{op:'create',values}` / `{op:'update',id,values}` / `{op:'delete',id}`;
+/// a bare object (no `op`/`id`) is shorthand for create.
 fn split_nested(
     model: &ResolvedModel,
     values: &Map<String, Json>,
-) -> Result<(Map<String, Json>, Vec<NestedCreate>), DbError> {
+) -> Result<(Map<String, Json>, Vec<NestedWrite>), DbError> {
     let mut scalars = Map::new();
     let mut nested = Vec::new();
     for (key, jv) in values {
         match model.fields.iter().find(|f| f.name == *key).map(|f| f.kind) {
             Some(FieldKind::One2many { target, inverse }) => {
                 let arr = jv.as_array().ok_or_else(|| {
-                    DbError::BadInput(format!("'{key}' must be an array of child records"))
+                    DbError::BadInput(format!("'{key}' must be an array of child commands"))
                 })?;
-                let mut rows = Vec::with_capacity(arr.len());
-                for item in arr {
-                    let obj = item.as_object().ok_or_else(|| {
-                        DbError::BadInput(format!("each '{key}' item must be an object"))
-                    })?;
-                    if obj.contains_key("id") {
-                        return Err(DbError::BadInput(format!(
-                            "'{key}': nested writes can only create children (item with 'id' not allowed)"
-                        )));
-                    }
-                    rows.push(obj.clone());
-                }
-                if !rows.is_empty() {
+                let commands: Vec<O2mCommand> =
+                    arr.iter().map(|item| parse_o2m_command(key, item)).collect::<Result<_, _>>()?;
+                if !commands.is_empty() {
                     let child = resolve_registered(target).map_err(|e| {
                         DbError::BadInput(format!("unknown child model '{target}': {e}"))
                     })?;
-                    nested.push(NestedCreate { child, inverse, rows });
+                    nested.push(NestedWrite { child, inverse, commands });
                 }
             }
             // Scalar (or unknown) field: validate_write_values will accept or reject it.
@@ -728,6 +881,37 @@ fn split_nested(
         }
     }
     Ok((scalars, nested))
+}
+
+fn parse_o2m_command(field: &str, item: &Json) -> Result<O2mCommand, DbError> {
+    let obj = item
+        .as_object()
+        .ok_or_else(|| DbError::BadInput(format!("each '{field}' item must be an object")))?;
+    let values = || {
+        obj.get("values")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .ok_or_else(|| DbError::BadInput(format!("'{field}' command needs a 'values' object")))
+    };
+    let id = || {
+        obj.get("id")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| DbError::BadInput(format!("'{field}' command needs an integer 'id'")))
+    };
+    Ok(match obj.get("op").and_then(|v| v.as_str()) {
+        None => {
+            if obj.contains_key("id") {
+                return Err(DbError::BadInput(format!(
+                    "'{field}': an item with 'id' must use op 'update' or 'delete'"
+                )));
+            }
+            O2mCommand::Create(obj.clone())
+        }
+        Some("create") => O2mCommand::Create(values()?),
+        Some("update") => O2mCommand::Update(id()?, values()?),
+        Some("delete") => O2mCommand::Delete(id()?),
+        Some(other) => return Err(DbError::BadInput(format!("'{field}': unknown op '{other}'"))),
+    })
 }
 
 /// The multi-company restriction for a company-scoped model, or None when the caller is unrestricted
