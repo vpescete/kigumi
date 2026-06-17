@@ -10,18 +10,30 @@ pub mod prelude {
         action_for, check_access, check_compat, compute_fn, compute_stored, computed_fields,
         external_tables, field_accessible, field_required_groups, json_string, migration_plan,
         module_closure, module_of, record_rule_domain, registered_acls, registered_group_names,
-        registered_model_names, registered_rules, resolve, resolve_all_registered,
+        registered_model_names, registered_rules, related_path, resolve, resolve_all_registered,
         resolve_module_set, resolve_modules, resolve_registered, validate_depends, Acl,
         AclRegistration, ActionFn, ActionInput,
         ActionOutcome, ActionRegistration, ComputeFn, ComputeInput, ComputeRegistration, Condition,
         Ctx, Domain, DomainError, ExternalTable, FieldBuilder, FieldDef, FieldExtension,
         FieldGroupRegistration, FieldKind, MigrationTarget, Model, ModelDescriptor,
         ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
-        RecordRule, RecordRuleRegistration, ResolutionError, ResolvedModel, RuleDomain, Sql, Value,
-        FRAMEWORK_VERSION,
+        RecordRule, RecordRuleRegistration, RelatedRegistration, ResolutionError, ResolvedModel,
+        RuleDomain, Sql, Value, FRAMEWORK_VERSION,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
+}
+
+/// Marks a field as a `related` field (Odoo `related=`): a non-stored, read-only mirror of the value
+/// reached by `path` (e.g. "order_id.currency_id"). Usually emitted by `#[field(related = "...")]`.
+/// `meshble::register_related!("sale.order.line", "order_currency_id", "order_id.currency_id");`
+#[macro_export]
+macro_rules! register_related {
+    ($model:expr, $field:expr, $path:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::RelatedRegistration { model: $model, field: $field, path: $path }
+        }
+    };
 }
 
 /// Registers a compute function by name, so the engine runs it on write for fields declaring it.

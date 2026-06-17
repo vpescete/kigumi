@@ -81,6 +81,10 @@ pub struct SaleOrderLine {
     #[field(label = "Product", required, target = "product.product")]
     product_id: Many2one,
 
+    // Related (read-only mirror): the order's customer, resolved from order_id.partner_id.
+    #[field(label = "Customer", target = "res.partner", related = "order_id.partner_id")]
+    order_partner_id: Many2one,
+
     // Company-scoped like the order, so direct line access honours multi-company isolation.
     #[field(label = "Company", target = "res.company")]
     company_id: Many2one,
@@ -232,6 +236,14 @@ mod tests {
         assert_eq!(module_of("sale.order"), Some("sales"));
         assert_eq!(module_of("product.product"), Some("sales"));
         assert_eq!(module_of("res.partner"), Some("base"));
+    }
+
+    #[test]
+    fn related_field_macro_registers() {
+        // `#[field(related = "order_id.partner_id")]` emits a RelatedRegistration; non-related fields
+        // return None.
+        assert_eq!(related_path("sale.order.line", "order_partner_id"), Some("order_id.partner_id"));
+        assert_eq!(related_path("sale.order.line", "price_unit"), None);
     }
 
     #[test]

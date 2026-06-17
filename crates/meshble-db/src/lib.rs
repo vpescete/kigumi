@@ -18,8 +18,8 @@ pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
     action_for, check_access, compute_stored, computed_fields, field_accessible, record_rule_domain,
-    resolve_all_registered, resolve_registered, Acl, ActionInput, Children, Ctx, Domain, DomainError,
-    FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
+    related_path, resolve_all_registered, resolve_registered, Acl, ActionInput, Children, Ctx, Domain,
+    DomainError, FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
 };
 use meshble_schema::to_ddl;
 use serde_json::{Map, Value as Json};
@@ -1340,24 +1340,71 @@ fn parents_of(child_model_name: &str) -> Vec<(ResolvedModel, &'static str)> {
 fn select_columns(model: &ResolvedModel) -> String {
     let mut cols = vec!["id".to_string()];
     for f in &model.fields {
-        if !f.has_column() {
-            continue;
-        }
-        match f.kind {
-            // Read date/timestamp columns as ISO text so they decode into String without a chrono
-            // decoder; Decimal stays NUMERIC (rust_decimal), Float stays float8.
-            FieldKind::Date | FieldKind::Datetime => cols.push(format!("{0}::text AS {0}", f.name)),
-            _ => cols.push(f.name.to_string()),
+        if f.has_column() {
+            match f.kind {
+                // Read date/timestamp columns as ISO text so they decode into String without a chrono
+                // decoder; Decimal stays NUMERIC (rust_decimal), Float stays float8.
+                FieldKind::Date | FieldKind::Datetime => cols.push(format!("{0}::text AS {0}", f.name)),
+                _ => cols.push(f.name.to_string()),
+            }
+        } else if let Some(path) = related_path(model.name, f.name) {
+            // Related field: resolve its value with a correlated subquery, aliased to the field name.
+            if let Ok(sq) = related_subquery(model, path) {
+                cols.push(format!("{sq} AS {}", f.name));
+            }
         }
     }
     cols.join(", ")
+}
+
+/// Builds the correlated subquery resolving a related field's `path` (e.g. "order_id.currency_id")
+/// for the current row: leading segments are Many2one hops, the last is the mirrored field (cast to
+/// ::text for Date/Datetime, like a normal date column read). Read-only — it returns one value.
+fn related_subquery(model: &ResolvedModel, path: &str) -> Result<String, DbError> {
+    let segs: Vec<&str> = path.split('.').collect();
+    if segs.len() < 2 {
+        return Err(DbError::BadInput(format!("related path '{path}' must traverse a relation")));
+    }
+    let first = model
+        .fields
+        .iter()
+        .find(|f| f.name == segs[0])
+        .ok_or_else(|| DbError::BadInput(format!("related path: unknown field '{}'", segs[0])))?;
+    let target = match &first.kind {
+        FieldKind::Many2one { target } => target,
+        _ => return Err(DbError::BadInput(format!("related path: '{}' is not a Many2one", segs[0]))),
+    };
+    let mut cur = resolve_registered(target).map_err(DbError::BadInput)?;
+    let mut id_expr = format!("{}.{}", model.table, segs[0]);
+    for (i, seg) in segs.iter().enumerate().skip(1) {
+        let f = cur
+            .fields
+            .iter()
+            .find(|f| f.name == *seg)
+            .ok_or_else(|| DbError::BadInput(format!("related path: unknown field '{seg}' on '{}'", cur.name)))?;
+        if i == segs.len() - 1 {
+            let read = match f.kind {
+                FieldKind::Date | FieldKind::Datetime => format!("{seg}::text"),
+                _ => seg.to_string(),
+            };
+            return Ok(format!("(SELECT {read} FROM {} WHERE id = {id_expr})", cur.table));
+        }
+        let next = match &f.kind {
+            FieldKind::Many2one { target } => target,
+            _ => return Err(DbError::BadInput(format!("related path: '{seg}' is not a Many2one"))),
+        };
+        id_expr = format!("(SELECT {seg} FROM {} WHERE id = {id_expr})", cur.table);
+        cur = resolve_registered(next).map_err(DbError::BadInput)?;
+    }
+    unreachable!("the loop returns on the final segment")
 }
 
 /// Converts a database row into a typed `Value` map keyed by field name (for the compute engine).
 fn record_to_values(model: &ResolvedModel, row: &PgRow) -> BTreeMap<String, Value> {
     let mut m = BTreeMap::new();
     for f in &model.fields {
-        if !f.has_column() {
+        // Related fields have no column but ARE selected (as a subquery alias) — read them too.
+        if !f.has_column() && related_path(model.name, f.name).is_none() {
             continue;
         }
         let v = match &f.kind {
@@ -1397,7 +1444,8 @@ fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
     let id: i64 = row.try_get("id")?;
     obj.insert("id".to_string(), Json::from(id));
     for f in &model.fields {
-        if !f.has_column() {
+        // Related fields have no column but ARE selected (as a subquery alias) — project them too.
+        if !f.has_column() && related_path(model.name, f.name).is_none() {
             continue;
         }
         let v: Json = match &f.kind {

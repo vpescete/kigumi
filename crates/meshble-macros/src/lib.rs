@@ -49,6 +49,8 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
     }
     // D6 field-level security: emit a FieldGroupRegistration for every `#[field(groups = "...")]`.
     let group_submits = field_group_submits(&model_name, fields)?;
+    // Related fields: emit a RelatedRegistration for every `#[field(related = "...")]`.
+    let related_submits = related_submits(&model_name, fields)?;
 
     let vis = &input.vis;
     let ident = &input.ident;
@@ -77,6 +79,7 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
 
         #(#group_submits)*
+        #(#related_submits)*
     })
 }
 
@@ -106,6 +109,33 @@ fn field_group_submits(
                 ::meshble::prelude::FieldGroupRegistration {
                     model: #model_name, field: #fname, groups: &[ #(#gs),* ],
                 }
+            }
+        });
+    }
+    Ok(out)
+}
+
+/// Emits a `RelatedRegistration` for each field carrying `#[field(related = "path")]`.
+fn related_submits(
+    model_name: &str,
+    fields: &Punctuated<syn::Field, Token![,]>,
+) -> syn::Result<Vec<TokenStream2>> {
+    let mut out = Vec::new();
+    for f in fields {
+        let fname = f.ident.as_ref().ok_or_else(|| err(f, "field without a name"))?.to_string();
+        let mut metas: Vec<Meta> = Vec::new();
+        for a in &f.attrs {
+            if a.path().is_ident("field") {
+                metas.extend(a.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?);
+            }
+        }
+        let path = match meta_str(&metas, "related") {
+            Some(p) if !p.trim().is_empty() => p,
+            _ => continue,
+        };
+        out.push(quote! {
+            ::meshble::inventory::submit! {
+                ::meshble::prelude::RelatedRegistration { model: #model_name, field: #fname, path: #path }
             }
         });
     }
@@ -235,8 +265,9 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
     let label = meta_str(&metas, "label").unwrap_or_else(|| fname.clone());
     let required = meta_flag(&metas, "required");
     let compute = meta_str(&metas, "compute");
-    // stored: never for one2many; computed only with `store`; otherwise yes.
-    let stored = if kind_name == "One2many" {
+    // stored: never for one2many or a related field (no column — resolved at read time); computed
+    // only with `store`; otherwise yes.
+    let stored = if kind_name == "One2many" || meta_str(&metas, "related").is_some() {
         false
     } else if compute.is_some() {
         meta_flag(&metas, "store")

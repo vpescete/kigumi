@@ -61,6 +61,25 @@ pub fn external_tables() -> Vec<&'static str> {
     inventory::iter::<ExternalTable>.into_iter().map(|e| e.model).collect()
 }
 
+/// A related field (Odoo `related=`): a NON-stored, read-only mirror of a value reached by following
+/// a relational `path` (e.g. `order_id.currency_id`). Registered out-of-band (emitted by
+/// `#[field(related = "...")]`) so it adds no column to the metamodel — the value is resolved at read
+/// time by a correlated subquery over the path. The field's declared kind must match the path target.
+pub struct RelatedRegistration {
+    pub model: &'static str,
+    pub field: &'static str,
+    pub path: &'static str,
+}
+inventory::collect!(RelatedRegistration);
+
+/// The relational path a related field mirrors, or None if `field` is not a related field.
+pub fn related_path(model: &str, field: &str) -> Option<&'static str> {
+    inventory::iter::<RelatedRegistration>
+        .into_iter()
+        .find(|r| r.model == model && r.field == field)
+        .map(|r| r.path)
+}
+
 /// Distinct group names referenced by any registered ACL or record rule — the catalog's known
 /// groups (the source for seeding the read-only `res.groups` list). Sorted, deterministic.
 pub fn registered_group_names() -> Vec<String> {

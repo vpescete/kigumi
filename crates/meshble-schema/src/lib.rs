@@ -7,7 +7,7 @@
 mod openapi;
 pub use openapi::openapi;
 
-use meshble_core::{actions_for, json_string, Domain, DomainError, FieldKind, ResolvedModel};
+use meshble_core::{actions_for, json_string, related_path, Domain, DomainError, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
 fn pg_type(kind: &FieldKind) -> &'static str {
@@ -105,12 +105,14 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
         .fields
         .iter()
         .map(|f| {
+            // Related fields are read-only mirrors (resolved server-side), like computed fields.
+            let readonly = f.is_computed() || related_path(m.name, f.name).is_some();
             let mut parts = vec![
                 format!("\"name\": {}", json_string(f.name)),
                 format!("\"label\": {}", json_string(f.label)),
                 format!("\"widget\": \"{}\"", widget(&f.kind)),
                 format!("\"required\": {}", f.required),
-                format!("\"readonly\": {}", f.is_computed()),
+                format!("\"readonly\": {readonly}"),
             ];
             if let FieldKind::Selection(opts) = &f.kind {
                 let items: Vec<String> = opts
@@ -144,12 +146,13 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
             format!("    {{ {} }}", parts.join(", "))
         })
         .collect();
-    // List view (D7): the columns a generic list renders. Default = the scalar (column-backed)
-    // fields in declaration order; One2many relations are not columns. The frontend may subset/reorder.
+    // List view (D7): the columns a generic list renders. Default = the scalar (column-backed) fields
+    // plus related mirrors, in declaration order; One2many relations are not columns. The frontend
+    // may subset/reorder.
     let columns: Vec<String> = m
         .fields
         .iter()
-        .filter(|f| f.has_column())
+        .filter(|f| f.has_column() || related_path(m.name, f.name).is_some())
         .map(|f| {
             format!(
                 "    {{ \"name\": {}, \"label\": {}, \"widget\": \"{}\" }}",
