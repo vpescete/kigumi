@@ -325,17 +325,9 @@ impl Db {
         }
         // Split the payload: scalar columns vs One2many child-create payloads (nested writes).
         let (mut scalars, nested) = split_nested(model, values)?;
-        // Multi-company: default company_id to the caller's active company when the model is
-        // company-scoped and the field was not supplied.
-        if let Some(cid) = ctx.company_id {
-            let scoped = model
-                .fields
-                .iter()
-                .any(|f| f.name == "company_id" && matches!(f.kind, FieldKind::Many2one { .. }));
-            if scoped && !scalars.contains_key("company_id") {
-                scalars.insert("company_id".to_string(), Json::from(cid));
-            }
-        }
+        // Multi-company: validate the supplied company_id against the caller's scope and default it
+        // on create (single chokepoint, reused for nested children + update below).
+        apply_company_scope(model, ctx, &mut scalars, true)?;
         let cols = validate_write_values(model, &scalars, true)?;
         if cols.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
@@ -392,6 +384,7 @@ impl Db {
             for row in &nc.rows {
                 let mut cvals = row.clone();
                 cvals.insert(nc.inverse.to_string(), Json::from(id)); // parent owns the FK
+                apply_company_scope(&nc.child, ctx, &mut cvals, true)?; // children are scoped too
                 let ccols = validate_write_values(&nc.child, &cvals, true)?;
                 let mut crec: BTreeMap<String, Value> =
                     ccols.into_iter().map(|(c, v)| (c.to_string(), v)).collect();
@@ -460,7 +453,10 @@ impl Db {
         if !check_access(Operation::Write, model.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "write" });
         }
-        let cols = validate_write_values(model, values, false)?;
+        // Multi-company: a scoped caller may not reassign a row into a foreign company or NULL.
+        let mut values = values.clone();
+        apply_company_scope(model, ctx, &mut values, false)?;
+        let cols = validate_write_values(model, &values, false)?;
         if cols.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
         }
@@ -746,6 +742,69 @@ fn company_clause(model: &ResolvedModel, ctx: &Ctx, params: &mut Vec<Value>) -> 
         Some(d) => Ok(format!(" AND ({})", d.compile_into(model, params)?)),
         None => Ok(String::new()),
     }
+}
+
+/// Enforces multi-company scoping on a WRITE payload for a company-scoped model (a Many2one named
+/// `company_id`). The single chokepoint reused by parent create, nested child create, and update.
+/// For a scoped caller (non-sudo, non-empty allowed set): an explicit `company_id` must be a non-null
+/// id WITHIN the allowed set (no writing a row into a foreign company; no NULL, which would publish a
+/// row as shared/visible to everyone); an unset `company_id` on CREATE is defaulted to the caller's
+/// active company. sudo and unrestricted callers are unaffected (create still defaults to the active
+/// company when one is set).
+fn apply_company_scope(
+    model: &ResolvedModel,
+    ctx: &Ctx,
+    payload: &mut Map<String, Json>,
+    is_create: bool,
+) -> Result<(), DbError> {
+    let scoped_model = model
+        .fields
+        .iter()
+        .any(|f| f.name == "company_id" && matches!(f.kind, FieldKind::Many2one { .. }));
+    if !scoped_model {
+        return Ok(());
+    }
+    // company_scoped() is non-sudo AND a non-empty allowed set, so sudo / unrestricted callers fall
+    // through to permissive behavior (create still defaults to an active company when one is set).
+    let restricted = ctx.company_scoped();
+    let denied =
+        |op: &'static str| DbError::AccessDenied { model: model.name.to_string(), operation: op };
+
+    match payload.get("company_id") {
+        // Explicit NULL = "shared, visible to all companies" — privileged; a scoped caller can't.
+        Some(v) if v.is_null() => {
+            if restricted {
+                return Err(denied("write (null company)"));
+            }
+        }
+        // Explicit id must be one the caller is allowed to act for.
+        Some(v) => {
+            let cid =
+                v.as_i64().ok_or_else(|| DbError::BadInput("company_id must be an integer".to_string()))?;
+            if restricted && !ctx.allowed_company_ids.contains(&cid) {
+                return Err(denied("write (foreign company)"));
+            }
+        }
+        // Unset on create → default to the active company (or the sole allowed one).
+        None if is_create => {
+            let active = ctx.company_id.or_else(|| {
+                (ctx.allowed_company_ids.len() == 1).then(|| ctx.allowed_company_ids[0])
+            });
+            match active {
+                Some(cid) => {
+                    payload.insert("company_id".to_string(), Json::from(cid));
+                }
+                None if restricted => {
+                    return Err(DbError::BadInput(
+                        "company_id is required (no single active company in scope)".to_string(),
+                    ))
+                }
+                None => {} // unrestricted, no active company → leave NULL (M2 stub)
+            }
+        }
+        None => {}
+    }
+    Ok(())
 }
 
 fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {

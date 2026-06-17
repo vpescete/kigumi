@@ -90,6 +90,17 @@ async fn company_scope_isolates_rows() {
     let got = db.find_one_secured(&doc, &su, ACLS, RULES, new_id).await.unwrap().unwrap();
     assert_eq!(got["company_id"].as_i64().unwrap(), c1, "create defaulted company_id to the active company");
 
+    // WRITE-SIDE enforcement (audit fixes): a scoped caller cannot write a foreign or NULL company.
+    let foreign = serde_json::json!({ "name": "x", "company_id": c2 });
+    assert!(db.insert_secured(&doc, &in_c1, ACLS, RULES, foreign.as_object().unwrap()).await.is_err(), "create with foreign company rejected");
+    let shared = serde_json::json!({ "name": "x", "company_id": null });
+    assert!(db.insert_secured(&doc, &in_c1, ACLS, RULES, shared.as_object().unwrap()).await.is_err(), "create with NULL (shared) company rejected");
+    assert!(db.update_secured(&doc, &in_c1, ACLS, RULES, new_id, serde_json::json!({ "company_id": c2 }).as_object().unwrap()).await.is_err(), "reassign own row to a foreign company rejected");
+    assert!(db.update_secured(&doc, &in_c1, ACLS, RULES, new_id, serde_json::json!({ "company_id": null }).as_object().unwrap()).await.is_err(), "demote own row to shared rejected");
+    // Editing other fields (or re-stating the SAME company) stays allowed.
+    assert_eq!(db.update_secured(&doc, &in_c1, ACLS, RULES, new_id, serde_json::json!({ "name": "renamed" }).as_object().unwrap()).await.unwrap(), 1);
+    assert_eq!(db.update_secured(&doc, &in_c1, ACLS, RULES, new_id, serde_json::json!({ "company_id": c1 }).as_object().unwrap()).await.unwrap(), 1, "writing the caller's own company is fine");
+
     db.drop_table(&doc).await.unwrap();
     db.drop_table(&company).await.unwrap();
 }
