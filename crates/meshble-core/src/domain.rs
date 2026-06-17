@@ -158,6 +158,8 @@ pub enum DomainError {
     UnsupportedPath { field: String },
     /// A relation's target model is not registered in the catalog (cannot resolve the join).
     UnknownRelation { target: String, detail: String },
+    /// The JSON domain (from `from_json`) is malformed.
+    BadJson(String),
 }
 
 impl Domain {
@@ -405,6 +407,102 @@ impl Domain {
     pub fn validate(&self, model: &ResolvedModel) -> Result<(), DomainError> {
         self.compile(model).map(|_| ())
     }
+
+    /// Parses a domain from the portable JSON AST (the inverse of [`Domain::to_json`]) — used for
+    /// the `?domain=<json>` query escape and for admin-authored record rules stored as data. The
+    /// result is still untrusted: validate/compile it against a model before use.
+    pub fn from_json(s: &str) -> Result<Domain, DomainError> {
+        let v: serde_json::Value =
+            serde_json::from_str(s).map_err(|e| DomainError::BadJson(e.to_string()))?;
+        domain_from_json(&v)
+    }
+}
+
+fn bad_json(msg: impl Into<String>) -> DomainError {
+    DomainError::BadJson(msg.into())
+}
+
+fn domain_from_json(v: &serde_json::Value) -> Result<Domain, DomainError> {
+    let obj = v.as_object().ok_or_else(|| bad_json("each domain node must be a JSON object"))?;
+    if let Some(c) = obj.get("const") {
+        return Ok(if c.as_bool().unwrap_or(false) { Domain::True } else { Domain::False });
+    }
+    if let Some(n) = obj.get("not") {
+        return Ok(Domain::Not(Box::new(domain_from_json(n)?)));
+    }
+    if let Some(a) = obj.get("and") {
+        return fold_json(a, Domain::True, Domain::and);
+    }
+    if let Some(o) = obj.get("or") {
+        return fold_json(o, Domain::False, Domain::or);
+    }
+    if let Some(f) = obj.get("field") {
+        let field = f.as_str().ok_or_else(|| bad_json("'field' must be a string"))?.to_string();
+        let op_s = obj.get("op").and_then(|x| x.as_str()).ok_or_else(|| bad_json("missing 'op'"))?;
+        let op = op_from_str(op_s).ok_or_else(|| bad_json(format!("unknown operator '{op_s}'")))?;
+        let value = match op {
+            Operator::IsNull | Operator::IsNotNull => Value::Null,
+            _ => value_from_json(obj.get("value").ok_or_else(|| bad_json("missing 'value'"))?)?,
+        };
+        return Ok(Domain::Cond(Condition { field, op, value }));
+    }
+    Err(bad_json("unrecognized domain node (expected const/not/and/or/field)"))
+}
+
+fn fold_json(
+    v: &serde_json::Value,
+    base: Domain,
+    combine: fn(Domain, Domain) -> Domain,
+) -> Result<Domain, DomainError> {
+    let arr = v.as_array().ok_or_else(|| bad_json("'and'/'or' expects an array"))?;
+    let mut acc: Option<Domain> = None;
+    for item in arr {
+        let d = domain_from_json(item)?;
+        acc = Some(match acc {
+            Some(prev) => combine(prev, d),
+            None => d,
+        });
+    }
+    Ok(acc.unwrap_or(base))
+}
+
+fn op_from_str(s: &str) -> Option<Operator> {
+    Some(match s {
+        "=" => Operator::Eq,
+        "!=" => Operator::Ne,
+        "<" => Operator::Lt,
+        "<=" => Operator::Le,
+        ">" => Operator::Gt,
+        ">=" => Operator::Ge,
+        "in" => Operator::In,
+        "not in" => Operator::NotIn,
+        "like" => Operator::Like,
+        "ilike" => Operator::ILike,
+        "is null" => Operator::IsNull,
+        "is not null" => Operator::IsNotNull,
+        _ => return None,
+    })
+}
+
+fn value_from_json(v: &serde_json::Value) -> Result<Value, DomainError> {
+    Ok(match v {
+        serde_json::Value::String(s) => Value::Str(s.clone()),
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int(i)
+            } else if let Some(f) = n.as_f64().filter(|x| x.is_finite()) {
+                Value::Float(f)
+            } else {
+                return Err(bad_json("numeric value out of range"));
+            }
+        }
+        serde_json::Value::Array(items) => {
+            Value::List(items.iter().map(value_from_json).collect::<Result<Vec<_>, _>>()?)
+        }
+        serde_json::Value::Object(_) => return Err(bad_json("a value cannot be an object")),
+    })
 }
 
 fn op_str(op: Operator) -> &'static str {
@@ -675,5 +773,27 @@ mod tests {
     #[test]
     fn is_null_json_omits_value() {
         assert_eq!(Domain::field("state").is_null().to_json(), r#"{"field":"state","op":"is null"}"#);
+    }
+
+    #[test]
+    fn from_json_round_trips() {
+        let d = Domain::field("state").eq("draft").and(Domain::field("amount").ge(100_i64));
+        assert_eq!(Domain::from_json(&d.to_json()).unwrap(), d);
+    }
+
+    #[test]
+    fn from_json_parses_or_not_and_isnull() {
+        let d = Domain::from_json(
+            r#"{"or":[{"field":"a","op":"=","value":1},{"not":{"field":"b","op":"is null"}}]}"#,
+        )
+        .unwrap();
+        assert!(matches!(d, Domain::Or(_, _)));
+    }
+
+    #[test]
+    fn from_json_rejects_garbage() {
+        assert!(Domain::from_json("not json").is_err());
+        assert!(Domain::from_json(r#"{"field":"a"}"#).is_err()); // missing op
+        assert!(Domain::from_json(r#"{"field":"a","op":"??","value":1}"#).is_err()); // unknown op
     }
 }

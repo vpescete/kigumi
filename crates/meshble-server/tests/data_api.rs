@@ -92,8 +92,10 @@ async fn secured_data_endpoint_enforces_rules() {
     // Group "u": the record rule restricts to active rows → alpha, beta only.
     let (status, body) = get(app.clone(), "/api/widget", Some("u")).await;
     assert_eq!(status, StatusCode::OK);
-    let rows: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(rows.as_array().unwrap().len(), 2);
+    // The list endpoint returns a paginated envelope { data, total, limit, offset }.
+    let env: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(env["data"].as_array().unwrap().len(), 2);
+    assert_eq!(env["total"].as_i64().unwrap(), 2, "total under the record rule");
     assert!(body.contains("alpha") && body.contains("beta") && !body.contains("gamma"));
 
     // Authenticated but no granting group → ACL denies → 403.

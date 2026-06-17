@@ -189,7 +189,9 @@ function renderForm() {
 }
 
 async function loadRows() {
-  const rows = await api("GET", "/api/" + contract.model);
+  // The list endpoint returns a paginated envelope { data, total, limit, offset }.
+  const res = await api("GET", "/api/" + contract.model);
+  const rows = Array.isArray(res) ? res : res.data;
   const cols = contract.fields.filter((f) => f.widget !== "one2many");
   let html = "<table><thead><tr><th>id</th>" + cols.map((c) => "<th>" + c.label + "</th>").join("") + "</tr></thead><tbody>";
   for (const r of rows) {

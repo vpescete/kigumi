@@ -6,10 +6,11 @@
 //! `meshble_core::resolve_all_registered()` and its security policy, then calls [`router`] or
 //! [`router_with_data`]. The core stays headless; this crate is optional.
 
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -17,7 +18,9 @@ use axum::{
 };
 use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
-use meshble_core::{Acl, Ctx, RecordRule, ResolvedModel};
+use meshble_core::{
+    Acl, Condition, Ctx, Domain, FieldKind, Operator, RecordRule, ResolvedModel, Value,
+};
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
 
@@ -170,9 +173,13 @@ async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -
     }
 }
 
+const DEFAULT_LIMIT: i64 = 80;
+const MAX_LIMIT: i64 = 500;
+
 async fn list_handler(
     State(state): State<AppState>,
     Path(name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Response {
     let model = match state.models.iter().find(|m| m.name == name) {
@@ -184,13 +191,133 @@ async fn list_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.find_secured(model, &ctx, backend.acls, backend.rules, None).await {
-        Ok(rows) => json_response(serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string())),
-        Err(DbError::AccessDenied { .. }) => {
-            (StatusCode::FORBIDDEN, "access denied").into_response()
+    let (filter, order, limit, offset) = match parse_list_query(model, &params) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    match backend
+        .db
+        .list_secured(model, &ctx, backend.acls, backend.rules, filter.as_ref(), &order, limit, offset)
+        .await
+    {
+        Ok(page) => {
+            let body = serde_json::json!({
+                "data": page.data, "total": page.total, "limit": limit, "offset": offset,
+            });
+            json_response(body.to_string())
         }
+        Err(DbError::AccessDenied { .. }) => (StatusCode::FORBIDDEN, "access denied").into_response(),
+        Err(DbError::BadInput(msg)) => bad_request(msg),
+        Err(DbError::Domain(e)) => bad_request(format!("invalid filter: {e:?}")),
         Err(e) => internal_error("data", e),
     }
+}
+
+fn bad_request(msg: String) -> Response {
+    (StatusCode::BAD_REQUEST, msg).into_response()
+}
+
+/// Parses list query params into (filter, order, limit, offset). Two filter forms (decision D5):
+/// suffix operators `field__op=value` (the default, AND-ed) and a `?domain=<json AST>` escape for
+/// arbitrary AND/OR/NOT — AND-ed together when both are present.
+fn parse_list_query(
+    model: &ResolvedModel,
+    params: &HashMap<String, String>,
+) -> Result<(Option<Domain>, Vec<(String, bool)>, i64, i64), Response> {
+    let mut conds: Vec<Domain> = Vec::new();
+    if let Some(js) = params.get("domain") {
+        match Domain::from_json(js) {
+            Ok(d) => conds.push(d),
+            Err(e) => return Err(bad_request(format!("invalid domain JSON: {e:?}"))),
+        }
+    }
+    for (key, raw) in params {
+        if matches!(key.as_str(), "domain" | "order" | "limit" | "offset") {
+            continue;
+        }
+        let (field, op) = split_suffix(key);
+        conds.push(build_leaf(model, field, op, raw).map_err(bad_request)?);
+    }
+    let filter = conds.into_iter().reduce(|a, b| a.and(b));
+
+    let mut order = Vec::new();
+    if let Some(o) = params.get("order") {
+        for part in o.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            match part.strip_prefix('-') {
+                Some(f) => order.push((f.to_string(), true)),
+                None => order.push((part.to_string(), false)),
+            }
+        }
+    }
+
+    let limit = match params.get("limit") {
+        Some(s) => s.parse::<i64>().map_err(|_| bad_request("limit must be an integer".into()))?.clamp(1, MAX_LIMIT),
+        None => DEFAULT_LIMIT,
+    };
+    let offset = match params.get("offset") {
+        Some(s) => s.parse::<i64>().map_err(|_| bad_request("offset must be an integer".into()))?.max(0),
+        None => 0,
+    };
+    Ok((filter, order, limit, offset))
+}
+
+/// Splits `field__op` into (field, op); a bare `field` defaults to the `eq` operator.
+fn split_suffix(key: &str) -> (&str, &str) {
+    match key.rfind("__") {
+        Some(i) => (&key[..i], &key[i + 2..]),
+        None => (key, "eq"),
+    }
+}
+
+/// Builds one leaf condition, coercing the raw string to the field's typed value.
+fn build_leaf(model: &ResolvedModel, field: &str, op: &str, raw: &str) -> Result<Domain, String> {
+    let kind = if field == "id" {
+        FieldKind::Integer
+    } else {
+        model
+            .fields
+            .iter()
+            .find(|f| f.name == field)
+            .map(|f| f.kind)
+            .ok_or_else(|| format!("unknown filter field '{field}'"))?
+    };
+    let operator = match op {
+        "eq" => Operator::Eq,
+        "ne" => Operator::Ne,
+        "gt" => Operator::Gt,
+        "gte" => Operator::Ge,
+        "lt" => Operator::Lt,
+        "lte" => Operator::Le,
+        "like" => Operator::Like,
+        "ilike" => Operator::ILike,
+        "in" => Operator::In,
+        other => return Err(format!("unknown operator suffix '__{other}'")),
+    };
+    let value = if operator == Operator::In {
+        Value::List(raw.split(',').map(|s| coerce(&kind, s.trim())).collect::<Result<Vec<_>, _>>()?)
+    } else {
+        coerce(&kind, raw)?
+    };
+    Ok(Domain::Cond(Condition { field: field.to_string(), op: operator, value }))
+}
+
+/// Coerces a query string to a typed [`Value`] for the field's kind.
+fn coerce(kind: &FieldKind, raw: &str) -> Result<Value, String> {
+    Ok(match kind {
+        FieldKind::Integer | FieldKind::Many2one { .. } => {
+            Value::Int(raw.parse().map_err(|_| format!("'{raw}' is not an integer"))?)
+        }
+        FieldKind::Decimal { .. } => {
+            let f: f64 = raw.parse().map_err(|_| format!("'{raw}' is not a number"))?;
+            if !f.is_finite() {
+                return Err(format!("'{raw}' is not a finite number"));
+            }
+            Value::Float(f)
+        }
+        FieldKind::Bool => Value::Bool(matches!(raw, "true" | "1" | "t" | "yes")),
+        FieldKind::Text | FieldKind::Selection(_) => Value::Str(raw.to_string()),
+        FieldKind::One2many { .. } => return Err("cannot filter on a One2many field".to_string()),
+    })
 }
 
 async fn get_one_handler(
@@ -437,5 +564,74 @@ mod tests {
 
         let (status, _) = fetch("/api/nope/view").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::*;
+    use meshble_core::{resolve, FieldDef, ModelDescriptor};
+
+    static M: ModelDescriptor = ModelDescriptor {
+        name: "q.model",
+        table: "q_model",
+        fields: &[
+            FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: true, stored: true, compute: None, depends: &[] },
+            FieldDef { name: "amount", label: "Amount", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: None, depends: &[] },
+            FieldDef { name: "state", label: "State", kind: FieldKind::Selection(&[("draft", "Draft"), ("done", "Done")]), required: false, stored: true, compute: None, depends: &[] },
+        ],
+    };
+    fn model() -> ResolvedModel {
+        resolve(&M, &[]).unwrap()
+    }
+
+    #[test]
+    fn suffix_split() {
+        assert_eq!(split_suffix("amount__gte"), ("amount", "gte"));
+        assert_eq!(split_suffix("name"), ("name", "eq")); // bare field defaults to eq
+    }
+
+    #[test]
+    fn coerce_by_kind() {
+        assert_eq!(coerce(&FieldKind::Integer, "5"), Ok(Value::Int(5)));
+        assert_eq!(coerce(&FieldKind::Decimal { currency_field: None }, "1.5"), Ok(Value::Float(1.5)));
+        assert_eq!(coerce(&FieldKind::Bool, "true"), Ok(Value::Bool(true)));
+        assert_eq!(coerce(&FieldKind::Text, "x"), Ok(Value::Str("x".to_string())));
+        assert!(coerce(&FieldKind::Integer, "nope").is_err());
+    }
+
+    #[test]
+    fn build_leaf_typed() {
+        let m = model();
+        let d = build_leaf(&m, "amount", "gte", "100").unwrap();
+        assert_eq!(d, Domain::Cond(Condition { field: "amount".into(), op: Operator::Ge, value: Value::Float(100.0) }));
+        assert!(build_leaf(&m, "nope", "eq", "1").is_err(), "unknown field rejected");
+        assert!(build_leaf(&m, "name", "weird", "1").is_err(), "unknown operator rejected");
+    }
+
+    #[test]
+    fn parse_query_filter_order_limit() {
+        let m = model();
+        let mut p = HashMap::new();
+        p.insert("state".to_string(), "draft".to_string());
+        p.insert("amount__gte".to_string(), "10".to_string());
+        p.insert("order".to_string(), "-id".to_string());
+        p.insert("limit".to_string(), "5".to_string());
+        let (filter, order, limit, offset) = parse_list_query(&m, &p).unwrap();
+        assert!(filter.is_some());
+        assert_eq!(order, vec![("id".to_string(), true)]);
+        assert_eq!(limit, 5);
+        assert_eq!(offset, 0);
+        // The compiled filter is valid SQL against the model.
+        assert!(filter.unwrap().compile(&m).is_ok());
+    }
+
+    #[test]
+    fn limit_is_clamped() {
+        let m = model();
+        let mut p = HashMap::new();
+        p.insert("limit".to_string(), "100000".to_string());
+        let (_, _, limit, _) = parse_list_query(&m, &p).unwrap();
+        assert_eq!(limit, MAX_LIMIT);
     }
 }

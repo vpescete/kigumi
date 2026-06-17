@@ -58,6 +58,12 @@ pub struct Db {
     pool: PgPool,
 }
 
+/// A page of list results plus the total count under the same secured domain.
+pub struct ListPage {
+    pub data: Vec<Json>,
+    pub total: i64,
+}
+
 impl Db {
     /// Connects to `url` (e.g. `postgres://user@host/db`).
     pub async fn connect(url: &str) -> Result<Db, DbError> {
@@ -143,6 +149,62 @@ impl Db {
         }
         let rows = q.fetch_all(&self.pool).await?;
         rows.iter().map(|r| row_to_json(model, r)).collect()
+    }
+
+    /// A page of rows visible to `ctx` under the security policy, with optional `filter`, `order`
+    /// (field, descending) and limit/offset — plus the total count under the SAME secured domain.
+    /// Order fields are validated against the model's columns, so the ORDER BY uses only
+    /// model-controlled identifiers (never user strings); limit/offset are bound parameters.
+    pub async fn list_secured(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        filter: Option<&Domain>,
+        order: &[(String, bool)],
+        limit: i64,
+        offset: i64,
+    ) -> Result<ListPage, DbError> {
+        let dom = self.secured_read_domain(model, ctx, acls, rules, filter)?;
+        let total = self.count_where(model, &dom).await?;
+
+        let mut order_sql = String::new();
+        for (field, desc) in order {
+            let ok = field.as_str() == "id"
+                || model.fields.iter().any(|f| f.name == field.as_str() && f.has_column());
+            if !ok {
+                return Err(DbError::BadInput(format!("cannot order by unknown field '{field}'")));
+            }
+            if !order_sql.is_empty() {
+                order_sql.push_str(", ");
+            }
+            order_sql.push_str(field);
+            order_sql.push_str(if *desc { " DESC" } else { " ASC" });
+        }
+        if order_sql.is_empty() {
+            order_sql.push_str("id");
+        }
+
+        let f = dom.compile(model)?;
+        let n = f.params.len();
+        let sql = format!(
+            "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT ${} OFFSET ${}",
+            select_columns(model),
+            model.table,
+            f.where_clause,
+            order_sql,
+            n + 1,
+            n + 2,
+        );
+        let mut q = sqlx::query(&sql);
+        for p in &f.params {
+            q = bind_query(q, p);
+        }
+        q = q.bind(limit).bind(offset);
+        let rows = q.fetch_all(&self.pool).await?;
+        let data = rows.iter().map(|r| row_to_json(model, r)).collect::<Result<Vec<_>, _>>()?;
+        Ok(ListPage { data, total })
     }
 
     /// Like [`Db::count_secured`] but returns the ids of the visible rows (ordered).
