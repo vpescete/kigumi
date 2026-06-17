@@ -53,16 +53,17 @@ pub struct SaleMargin {
     margin: Decimal,
 }
 
-/// Product catalog — the simplest sellable unit. Variants/templates (`product.template` +
-/// attributes) come later; one flat model is enough for the quote-to-order vertical.
-// ponytail: single product model; split into template/variant only when variants are needed.
-#[model(name = "product.product", table = "product_product")]
-pub struct ProductProduct {
+/// Product template (Odoo's `product.template`): the SHARED definition of a product — the fields
+/// every variant has in common. Variants (`product.product`) inherit these via `_inherits`, so N
+/// variants share ONE template row with no duplication and no template→variant sync.
+#[model(name = "product.template", table = "product_template")]
+pub struct ProductTemplate {
     #[field(label = "Name", required)]
     name: Text,
 
-    #[field(label = "Internal Reference")]
-    default_code: Text,
+    // Named `product_type` (not `type`: a SQL reserved word and a Rust keyword).
+    #[field(label = "Type", default = "consu", selection = "consu:Goods,service:Service")]
+    product_type: Selection,
 
     #[field(label = "Sales Price", default = "0")]
     list_price: Decimal,
@@ -70,12 +71,31 @@ pub struct ProductProduct {
     #[field(label = "Cost", default = "0")]
     standard_price: Decimal,
 
-    // First-class Many2many: product tags through a junction table.
-    #[field(label = "Tags", target = "product.tag", relation = "product_product_tag_rel", column = "product_id", target_column = "tag_id")]
-    tag_ids: Many2many,
+    #[field(label = "Description")]
+    description: Text,
 
     #[field(label = "Active", default = "true")]
     active: Bool,
+}
+
+/// Product variant (Odoo's `product.product`): a sellable unit that `_inherits` its product.template
+/// through the required `product_tmpl_id` FK, transparently exposing the template's name/price/etc.
+/// while carrying variant-specific fields (internal reference, barcode, tags). Creating a variant
+/// without a template auto-creates one (the write-split); referenced by `sale.order.line.product_id`.
+#[model(name = "product.product", table = "product_product", inherits = "product.template", via = "product_tmpl_id")]
+pub struct ProductProduct {
+    #[field(label = "Product Template", required, target = "product.template")]
+    product_tmpl_id: Many2one,
+
+    #[field(label = "Internal Reference")]
+    default_code: Text,
+
+    #[field(label = "Barcode")]
+    barcode: Text,
+
+    // First-class Many2many: variant tags through a junction table.
+    #[field(label = "Tags", target = "product.tag", relation = "product_product_tag_rel", column = "product_id", target_column = "tag_id")]
+    tag_ids: Many2many,
 }
 
 /// A product tag/label (the comodel of `product.product.tag_ids`).
@@ -157,6 +177,10 @@ pub fn resolved_sale_order() -> ResolvedModel {
 pub static ACLS: &[Acl] = &[
     Acl { model: "sale.order", group: "sales.user", read: true, write: true, create: true, delete: false },
     Acl { model: "sale.order.line", group: "sales.user", read: true, write: true, create: true, delete: true },
+    // Templates mirror variants: everyone in sales reads, managers maintain. A manager creating a
+    // variant auto-creates its template, so the create/write ACLs must match product.product's.
+    Acl { model: "product.template", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.template", group: "sales.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "product.product", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "product.product", group: "sales.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "product.tag", group: "sales.user", read: true, write: false, create: false, delete: false },
