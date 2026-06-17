@@ -388,7 +388,8 @@ impl Db {
 
         let (names, vals): (Vec<&str>, Vec<Value>) =
             record.iter().map(|(k, v)| (k.as_str(), v.clone())).unzip();
-        let placeholders: Vec<String> = (1..=names.len()).map(|i| format!("${i}")).collect();
+        let placeholders: Vec<String> =
+            names.iter().enumerate().map(|(i, c)| format!("${}::{}", i + 1, col_cast(model, c))).collect();
         let sql = format!(
             "INSERT INTO {} ({}) VALUES ({}) RETURNING id",
             model.table,
@@ -472,7 +473,7 @@ impl Db {
         let mut affected = 1u64;
         if !cols.is_empty() {
             let set: Vec<String> =
-                cols.iter().enumerate().map(|(i, (c, _))| format!("{} = ${}", c, i + 1)).collect();
+                cols.iter().enumerate().map(|(i, (c, _))| format!("{} = ${}::{}", c, i + 1, col_cast(model, c))).collect();
             let id_ph = cols.len() + 1;
             let mut params: Vec<Value> = cols.iter().map(|(_, v)| v.clone()).collect();
             params.push(Value::Int(id));
@@ -607,7 +608,8 @@ impl Db {
         compute_stored(&nw.child, &mut crec, &Children::new());
         let (cn, cv): (Vec<&str>, Vec<Value>) =
             crec.iter().map(|(k, v)| (k.as_str(), v.clone())).unzip();
-        let cph: Vec<String> = (1..=cn.len()).map(|i| format!("${i}")).collect();
+        let cph: Vec<String> =
+            cn.iter().enumerate().map(|(i, c)| format!("${}::{}", i + 1, col_cast(&nw.child, c))).collect();
         let csql = format!(
             "INSERT INTO {} ({}) VALUES ({}) RETURNING id",
             nw.child.table,
@@ -683,7 +685,7 @@ impl Db {
             }
         }
         let set: Vec<String> =
-            set_pairs.iter().enumerate().map(|(i, (c, _))| format!("{} = ${}", c, i + 1)).collect();
+            set_pairs.iter().enumerate().map(|(i, (c, _))| format!("{} = ${}::{}", c, i + 1, col_cast(&nw.child, c))).collect();
         let id_ph = set_pairs.len() + 1;
         let mut params: Vec<Value> = set_pairs.iter().map(|(_, v)| v.clone()).collect();
         params.push(Value::Int(child_id));
@@ -1202,6 +1204,26 @@ fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
     })
 }
 
+/// The Postgres type a column's INSERT/UPDATE placeholder is cast to. A bound NULL would otherwise
+/// be typed `text` by the driver and rejected when assigned to a `bigint`/`numeric`/`boolean` column
+/// (e.g. setting a Many2one back to null); casting `$n::<type>` makes an explicit NULL the right type,
+/// and is a no-op for non-null values already of that type.
+fn pg_cast(kind: &FieldKind) -> &'static str {
+    match kind {
+        FieldKind::Text | FieldKind::Selection(_) => "text",
+        FieldKind::Integer | FieldKind::Many2one { .. } => "bigint",
+        FieldKind::Decimal { .. } => "numeric",
+        FieldKind::Bool => "boolean",
+        FieldKind::One2many { .. } => "text", // no column; never reached in a SET/VALUES clause
+    }
+}
+
+/// The cast type for a model column (defaults to `text` if the column is unknown — unreachable, since
+/// columns come from validated field names).
+fn col_cast(model: &ResolvedModel, col: &str) -> &'static str {
+    model.fields.iter().find(|f| f.name == col).map(|f| pg_cast(&f.kind)).unwrap_or("text")
+}
+
 /// Binds a domain parameter into a non-scalar query (used for UPDATE/DELETE and the create check).
 fn bind_query<'q>(q: Query<'q, Postgres, PgArguments>, v: &Value) -> Query<'q, Postgres, PgArguments> {
     match v {
@@ -1269,7 +1291,7 @@ async fn recompute_columns_on(
     let children = read_children_on(&mut *conn, parent, parent_id).await?;
     compute_stored(parent, &mut record, &children);
     let set: Vec<String> =
-        computed.iter().enumerate().map(|(i, name)| format!("{} = ${}", name, i + 1)).collect();
+        computed.iter().enumerate().map(|(i, name)| format!("{} = ${}::{}", name, i + 1, col_cast(parent, name))).collect();
     let sql = format!("UPDATE {} SET {} WHERE id = ${}", parent.table, set.join(", "), computed.len() + 1);
     let mut q = sqlx::query(&sql);
     for name in &computed {
