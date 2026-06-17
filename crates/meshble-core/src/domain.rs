@@ -103,6 +103,27 @@ impl Domain {
     pub fn not(self) -> Domain {
         Domain::Not(Box::new(self))
     }
+
+    /// The full (possibly dotted) field paths referenced by this domain's conditions, e.g.
+    /// `["state", "partner_id.name"]`. Used to vet a caller-supplied filter against field-level
+    /// access (D6) — the caller must be able to read EVERY field a relational path traverses, so a
+    /// restricted field cannot be probed even through a relation.
+    pub fn condition_paths(&self) -> Vec<&str> {
+        let mut out = Vec::new();
+        self.collect_paths(&mut out);
+        out
+    }
+    fn collect_paths<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            Domain::Cond(c) => out.push(&c.field),
+            Domain::And(a, b) | Domain::Or(a, b) => {
+                a.collect_paths(out);
+                b.collect_paths(out);
+            }
+            Domain::Not(d) => d.collect_paths(out),
+            Domain::True | Domain::False => {}
+        }
+    }
 }
 
 /// Fluent builder for a single condition.

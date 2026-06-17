@@ -95,7 +95,8 @@ pub struct SaleOrderLine {
     price_unit: Decimal,
 
     // Cost captured on the line (an onchange would default it from the product; onchange is deferred).
-    #[field(label = "Cost", default = "0")]
+    // D6 field-level security: cost is manager-only — read and write require `sales.manager`.
+    #[field(label = "Cost", default = "0", groups = "sales.manager")]
     purchase_price: Decimal,
 
     #[field(label = "Subtotal", compute = "compute_line_subtotal", depends = "product_uom_qty,price_unit", store)]
@@ -217,6 +218,14 @@ mod tests {
     fn manifest_compatible_with_framework() {
         // The framework declares FRAMEWORK_VERSION (0.1.0); the module accepts ">=0.1, <0.2".
         assert!(check_compat(&MANIFEST, FRAMEWORK_VERSION).is_ok());
+    }
+
+    #[test]
+    fn field_groups_macro_registers_restriction() {
+        // `#[field(groups = "sales.manager")]` on purchase_price emits a FieldGroupRegistration;
+        // unrestricted fields return None (D6).
+        assert_eq!(field_required_groups("sale.order.line", "purchase_price"), Some(&["sales.manager"][..]));
+        assert_eq!(field_required_groups("sale.order.line", "price_unit"), None);
     }
 
     #[test]

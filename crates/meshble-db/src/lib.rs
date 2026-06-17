@@ -16,7 +16,7 @@ pub use auth_store::UserRow;
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
-    action_for, check_access, compute_stored, computed_fields, record_rule_domain,
+    action_for, check_access, compute_stored, computed_fields, field_accessible, record_rule_domain,
     resolve_all_registered, resolve_registered, Acl, ActionInput, Children, Ctx, Domain, DomainError,
     FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
 };
@@ -167,7 +167,7 @@ impl Db {
             };
         }
         let rows = q.fetch_all(&self.pool).await?;
-        rows.iter().map(|r| row_to_json(model, r)).collect()
+        rows.iter().map(|r| project_row(model, ctx, r)).collect()
     }
 
     /// A page of rows visible to `ctx` under the security policy, with optional `filter`, `order`
@@ -194,6 +194,13 @@ impl Db {
                 || model.fields.iter().any(|f| f.name == field.as_str() && f.has_column());
             if !ok {
                 return Err(DbError::BadInput(format!("cannot order by unknown field '{field}'")));
+            }
+            // D6: don't let a non-member order by a field they can't read (it would leak ordering).
+            if !field_accessible(model.name, field, ctx) {
+                return Err(DbError::AccessDenied {
+                    model: model.name.to_string(),
+                    operation: "order by (restricted field)",
+                });
             }
             if !order_sql.is_empty() {
                 order_sql.push_str(", ");
@@ -222,7 +229,7 @@ impl Db {
         }
         q = q.bind(limit).bind(offset);
         let rows = q.fetch_all(&self.pool).await?;
-        let data = rows.iter().map(|r| row_to_json(model, r)).collect::<Result<Vec<_>, _>>()?;
+        let data = rows.iter().map(|r| project_row(model, ctx, r)).collect::<Result<Vec<_>, _>>()?;
         Ok(ListPage { data, total })
     }
 
@@ -279,9 +286,16 @@ impl Db {
             Json::Object(o) => o,
             _ => return Ok(None),
         };
+        strip_unreadable(model, ctx, &mut obj); // D6: drop fields the caller may not read
         // Inline each One2many field as an array of the caller's visible child rows.
         for f in &model.fields {
             if let FieldKind::One2many { target, inverse } = f.kind {
+                // D6: the One2many field itself can be restricted — omit the whole relation if the
+                // caller cannot read it (strip_unreadable can't catch this: the key is added here,
+                // AFTER stripping, and One2many has no column so it was never in the stripped object).
+                if !field_accessible(model.name, f.name, ctx) {
+                    continue;
+                }
                 let child = match resolve_registered(target) {
                     Ok(c) => c,
                     Err(_) => continue,
@@ -313,6 +327,20 @@ impl Db {
                 operation: "read",
             });
         }
+        // D6: a caller-supplied filter must not reference a field the caller cannot read, else a
+        // restricted field could be probed (e.g. `secret = 'x'`) even though its value is stripped.
+        // Relational paths are walked hop-by-hop, so `partner_id.secret` is rejected when `secret`
+        // is restricted on the TARGET model — not just the first segment.
+        if let Some(f) = filter {
+            for path in f.condition_paths() {
+                if !filter_path_accessible(model, path, ctx) {
+                    return Err(DbError::AccessDenied {
+                        model: model.name.to_string(),
+                        operation: "filter (restricted field)",
+                    });
+                }
+            }
+        }
         let rule = record_rule_domain(Operation::Read, model.name, ctx, rules);
         let base = match (filter, rule) {
             (Some(f), Some(r)) => f.clone().and(r),
@@ -340,6 +368,7 @@ impl Db {
         if !check_access(Operation::Create, model.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "create" });
         }
+        check_writable_fields(model, ctx, values)?; // D6: reject fields the caller may not write
         // Split the payload: scalar columns vs One2many child-create payloads (nested writes).
         let (mut scalars, nested) = split_nested(model, values)?;
         // Multi-company: validate the supplied company_id against the caller's scope and default it
@@ -424,6 +453,7 @@ impl Db {
         if !check_access(Operation::Write, model.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "write" });
         }
+        check_writable_fields(model, ctx, values)?; // D6: reject fields the caller may not write
         // Split scalar fields from One2many child commands (D4 typed write-through).
         let (mut scalars, nested) = split_nested(model, values)?;
         // Multi-company: a scoped caller may not reassign a row into a foreign company or NULL.
@@ -567,6 +597,7 @@ impl Db {
         if !check_access(Operation::Create, nw.child.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: nw.child.name.to_string(), operation: "create" });
         }
+        check_writable_fields(&nw.child, ctx, &cvals)?; // D6: child fields the caller may not write
         cvals.insert(nw.inverse.to_string(), Json::from(parent_id)); // parent owns the FK
         apply_company_scope(&nw.child, ctx, &mut cvals, true)?;
         apply_defaults(&nw.child, &mut cvals);
@@ -620,6 +651,7 @@ impl Db {
         if !check_access(Operation::Write, nw.child.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: nw.child.name.to_string(), operation: "write" });
         }
+        check_writable_fields(&nw.child, ctx, &cvals)?; // D6: child fields the caller may not write
         cvals.remove(nw.inverse); // the parent owns the link; re-parenting via nesting is not allowed
         apply_company_scope(&nw.child, ctx, &mut cvals, false)?;
         let cols = validate_write_values(&nw.child, &cvals, false)?;
@@ -1334,6 +1366,79 @@ fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
         obj.insert(f.name.to_string(), v);
     }
     Ok(Json::Object(obj))
+}
+
+/// Builds a row's JSON and removes the fields the caller may not READ (D6 field-level security).
+fn project_row(model: &ResolvedModel, ctx: &Ctx, row: &PgRow) -> Result<Json, DbError> {
+    let mut j = row_to_json(model, row)?;
+    if let Json::Object(ref mut o) = j {
+        strip_unreadable(model, ctx, o);
+    }
+    Ok(j)
+}
+
+/// Removes from `obj` the fields whose `#[field(groups = ...)]` the caller is not a member of. The
+/// `id` key (and any field with no restriction) is always kept; superuser keeps everything.
+fn strip_unreadable(model: &ResolvedModel, ctx: &Ctx, obj: &mut Map<String, Json>) {
+    if ctx.is_su() {
+        return;
+    }
+    obj.retain(|k, _| field_accessible(model.name, k, ctx));
+}
+
+/// Whether the caller may read every field a (possibly dotted) filter path traverses (D6). Walks the
+/// relation chain: each segment must be field-accessible on the model it sits on, and a non-final
+/// segment must be a relation whose target model is resolved before checking the next segment. So
+/// `partner_id.secret` is rejected when `secret` is restricted on the partner model, blocking probing
+/// of a restricted field through a relation. Superuser is always allowed.
+fn filter_path_accessible(model: &ResolvedModel, path: &str, ctx: &Ctx) -> bool {
+    if ctx.is_su() {
+        return true;
+    }
+    let mut cur: ResolvedModel = model.clone();
+    let mut segs = path.split('.').peekable();
+    while let Some(seg) = segs.next() {
+        if !field_accessible(cur.name, seg, ctx) {
+            return false;
+        }
+        if segs.peek().is_none() {
+            break; // last segment — nothing more to traverse
+        }
+        // Non-final segment must be a relation; resolve its target to keep walking.
+        match cur.fields.iter().find(|f| f.name == seg).map(|f| &f.kind) {
+            Some(FieldKind::Many2one { target }) | Some(FieldKind::One2many { target, .. }) => {
+                match resolve_registered(target) {
+                    Ok(m) => cur = m,
+                    // Unresolvable target → the domain compile will reject it anyway; nothing to probe.
+                    Err(_) => return true,
+                }
+            }
+            // Dotted into a non-relation (invalid path) → let the domain compiler surface the error.
+            _ => return true,
+        }
+    }
+    true
+}
+
+/// Rejects a write whose payload touches a field the caller may not WRITE (D6). One2many keys are
+/// not restricted here — their child writes are checked recursively when the nested commands apply.
+fn check_writable_fields(
+    model: &ResolvedModel,
+    ctx: &Ctx,
+    payload: &Map<String, Json>,
+) -> Result<(), DbError> {
+    if ctx.is_su() {
+        return Ok(());
+    }
+    for k in payload.keys() {
+        if !field_accessible(model.name, k, ctx) {
+            return Err(DbError::AccessDenied {
+                model: model.name.to_string(),
+                operation: "write (restricted field)",
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Binds the compiled domain's parameters in order. Owned binds (clone/copy) so the bound

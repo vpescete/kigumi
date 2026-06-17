@@ -95,6 +95,38 @@ impl Ctx {
     }
 }
 
+/// Field-level access restriction (D6 / Odoo's `Field.groups`): the groups required to access one
+/// `model.field`. Registered out-of-band (emitted by `#[field(groups = "...")]`) so it adds no
+/// column to the metamodel and no churn to existing `FieldDef` literals — the same side-registry
+/// pattern as external tables. Read AND write are gated by the same set, at the DB boundary.
+pub struct FieldGroupRegistration {
+    pub model: &'static str,
+    pub field: &'static str,
+    pub groups: &'static [&'static str],
+}
+inventory::collect!(FieldGroupRegistration);
+
+/// The groups required to access `model.field`, or None when the field is unrestricted.
+pub fn field_required_groups(model: &str, field: &str) -> Option<&'static [&'static str]> {
+    inventory::iter::<FieldGroupRegistration>
+        .into_iter()
+        .find(|r| r.model == model && r.field == field)
+        .map(|r| r.groups)
+}
+
+/// Whether `ctx` may access (read or write) `model.field`. Default-allow when the field has no group
+/// restriction; superuser always allowed; otherwise the caller must be in at least one required
+/// group. Mirrors Odoo, which gates read and write by the same `Field.groups` set at the ORM boundary.
+pub fn field_accessible(model: &str, field: &str, ctx: &Ctx) -> bool {
+    if ctx.is_su() {
+        return true;
+    }
+    match field_required_groups(model, field) {
+        None => true,
+        Some(groups) => groups.iter().any(|g| ctx.is_member(g)),
+    }
+}
+
 /// Returns true if `ctx` may perform `op` on `model`. Access is granted if ANY of the user's
 /// groups grants it (union semantics, like Odoo). Superuser is always allowed.
 pub fn check_access(op: Operation, model: &str, ctx: &Ctx, acls: &[Acl]) -> bool {

@@ -47,6 +47,8 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
     for f in fields {
         field_toks.push(build_field(f)?);
     }
+    // D6 field-level security: emit a FieldGroupRegistration for every `#[field(groups = "...")]`.
+    let group_submits = field_group_submits(&model_name, fields)?;
 
     let vis = &input.vis;
     let ident = &input.ident;
@@ -73,7 +75,41 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
                 descriptor: <#ident as ::meshble::prelude::Model>::descriptor,
             }
         }
+
+        #(#group_submits)*
     })
+}
+
+/// Emits a `FieldGroupRegistration` submission for each field carrying `#[field(groups = "a,b")]`.
+fn field_group_submits(
+    model_name: &str,
+    fields: &Punctuated<syn::Field, Token![,]>,
+) -> syn::Result<Vec<TokenStream2>> {
+    let mut out = Vec::new();
+    for f in fields {
+        let fname = f.ident.as_ref().ok_or_else(|| err(f, "field without a name"))?.to_string();
+        let mut metas: Vec<Meta> = Vec::new();
+        for a in &f.attrs {
+            if a.path().is_ident("field") {
+                metas.extend(a.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?);
+            }
+        }
+        let gs: Vec<String> = match meta_str(&metas, "groups") {
+            Some(s) => s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
+            None => continue,
+        };
+        if gs.is_empty() {
+            continue;
+        }
+        out.push(quote! {
+            ::meshble::inventory::submit! {
+                ::meshble::prelude::FieldGroupRegistration {
+                    model: #model_name, field: #fname, groups: &[ #(#gs),* ],
+                }
+            }
+        });
+    }
+    Ok(out)
 }
 
 /// `#[extend("sale.order")]` — adds fields to a model defined elsewhere.

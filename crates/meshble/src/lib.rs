@@ -8,15 +8,16 @@ pub use meshble_core::inventory;
 pub mod prelude {
     pub use meshble_core::{
         action_for, check_access, check_compat, compute_fn, compute_stored, computed_fields,
-        external_tables, json_string, migration_plan, record_rule_domain, registered_acls,
-        registered_group_names, registered_model_names, registered_rules, resolve,
-        resolve_all_registered, resolve_module_set, resolve_modules, resolve_registered,
-        validate_depends, Acl, AclRegistration, ActionFn, ActionInput, ActionOutcome,
-        ActionRegistration, ComputeFn, ComputeInput, ComputeRegistration, Condition, Ctx, Domain,
-        DomainError, ExternalTable, FieldBuilder, FieldDef, FieldExtension, FieldKind,
-        MigrationTarget, Model, ModelDescriptor, ModelRegistration, ModuleDep, ModuleManifest,
-        ModuleRegistration, Operation, Operator, RecordRule, RecordRuleRegistration,
-        ResolutionError, ResolvedModel, Sql, Value, FRAMEWORK_VERSION,
+        external_tables, field_accessible, field_required_groups, json_string, migration_plan,
+        record_rule_domain, registered_acls, registered_group_names, registered_model_names,
+        registered_rules, resolve, resolve_all_registered, resolve_module_set, resolve_modules,
+        resolve_registered, validate_depends, Acl, AclRegistration, ActionFn, ActionInput,
+        ActionOutcome, ActionRegistration, ComputeFn, ComputeInput, ComputeRegistration, Condition,
+        Ctx, Domain, DomainError, ExternalTable, FieldBuilder, FieldDef, FieldExtension,
+        FieldGroupRegistration, FieldKind, MigrationTarget, Model, ModelDescriptor,
+        ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
+        RecordRule, RecordRuleRegistration, ResolutionError, ResolvedModel, Sql, Value,
+        FRAMEWORK_VERSION,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
@@ -53,6 +54,19 @@ macro_rules! register_external {
     ($model:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::ExternalTable { model: $model }
+        }
+    };
+}
+
+/// Restricts a model field to the given groups (D6 field-level security): read AND write of that
+/// field require membership in at least one group; superuser bypasses. Usually emitted automatically
+/// by `#[field(groups = "...")]`, but can be declared by hand:
+/// `meshble::register_field_groups!("res.users", "login", &["admin"]);`
+#[macro_export]
+macro_rules! register_field_groups {
+    ($model:expr, $field:expr, $groups:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::FieldGroupRegistration { model: $model, field: $field, groups: $groups }
         }
     };
 }
