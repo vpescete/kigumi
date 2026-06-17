@@ -6,8 +6,8 @@
 //! monkey-patch that mutates a class at runtime.
 
 use crate::{
-    resolve, resolve_module_set, validate_depends, Acl, FieldDef, ModelDescriptor, ModuleManifest,
-    RecordRule, ResolutionError, ResolvedModel, FRAMEWORK_VERSION,
+    resolve, resolve_module_set, validate_depends, Acl, FieldDef, FieldKind, ModelDescriptor,
+    ModuleManifest, RecordRule, ResolutionError, ResolvedModel, FRAMEWORK_VERSION,
 };
 
 /// Registration of a base model (emitted by `#[model]`).
@@ -96,6 +96,111 @@ pub fn tracked_fields(model: &str) -> Vec<&'static str> {
         .filter(|e| e.model == model)
         .map(|e| e.field)
         .collect()
+}
+
+/// Delegation inheritance (Odoo's `_inherits`): `model` carries a required Many2one `via` to `parent`
+/// and transparently exposes the parent's stored scalar fields (read via the FK, written through to the
+/// parent). Emitted by `#[model(inherits = "parent", via = "fk")]`. The `via` FK is an ordinary field
+/// the model declares — this only records the delegation, so no `ModelDescriptor`/`FieldDef` churn.
+pub struct InheritsRegistration {
+    pub model: &'static str,
+    pub parent: &'static str,
+    pub via: &'static str,
+}
+inventory::collect!(InheritsRegistration);
+
+/// The `(parent, via)` a model delegates to, or None if it is not an `_inherits` child.
+pub fn inherits_of(model: &str) -> Option<(&'static str, &'static str)> {
+    inventory::iter::<InheritsRegistration>
+        .into_iter()
+        .find(|e| e.model == model)
+        .map(|e| (e.parent, e.via))
+}
+
+/// A field a child transparently exposes from its `_inherits` parent: the parent's [`FieldDef`], the
+/// parent's table, and the child's `via` FK column the read subquery / write UPDATE pivots on.
+#[derive(Clone, Copy, Debug)]
+pub struct DelegatedField {
+    pub def: FieldDef,
+    pub parent_table: &'static str,
+    pub via: &'static str,
+}
+
+/// The parent fields that delegation exposes: stored, non-computed, non-related columns (scalars +
+/// Many2one). Computed / related / One2many / Many2many parent fields are NOT delegated (v1). Uses only
+/// `resolve_registered(parent)`, never `resolve_registered(model)`, so it can't recurse into the caller.
+fn parent_delegatable(parent: &str) -> Result<Vec<FieldDef>, String> {
+    let p = resolve_registered(parent)?;
+    Ok(p.fields
+        .iter()
+        .copied()
+        .filter(|f| f.has_column() && !f.is_computed() && related_path(parent, f.name).is_none())
+        .collect())
+}
+
+/// Walks the `_inherits` chain from `model` (using only the registry, no resolution) and errors on a
+/// cycle or excessive depth — so delegation resolution terminates instead of recursing forever.
+fn check_inherits_acyclic(model: &str) -> Result<(), String> {
+    let mut seen: Vec<&'static str> = Vec::new();
+    let mut cur = model.to_string();
+    for _ in 0..32 {
+        match inherits_of(&cur) {
+            None => return Ok(()),
+            Some((parent, _)) => {
+                if seen.contains(&parent) || parent == model {
+                    return Err(format!("'_inherits' cycle: '{parent}' revisited from '{model}'"));
+                }
+                seen.push(parent);
+                cur = parent.to_string();
+            }
+        }
+    }
+    Err(format!("'_inherits' chain from '{model}' is too deep (possible cycle)"))
+}
+
+/// Validates a model's `_inherits` declaration against its resolved own fields: the chain is acyclic,
+/// the `via` field is a required Many2one to the parent, and no own field collides with a delegated
+/// parent field (no silent override — unlike Odoo). Called by `resolve_registered` after the merge.
+fn validate_inherits(model: &str, own: &ResolvedModel) -> Result<(), String> {
+    let Some((parent, via)) = inherits_of(model) else { return Ok(()) };
+    check_inherits_acyclic(model)?;
+    let vf = own.fields.iter().find(|f| f.name == via).ok_or_else(|| {
+        format!("'_inherits' on '{model}': via field '{via}' is not declared on the model")
+    })?;
+    match vf.kind {
+        FieldKind::Many2one { target } if target == parent => {}
+        _ => {
+            return Err(format!(
+                "'_inherits' on '{model}': via field '{via}' must be a Many2one to '{parent}'"
+            ))
+        }
+    }
+    if !vf.required {
+        return Err(format!("'_inherits' on '{model}': via field '{via}' must be required"));
+    }
+    for d in parent_delegatable(parent)? {
+        if own.fields.iter().any(|f| f.name == d.name) {
+            return Err(format!(
+                "'_inherits' on '{model}': field '{}' collides with inherited '{parent}.{}'",
+                d.name, d.name
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The fields `model` delegates to its `_inherits` parent (empty if it is not a child). Each is read
+/// via the parent through the `via` FK; the child does NOT have a column for it. Shadowed names (a
+/// child field of the same name) are excluded — though `validate_inherits` already rejects collisions.
+pub fn delegated_fields(model: &str) -> Result<Vec<DelegatedField>, String> {
+    let Some((parent, via)) = inherits_of(model) else { return Ok(Vec::new()) };
+    let child = resolve_registered(model)?;
+    let parent_table = resolve_registered(parent)?.table;
+    Ok(parent_delegatable(parent)?
+        .into_iter()
+        .filter(|d| !child.fields.iter().any(|f| f.name == d.name))
+        .map(|def| DelegatedField { def, parent_table, via })
+        .collect())
 }
 
 /// A related field (Odoo `related=`): a NON-stored, read-only mirror of a value reached by following
@@ -325,5 +430,6 @@ pub fn resolve_registered(model: &str) -> Result<ResolvedModel, String> {
     let ext_fields: Vec<&'static [FieldDef]> = exts.iter().map(|e| (e.fields)()).collect();
     let m = resolve((base.descriptor)(), &ext_fields)?;
     validate_depends(&m)?;
+    validate_inherits(model, &m)?; // delegation: acyclic chain, valid via FK, no name collision
     Ok(m)
 }

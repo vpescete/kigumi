@@ -53,6 +53,16 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
     let related_submits = related_submits(&model_name, fields)?;
     // Tracked fields: emit a TrackedFieldRegistration for every `#[field(tracked)]`.
     let tracked_submits = tracked_submits(&model_name, fields)?;
+    // Delegation inheritance: `inherits = "parent", via = "fk"` emits an InheritsRegistration.
+    let inherits_submit = match (meta_str(args, "inherits"), meta_str(args, "via")) {
+        (Some(parent), Some(via)) => quote! {
+            ::meshble::inventory::submit! {
+                ::meshble::prelude::InheritsRegistration { model: #model_name, parent: #parent, via: #via }
+            }
+        },
+        (None, None) => quote! {},
+        _ => return Err(err(&input.ident, "#[model] `inherits` and `via` must be given together")),
+    };
 
     let vis = &input.vis;
     let ident = &input.ident;
@@ -83,6 +93,7 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
         #(#group_submits)*
         #(#related_submits)*
         #(#tracked_submits)*
+        #inherits_submit
     })
 }
 

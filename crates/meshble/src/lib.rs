@@ -8,18 +8,18 @@ pub use meshble_core::inventory;
 pub mod prelude {
     pub use meshble_core::{
         action_for, check_access, check_compat, compute_fn, compute_stored, computed_fields,
-        external_tables, field_accessible, field_required_groups, is_mailed, json_string,
-        mailed_models, migration_plan, module_closure, module_of, record_rule_domain,
-        registered_acls, registered_group_names, registered_model_names, registered_rules,
-        related_path, resolve, resolve_all_registered, resolve_module_set, resolve_modules,
-        resolve_registered, validate_depends, Acl, AclRegistration, ActionFn, ActionInput,
-        ActionOutcome, ActionRegistration, ComputeFn, ComputeInput, ComputeRegistration, Condition,
-        Ctx, Domain, DomainError, ExternalTable, FieldBuilder, FieldDef, FieldExtension,
-        FieldGroupRegistration, FieldKind, MailedRegistration, MigrationTarget, Model,
-        ModelDescriptor, ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration,
-        Operation, Operator, RecordRule, RecordRuleRegistration, RelatedRegistration,
-        ResolutionError, ResolvedModel, RuleDomain, Sql, TrackedFieldRegistration, Value,
-        FRAMEWORK_VERSION, tracked_fields,
+        delegated_fields, external_tables, field_accessible, field_required_groups, inherits_of,
+        is_mailed, json_string, mailed_models, migration_plan, module_closure, module_of,
+        record_rule_domain, registered_acls, registered_group_names, registered_model_names,
+        registered_rules, related_path, resolve, resolve_all_registered, resolve_module_set,
+        resolve_modules, resolve_registered, tracked_fields, validate_depends, Acl, AclRegistration,
+        ActionFn, ActionInput, ActionOutcome, ActionRegistration, ComputeFn, ComputeInput,
+        ComputeRegistration, Condition, Ctx, DelegatedField, Domain, DomainError, ExternalTable,
+        FieldBuilder, FieldDef, FieldExtension, FieldGroupRegistration, FieldKind,
+        InheritsRegistration, MailedRegistration, MigrationTarget, Model, ModelDescriptor,
+        ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
+        RecordRule, RecordRuleRegistration, RelatedRegistration, ResolutionError, ResolvedModel,
+        RuleDomain, Sql, TrackedFieldRegistration, Value, FRAMEWORK_VERSION,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
@@ -126,6 +126,18 @@ macro_rules! register_mailed {
     ($model:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::MailedRegistration { model: $model }
+        }
+    };
+}
+
+/// Declares delegation inheritance (Odoo's `_inherits`): `model` exposes `parent`'s stored scalar
+/// fields through its required Many2one `via` FK. Usually emitted by `#[model(inherits=…, via=…)]`:
+/// `meshble::register_inherits!("product.product", "product.template", "product_tmpl_id");`
+#[macro_export]
+macro_rules! register_inherits {
+    ($model:expr, $parent:expr, $via:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::InheritsRegistration { model: $model, parent: $parent, via: $via }
         }
     };
 }
