@@ -1,7 +1,18 @@
 import type { ReactNode } from 'react'
 import { fmtMoney } from './data'
 import { Badge } from './ui'
-import type { FieldMeta } from './api'
+import type { FieldMeta, Row } from './api'
+
+// A human label for a related record (for Many2one pickers): the first present name-ish field,
+// falling back to the id. Avoids per-model code while staying readable for the common models.
+export function relLabel(row: Row): string {
+  const r = row as Record<string, unknown>
+  for (const key of ['name', 'login', 'code', 'default_code', 'title']) {
+    const v = r[key]
+    if (typeof v === 'string' && v.trim()) return v
+  }
+  return `#${row.id}`
+}
 
 // Renders a stored value for display, driven only by the contract's widget hint — no per-model code.
 // Decimals arrive as exact JSON strings (monetary), Many2one as the related id, Selection as its key.

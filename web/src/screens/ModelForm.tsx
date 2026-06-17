@@ -6,9 +6,10 @@ import { canRun } from '../api'
 import { useAuth } from '../auth'
 import type { Column } from '../ui'
 import { Button, Card, DataTable, ErrorState, Loading, PageHeader } from '../ui'
-import { displayValue, modelTitle } from '../format'
+import { displayValue, modelTitle, relLabel } from '../format'
 
 type FormValues = Record<string, unknown>
+type RelOption = { id: number; label: string }
 
 const editableScalar = (f: api.FieldMeta): boolean => !f.readonly && f.widget !== 'one2many'
 
@@ -33,6 +34,7 @@ export function ModelForm() {
   const [record, setRecord] = useState<api.Row | null>(null)
   const [values, setValues] = useState<FormValues>({})
   const [childContracts, setChildContracts] = useState<Record<string, api.Contract>>({})
+  const [relOptions, setRelOptions] = useState<Record<string, RelOption[]>>({})
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -55,6 +57,19 @@ export function ModelForm() {
         o2m.map(async (f) => [f.name, await api.contract(f.relation as string)] as const),
       )
       setChildContracts(Object.fromEntries(children))
+      // Fetch selectable records for each Many2one, so the field is a name picker, not a raw id input.
+      const m2o = c.fields.filter((f) => f.widget === 'many2one' && f.relation)
+      const opts = await Promise.all(
+        m2o.map(async (f) => {
+          try {
+            const page = await api.list(f.relation as string, { limit: 200 })
+            return [f.name, page.data.map((r) => ({ id: r.id, label: relLabel(r) }))] as const
+          } catch {
+            return [f.name, [] as RelOption[]] as const
+          }
+        }),
+      )
+      setRelOptions(Object.fromEntries(opts))
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load')
     }
@@ -155,7 +170,12 @@ export function ModelForm() {
               {f.readonly ? (
                 <div className="t-body text-text py-1.5">{displayValue(values[f.name], f.widget, f)}</div>
               ) : (
-                <FieldInput field={f} value={values[f.name]} onChange={(v) => setField(f.name, v)} />
+                <FieldInput
+                  field={f}
+                  value={values[f.name]}
+                  options={relOptions[f.name]}
+                  onChange={(v) => setField(f.name, v)}
+                />
               )}
             </div>
           ))}
@@ -173,10 +193,12 @@ export function ModelForm() {
 function FieldInput({
   field,
   value,
+  options,
   onChange,
 }: {
   field: api.FieldMeta
   value: unknown
+  options?: RelOption[]
   onChange: (value: unknown) => void
 }) {
   const cls =
@@ -217,6 +239,24 @@ function FieldInput({
         />
       )
     case 'many2one':
+      // A name picker when we have the related records; raw id input only as a fallback.
+      if (options) {
+        return (
+          <select
+            value={value == null ? '' : String(value)}
+            onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+            className={cls}
+            style={style}
+          >
+            <option value="">—</option>
+            {options.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        )
+      }
       return (
         <input
           type="number"
