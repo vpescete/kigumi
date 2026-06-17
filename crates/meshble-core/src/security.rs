@@ -125,12 +125,22 @@ pub struct FieldGroupRegistration {
 }
 inventory::collect!(FieldGroupRegistration);
 
-/// The groups required to access `model.field`, or None when the field is unrestricted.
+/// The groups required to access `model.field`, or None when the field is unrestricted. Delegation-
+/// aware (`_inherits`): a restriction on an inherited field lives on the PARENT model, so when the
+/// field is not restricted directly on `model` we fall back to the parent — otherwise an inherited
+/// field would expose its restricted value through the child (read/order/filter). Recurses the chain.
 pub fn field_required_groups(model: &str, field: &str) -> Option<&'static [&'static str]> {
-    inventory::iter::<FieldGroupRegistration>
+    if let Some(groups) = inventory::iter::<FieldGroupRegistration>
         .into_iter()
         .find(|r| r.model == model && r.field == field)
         .map(|r| r.groups)
+    {
+        return Some(groups);
+    }
+    if let Some((parent, _via)) = crate::inherits_of(model) {
+        return field_required_groups(parent, field);
+    }
+    None
 }
 
 /// Whether `ctx` may access (read or write) `model.field`. Default-allow when the field has no group

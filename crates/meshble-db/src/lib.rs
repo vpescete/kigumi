@@ -18,9 +18,9 @@ pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
     action_for, check_access, compute_stored, computed_fields, delegated_fields, field_accessible,
-    is_mailed, record_rule_domain, related_path, resolve_all_registered, resolve_registered,
-    tracked_fields, Acl, ActionInput, Children, Ctx, Domain, DomainError, FieldDef, FieldKind,
-    Operation, RecordRule, ResolvedModel, Value,
+    inherits_of, is_mailed, record_rule_domain, related_path, resolve_all_registered,
+    resolve_registered, tracked_fields, Acl, ActionInput, Children, Ctx, Domain, DomainError,
+    FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
 };
 use meshble_schema::to_ddl;
 use serde_json::{Map, Value as Json};
@@ -408,23 +408,85 @@ impl Db {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "create" });
         }
         check_writable_fields(model, ctx, values)?; // D6: reject fields the caller may not write
-        // Split the payload: scalar columns, One2many child-create payloads, Many2many sets.
-        let (mut scalars, nested, m2m) = split_nested(model, values)?;
-        // Multi-company: validate the supplied company_id against the caller's scope and default it
-        // on create (single chokepoint, reused for nested children + update below).
-        apply_company_scope(model, ctx, &mut scalars, true)?;
-        apply_defaults(model, &mut scalars); // fill unset fields with their declared defaults
-        let cols = validate_write_values(model, &scalars, true)?;
+        // Split the payload: scalar columns, One2many child-create payloads, Many2many sets, and
+        // (_inherits) delegated parent fields.
+        let (mut scalars, nested, m2m, delegated) = split_nested(model, values)?;
+
+        let mut tx = self.pool.begin().await?;
+
+        // _inherits: the required `via` FK must point at a parent carrying the delegated fields. If the
+        // caller gave `via`, update that existing parent with the delegated keys; otherwise auto-create
+        // the parent (with the delegated fields) FIRST and point `via` at it — all in this transaction,
+        // so a child failure rolls the parent back too (no orphan template).
+        if let Some((parent, via)) = inherits_of(model.name) {
+            let parent_model = resolve_registered(parent).map_err(DbError::BadInput)?;
+            let has_via = scalars.get(via).is_some_and(|v| !v.is_null());
+            if has_via {
+                if !delegated.is_empty() {
+                    let pid = scalars.get(via).and_then(|v| v.as_i64()).ok_or_else(|| {
+                        DbError::BadInput(format!("_inherits via '{via}' must be an integer id"))
+                    })?;
+                    self.update_delegated_parent(&parent_model, ctx, acls, rules, pid, &delegated, &mut tx).await?;
+                }
+            } else {
+                if !check_access(Operation::Create, parent_model.name, ctx, acls) {
+                    return Err(DbError::AccessDenied {
+                        model: parent_model.name.to_string(),
+                        operation: "create (inherited parent)",
+                    });
+                }
+                check_writable_fields(&parent_model, ctx, &delegated)?;
+                let mut pscalars = delegated.clone();
+                let (pid, _) =
+                    self.insert_scalars_in_tx(&parent_model, ctx, rules, &mut pscalars, &mut tx).await?;
+                scalars.insert(via.to_string(), Json::from(pid));
+            }
+        }
+
+        // Insert the child row itself (full secured-create treatment), in the same transaction.
+        let (id, record) = self.insert_scalars_in_tx(model, ctx, rules, &mut scalars, &mut tx).await?;
+
+        // Nested One2many children: create-only on a brand-new parent, in the SAME transaction with
+        // child ACL + record rules re-checked. Then recompute this parent's own aggregate from the
+        // just-inserted children IN THIS TRANSACTION, so the row, children and aggregate commit
+        // atomically. The parent is brand-new (its id is invisible to other txns) → no advisory lock.
+        if !nested.is_empty() {
+            self.apply_nested_in_tx(&mut tx, ctx, acls, rules, &nested, id, false).await?;
+            recompute_columns_on(&mut tx, model, id).await?;
+        }
+        // Many2many sets, in the same transaction (atomic with the row + children).
+        if !m2m.is_empty() {
+            apply_m2m_in_tx(&mut tx, id, &m2m).await?;
+        }
+        tx.commit().await?;
+
+        // Grandparents are a separate aggregate (single-level by design); recompute post-commit. The
+        // call is idempotent (it reads current state), so a retry repairs it.
+        self.recompute_parents_of(model, &record).await?;
+        Ok(id)
+    }
+
+    /// Inserts a row from a SCALAR-only payload inside `tx` with the full secured-create treatment
+    /// (company-scope, defaults, required/type validation, stored computes, the create record-rule),
+    /// returning the new id and its column record. No nested/Many2many handling. Shared by the normal
+    /// create and the `_inherits` parent auto-create. ACL + D6 are checked by the caller.
+    async fn insert_scalars_in_tx(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        rules: &[RecordRule],
+        scalars: &mut Map<String, Json>,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+    ) -> Result<(i64, BTreeMap<String, Value>), DbError> {
+        apply_company_scope(model, ctx, scalars, true)?;
+        apply_defaults(model, scalars);
+        let cols = validate_write_values(model, scalars, true)?;
         if cols.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
         }
-        // Run the compute engine: stored computed fields are derived from the record and inserted.
-        // A brand-new row has no children yet, so aggregate computes start at their empty value
-        // (recomputed below once the nested children are inserted).
         let mut record: BTreeMap<String, Value> =
             cols.into_iter().map(|(c, v)| (c.to_string(), v)).collect();
         compute_stored(model, &mut record, &Children::new());
-
         let (names, vals): (Vec<&str>, Vec<Value>) =
             record.iter().map(|(k, v)| (k.as_str(), v.clone())).unzip();
         let placeholders: Vec<String> =
@@ -435,12 +497,9 @@ impl Db {
             names.join(", "),
             placeholders.join(", ")
         );
-
-        let mut tx = self.pool.begin().await?;
         let mut q = sqlx::query_scalar::<Postgres, i64>(&sql);
         q = bind_all(q, &vals);
-        let id: i64 = q.fetch_one(&mut *tx).await?;
-
+        let id: i64 = q.fetch_one(&mut **tx).await?;
         if let Some(rule) = record_rule_domain(Operation::Create, model.name, ctx, rules) {
             let mut params: Vec<Value> = vec![Value::Int(id)];
             let where_sql = rule.compile_into(model, &mut params)?;
@@ -449,38 +508,78 @@ impl Db {
             for v in &params {
                 cq = bind_query(cq, v);
             }
-            if cq.fetch_optional(&mut *tx).await?.is_none() {
-                // The created row violates the create rule → roll back by dropping the tx.
+            if cq.fetch_optional(&mut **tx).await?.is_none() {
                 return Err(DbError::AccessDenied {
                     model: model.name.to_string(),
                     operation: "create (record rule)",
                 });
             }
         }
+        Ok((id, record))
+    }
 
-        // Nested One2many children: create-only on a brand-new parent, in the SAME transaction with
-        // child ACL + record rules re-checked — parent + children are all-or-nothing.
-        if !nested.is_empty() {
-            self.apply_nested_in_tx(&mut tx, ctx, acls, rules, &nested, id, false).await?;
+    /// Writes delegated `_inherits` fields onto the parent record `pid` inside `tx`: the parent's own
+    /// Write ACL + D6 + company-scope + Write record-rule are enforced (writing a variant's inherited
+    /// field is a write to the shared template, so it needs template write access). Recomputes the
+    /// parent's stored computes if any. A 0-row update (parent missing / not permitted) is an error.
+    #[allow(clippy::too_many_arguments)]
+    async fn update_delegated_parent(
+        &self,
+        parent_model: &ResolvedModel,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        pid: i64,
+        delegated: &Map<String, Json>,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+    ) -> Result<(), DbError> {
+        if !check_access(Operation::Write, parent_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied {
+                model: parent_model.name.to_string(),
+                operation: "write (inherited parent)",
+            });
         }
-        // Many2many sets, in the same transaction (atomic with the row + children).
-        if !m2m.is_empty() {
-            apply_m2m_in_tx(&mut tx, id, &m2m).await?;
+        check_writable_fields(parent_model, ctx, delegated)?; // D6 on parent fields
+        let mut d = delegated.clone();
+        apply_company_scope(parent_model, ctx, &mut d, false)?;
+        let cols = validate_write_values(parent_model, &d, false)?;
+        if cols.is_empty() {
+            return Ok(());
         }
-
-        // Recompute this parent's own aggregate from the just-inserted children IN THIS TRANSACTION,
-        // so the parent row, its children, and its aggregate commit atomically (no stale window, and
-        // no "stale forever" if a post-commit recompute were to fail). The parent is brand-new — its
-        // id is invisible to other transactions — so no advisory lock is needed here.
-        if !nested.is_empty() {
-            recompute_columns_on(&mut tx, model, id).await?;
+        let set: Vec<String> = cols
+            .iter()
+            .enumerate()
+            .map(|(i, (c, _))| format!("{} = ${}::{}", c, i + 1, col_cast(parent_model, c)))
+            .collect();
+        let id_ph = cols.len() + 1;
+        let mut params: Vec<Value> = cols.iter().map(|(_, v)| v.clone()).collect();
+        params.push(Value::Int(pid));
+        let mut where_sql = match record_rule_domain(Operation::Write, parent_model.name, ctx, rules) {
+            Some(rule) => format!("id = ${id_ph} AND {}", rule.compile_into(parent_model, &mut params)?),
+            None => format!("id = ${id_ph}"),
+        };
+        where_sql.push_str(&company_clause(parent_model, ctx, &mut params)?);
+        let sql = format!("UPDATE {} SET {} WHERE {}", parent_model.table, set.join(", "), where_sql);
+        let mut q = sqlx::query(&sql);
+        for v in &params {
+            q = bind_query(q, v);
         }
-        tx.commit().await?;
-
-        // Grandparents are a separate aggregate (single-level by design); recompute post-commit. The
-        // call is idempotent (it reads current state), so a retry repairs it.
-        self.recompute_parents_of(model, &record).await?;
-        Ok(id)
+        if q.execute(&mut **tx).await?.rows_affected() == 0 {
+            return Err(DbError::AccessDenied {
+                model: parent_model.name.to_string(),
+                operation: "write (inherited parent not found or not permitted)",
+            });
+        }
+        // Serialize the parent's aggregate recompute per row (same advisory lock as the other write
+        // paths), so concurrent variant writes to the shared template can't lose-update its computes.
+        if !computed_fields(parent_model).is_empty() {
+            sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+                .bind(format!("agg:{}:{}", parent_model.table, pid))
+                .execute(&mut **tx)
+                .await?;
+            recompute_columns_on(tx, parent_model, pid).await?;
+        }
+        Ok(())
     }
 
     /// Updates row `id` with validated `values`, enforcing ACL Write and the Write record rule
@@ -498,13 +597,26 @@ impl Db {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "write" });
         }
         check_writable_fields(model, ctx, values)?; // D6: reject fields the caller may not write
-        // Split scalar fields from One2many child commands (D4) and Many2many sets.
-        let (mut scalars, nested, m2m) = split_nested(model, values)?;
+        // Split scalar fields from One2many child commands (D4), Many2many sets, and (_inherits)
+        // delegated parent fields.
+        let (mut scalars, nested, m2m, delegated) = split_nested(model, values)?;
         // Multi-company: a scoped caller may not reassign a row into a foreign company or NULL.
         apply_company_scope(model, ctx, &mut scalars, false)?;
         let cols = validate_write_values(model, &scalars, false)?;
-        if cols.is_empty() && nested.is_empty() && m2m.is_empty() {
+        if cols.is_empty() && nested.is_empty() && m2m.is_empty() && delegated.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
+        }
+        // _inherits: re-pointing the parent link (`via`) AND writing inherited fields in one call is
+        // ambiguous (which parent receives the inherited write?) — reject it rather than silently
+        // retarget the delegated write to the newly-linked parent.
+        if !delegated.is_empty() {
+            if let Some((_parent, via)) = inherits_of(model.name) {
+                if cols.iter().any(|(c, _)| *c == via) {
+                    return Err(DbError::BadInput(
+                        "cannot change the inherited parent link and write inherited fields in the same update".to_string(),
+                    ));
+                }
+            }
         }
 
         // Field tracking (mail): the tracked scalar columns actually present in this write. Only for
@@ -575,6 +687,23 @@ impl Db {
         // 2b) Apply Many2many sets (the row was confirmed writable above).
         if !m2m.is_empty() {
             apply_m2m_in_tx(&mut tx, id, &m2m).await?;
+        }
+        // 2c) _inherits: write delegated keys through to the parent (read this row's via FK, then
+        //     UPDATE the parent). The child was confirmed writable above; the parent enforces its own
+        //     ACL/rule. Same transaction, so child + parent changes commit together.
+        if !delegated.is_empty() {
+            if let Some((parent, via)) = inherits_of(model.name) {
+                let parent_model = resolve_registered(parent).map_err(DbError::BadInput)?;
+                let pid: Option<i64> =
+                    sqlx::query_scalar::<Postgres, i64>(&format!("SELECT {via} FROM {} WHERE id = $1", model.table))
+                        .bind(id)
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                let pid = pid.ok_or_else(|| {
+                    DbError::BadInput(format!("_inherits via '{via}' is null on '{}'", model.name))
+                })?;
+                self.update_delegated_parent(&parent_model, ctx, acls, rules, pid, &delegated, &mut tx).await?;
+            }
         }
 
         // 3) Recompute this row's computed columns (same-record + aggregate over its children),
@@ -1232,10 +1361,14 @@ struct M2mSet {
 fn split_nested(
     model: &ResolvedModel,
     values: &Map<String, Json>,
-) -> Result<(Map<String, Json>, Vec<NestedWrite>, Vec<M2mSet>), DbError> {
+) -> Result<(Map<String, Json>, Vec<NestedWrite>, Vec<M2mSet>, Map<String, Json>), DbError> {
     let mut scalars = Map::new();
     let mut nested = Vec::new();
     let mut m2m = Vec::new();
+    let mut delegated = Map::new();
+    // Names this model delegates to its `_inherits` parent (empty for a non-inheriting model).
+    let deleg_names: Vec<&'static str> =
+        delegated_fields(model.name).map_err(DbError::BadInput)?.iter().map(|d| d.def.name).collect();
     for (key, jv) in values {
         match model.fields.iter().find(|f| f.name == *key).map(|f| f.kind) {
             Some(FieldKind::Many2many { relation, column, target_column, .. }) => {
@@ -1272,13 +1405,17 @@ fn split_nested(
                     nested.push(NestedWrite { child, inverse, commands });
                 }
             }
+            // Delegated (_inherits) parent field: routed to the parent, not the child's columns.
+            _ if deleg_names.contains(&key.as_str()) => {
+                delegated.insert(key.clone(), jv.clone());
+            }
             // Scalar (or unknown) field: validate_write_values will accept or reject it.
             _ => {
                 scalars.insert(key.clone(), jv.clone());
             }
         }
     }
-    Ok((scalars, nested, m2m))
+    Ok((scalars, nested, m2m, delegated))
 }
 
 /// Applies Many2many SETs in `tx`: for each, clear the record's membership then insert the given
