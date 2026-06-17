@@ -1,0 +1,19 @@
+[package]
+name = "meshble-mod-mail"
+description = "Meshble mail module: headless chatter — messages, tracking, followers, activities"
+# MODULE version, independent of the framework (see docs/VERSIONING.md).
+version = "1.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meshble = { workspace = true }
+# Depends on base for res.users (message author / activity assignee).
+meshble-mod-base = { path = "../base", version = "1.0.0" }
+
+[dev-dependencies]
+meshble-db = { workspace = true }
+meshble-auth = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde_json = "1"

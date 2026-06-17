@@ -1070,6 +1070,7 @@ dependencies = [
  "meshble-config",
  "meshble-db",
  "meshble-mod-base",
+ "meshble-mod-mail",
  "meshble-mod-sales",
  "meshble-server",
  "serde_json",
@@ -1130,12 +1131,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "meshble-mod-mail"
+version = "1.0.0"
+dependencies = [
+ "meshble",
+ "meshble-auth",
+ "meshble-db",
+ "meshble-mod-base",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "meshble-mod-sales"
 version = "1.0.0"
 dependencies = [
  "meshble",
  "meshble-db",
  "meshble-mod-base",
+ "meshble-mod-mail",
  "serde_json",
  "tokio",
 ]

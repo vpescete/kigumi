@@ -8,17 +8,17 @@ pub use meshble_core::inventory;
 pub mod prelude {
     pub use meshble_core::{
         action_for, check_access, check_compat, compute_fn, compute_stored, computed_fields,
-        external_tables, field_accessible, field_required_groups, json_string, migration_plan,
-        module_closure, module_of, record_rule_domain, registered_acls, registered_group_names,
-        registered_model_names, registered_rules, related_path, resolve, resolve_all_registered,
-        resolve_module_set, resolve_modules, resolve_registered, validate_depends, Acl,
-        AclRegistration, ActionFn, ActionInput,
+        external_tables, field_accessible, field_required_groups, is_mailed, json_string,
+        mailed_models, migration_plan, module_closure, module_of, record_rule_domain,
+        registered_acls, registered_group_names, registered_model_names, registered_rules,
+        related_path, resolve, resolve_all_registered, resolve_module_set, resolve_modules,
+        resolve_registered, validate_depends, Acl, AclRegistration, ActionFn, ActionInput,
         ActionOutcome, ActionRegistration, ComputeFn, ComputeInput, ComputeRegistration, Condition,
         Ctx, Domain, DomainError, ExternalTable, FieldBuilder, FieldDef, FieldExtension,
-        FieldGroupRegistration, FieldKind, MigrationTarget, Model, ModelDescriptor,
-        ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
-        RecordRule, RecordRuleRegistration, RelatedRegistration, ResolutionError, ResolvedModel,
-        RuleDomain, Sql, Value, FRAMEWORK_VERSION,
+        FieldGroupRegistration, FieldKind, MailedRegistration, MigrationTarget, Model,
+        ModelDescriptor, ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration,
+        Operation, Operator, RecordRule, RecordRuleRegistration, RelatedRegistration,
+        ResolutionError, ResolvedModel, RuleDomain, Sql, Value, FRAMEWORK_VERSION,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
@@ -113,6 +113,18 @@ macro_rules! register_action {
     ($model:expr, $name:expr, $func:expr, $groups:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::ActionRegistration { model: $model, name: $name, func: $func, groups: $groups }
+        }
+    };
+}
+
+/// Opts a model into the mail subsystem (chatter): it gains a thread of messages, followers and
+/// activities via the `(res_model, res_id)` link, and the framework cleans that thread up when the
+/// record is deleted. One line, no mixin: `meshble::register_mailed!("sale.order");`
+#[macro_export]
+macro_rules! register_mailed {
+    ($model:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::MailedRegistration { model: $model }
         }
     };
 }

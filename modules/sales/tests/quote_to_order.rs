@@ -7,9 +7,10 @@ use meshble::prelude::*;
 use meshble_db::Db;
 use serde_json::json;
 
-/// Force both module crates to link so their `inventory` registrations are present.
+/// Force the module crates to link so their `inventory` registrations are present (sales depends on
+/// base and mail — sale.order opts into the mail subsystem, so mail's catalog must be migrated too).
 fn link() {
-    let _ = (&meshble_mod_sales::MANIFEST, &meshble_mod_base::MANIFEST);
+    let _ = (&meshble_mod_sales::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
 }
 
 /// A computed money field comes back as an exact JSON string; parse it for scale-independent asserts.

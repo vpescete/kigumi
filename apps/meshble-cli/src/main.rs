@@ -2,8 +2,9 @@
 //! API, inspect config, and manage users. Wires the existing crates together driven by
 //! `meshble-config` (DATABASE_URL / JWT secret / bind), so nothing is hardcoded.
 //!
-//! The linked modules (`meshble-mod-base`, `meshble-mod-sales`) self-register their models, ACLs,
-//! and record rules into the catalog via `inventory`; this binary just collects and serves them.
+//! The linked modules (`meshble-mod-base`, `meshble-mod-mail`, `meshble-mod-sales`) self-register
+//! their models, ACLs, and record rules into the catalog via `inventory`; this binary just
+//! collects and serves them.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -19,7 +20,7 @@ type Fallible = Result<(), Box<dyn std::error::Error>>;
 
 /// Forces the module crates to link so their `inventory` registrations are present in this binary.
 fn link_modules() {
-    let _ = (&meshble_mod_base::MANIFEST, &meshble_mod_sales::MANIFEST);
+    let _ = (&meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST, &meshble_mod_sales::MANIFEST);
 }
 
 #[derive(Parser)]

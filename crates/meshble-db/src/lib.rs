@@ -17,9 +17,10 @@ pub use auth_store::UserRow;
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
-    action_for, check_access, compute_stored, computed_fields, field_accessible, record_rule_domain,
-    related_path, resolve_all_registered, resolve_registered, Acl, ActionInput, Children, Ctx, Domain,
-    DomainError, FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
+    action_for, check_access, compute_stored, computed_fields, field_accessible, is_mailed,
+    record_rule_domain, related_path, resolve_all_registered, resolve_registered, Acl, ActionInput,
+    Children, Ctx, Domain, DomainError, FieldDef, FieldKind, Operation, RecordRule, ResolvedModel,
+    Value,
 };
 use meshble_schema::to_ddl;
 use serde_json::{Map, Value as Json};
@@ -926,12 +927,44 @@ impl Db {
             q = bind_query(q, v);
         }
         let affected = q.execute(&self.pool).await?.rows_affected();
+        // Polymorphic-integrity fix: a mailed record's thread (messages/activities/followers) is
+        // linked by (res_model, res_id), which the metamodel can't express as an FK. Clean it here —
+        // reliable because this is Meshble's ONLY delete path (unlike Odoo, where bulk SQL orphans it).
+        if affected > 0 && is_mailed(model.name) {
+            self.cleanup_thread(model.name, id).await?;
+        }
         for (parent, pid) in parents {
             self.recompute_parent(&parent, pid).await?;
         }
         Ok(affected)
     }
+
+    /// The database clock as an ISO-8601 string, for stamping mail messages/tracking/activities.
+    /// One clock (the DB) for every mail row, so ordering is consistent regardless of caller.
+    pub async fn now(&self) -> Result<String, DbError> {
+        Ok(sqlx::query_scalar::<_, String>("SELECT now()::text").fetch_one(&self.pool).await?)
+    }
+
+    /// Deletes a record's mail thread across all thread tables. Tolerates a thread table not being
+    /// migrated yet (the mail module may be linked but not installed) — nothing to clean, not an error.
+    async fn cleanup_thread(&self, model_name: &str, id: i64) -> Result<(), DbError> {
+        for table in THREAD_TABLES {
+            let sql = format!("DELETE FROM {table} WHERE res_model = $1 AND res_id = $2");
+            match sqlx::query(&sql).bind(model_name).bind(id).execute(&self.pool).await {
+                Ok(_) => {}
+                // 42P01 = undefined_table: the thread table isn't migrated; skip it.
+                Err(e) if e.as_database_error().and_then(|d| d.code()).as_deref() == Some("42P01") => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
+    }
 }
+
+/// Mail subsystem thread tables, all keyed by the polymorphic `(res_model, res_id)` link. Cleaned up
+/// when a mailed record is deleted (see [`Db::cleanup_thread`]). Listed here so the integrity hook
+/// covers every thread table even though the models land in separate mail slices.
+const THREAD_TABLES: &[&str] = &["mail_message", "mail_activity", "mail_follower"];
 
 /// Validates a write payload against the model: every key must be a writable stored column, every
 /// value must match its field kind, and `null` is rejected for required fields. With

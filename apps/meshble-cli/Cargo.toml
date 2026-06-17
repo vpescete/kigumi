@@ -18,6 +18,7 @@ meshble-server = { workspace = true }
 meshble-auth = { workspace = true }
 # Linked so their models/ACLs/rules self-register into the catalog (inventory).
 meshble-mod-base = { path = "../../modules/base" }
+meshble-mod-mail = { path = "../../modules/mail" }
 meshble-mod-sales = { path = "../../modules/sales" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 axum = "0.7"

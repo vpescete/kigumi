@@ -19,7 +19,7 @@ use axum::{
 use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{
-    Acl, Condition, Ctx, Domain, FieldKind, Operator, RecordRule, ResolvedModel, Value,
+    is_mailed, Acl, Condition, Ctx, Domain, FieldKind, Operator, RecordRule, ResolvedModel, Value,
 };
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
@@ -76,6 +76,9 @@ pub fn router_with_data(
             get(get_one_handler).patch(update_handler).delete(delete_handler),
         )
         .route("/api/:name/:id/action/:action", post(action_handler))
+        // Chatter (mail subsystem): a record's message thread. Gated by read access to the host.
+        .route("/api/:name/:id/messages", get(messages_handler))
+        .route("/api/:name/:id/message", post(post_message_handler))
         .with_state(AppState {
             models: Arc::new(models),
             data: Some(DataBackend {
@@ -453,6 +456,122 @@ async fn delete_handler(
 
 fn str_field<'a>(body: &'a Json2, key: &str) -> Option<&'a str> {
     body.get(key).and_then(|v| v.as_str())
+}
+
+/// Resolves the served `mail.message` model, or a 500 (the mail module isn't installed/served).
+fn mail_message_model(state: &AppState) -> Result<&ResolvedModel, Response> {
+    state
+        .models
+        .iter()
+        .find(|m| m.name == "mail.message")
+        .ok_or_else(|| internal_error("mail", "mail.message not served (mail module not installed)"))
+}
+
+/// Gates a chatter request: the host model must opt into mail, AND the caller must be able to READ
+/// the host record — you cannot see or post to the thread of a record you cannot read. The single
+/// access chokepoint for both thread endpoints (reuses the secured read path, no bespoke check).
+async fn chatter_gate(
+    state: &AppState,
+    backend: &DataBackend,
+    ctx: &Ctx,
+    name: &str,
+    id: i64,
+) -> Result<(), Response> {
+    let host = resolve_model(state, name)?;
+    if !is_mailed(name) {
+        return Err((StatusCode::BAD_REQUEST, format!("model '{name}' has no mail thread")).into_response());
+    }
+    match backend.db.find_one_secured(host, ctx, backend.acls, backend.rules, id).await {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err((StatusCode::NOT_FOUND, "not found or not permitted").into_response()),
+        Err(DbError::AccessDenied { .. }) => Err((StatusCode::FORBIDDEN, "access denied").into_response()),
+        Err(e) => Err(internal_error("chatter-gate", e)),
+    }
+}
+
+/// The polymorphic filter for one record's thread: `res_model = name AND res_id = id`.
+fn thread_filter(name: &str, id: i64) -> Domain {
+    Domain::Cond(Condition { field: "res_model".into(), op: Operator::Eq, value: Value::Str(name.to_string()) })
+        .and(Domain::Cond(Condition { field: "res_id".into(), op: Operator::Eq, value: Value::Int(id) }))
+}
+
+/// `GET /api/:name/:id/messages` — the record's message thread, oldest first (by id).
+async fn messages_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
+        return r;
+    }
+    let mail = match mail_message_model(&state) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    // The gate (host readable) IS the access decision; read the thread elevated so the framework
+    // isn't forced to grant users a blanket read ACL on mail.message (which would leak all threads).
+    let su = ctx.sudo();
+    let filter = thread_filter(&name, id);
+    match backend.db.find_secured(mail, &su, backend.acls, backend.rules, Some(&filter)).await {
+        Ok(rows) => json_response(serde_json::json!({ "data": rows }).to_string()),
+        Err(DbError::AccessDenied { .. }) => (StatusCode::FORBIDDEN, "access denied").into_response(),
+        Err(e) => internal_error("messages", e),
+    }
+}
+
+/// `POST /api/:name/:id/message` — post a comment (or log note) to the record's thread. The author
+/// is the authenticated caller; the timestamp is the DB clock. `notification` type is reserved for
+/// system tracking entries (a later slice), so only `comment`/`note` are accepted here.
+async fn post_message_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+    Json(body): Json<Json2>,
+) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = chatter_gate(&state, backend, &ctx, &name, id).await {
+        return r;
+    }
+    let mail = match mail_message_model(&state) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let text = match str_field(&body, "body") {
+        Some(s) if !s.trim().is_empty() => s.to_string(),
+        _ => return (StatusCode::BAD_REQUEST, "message body is required").into_response(),
+    };
+    let mtype = match str_field(&body, "message_type") {
+        None | Some("comment") => "comment",
+        Some("note") => "note",
+        Some(other) => return (StatusCode::BAD_REQUEST, format!("invalid message_type '{other}'")).into_response(),
+    };
+    let now = match backend.db.now().await {
+        Ok(t) => t,
+        Err(e) => return internal_error("clock", e),
+    };
+    let mut values = serde_json::Map::new();
+    values.insert("res_model".into(), Json2::String(name.clone()));
+    values.insert("res_id".into(), Json2::Number(id.into()));
+    values.insert("author_id".into(), Json2::Number(ctx.uid.into()));
+    values.insert("body".into(), Json2::String(text));
+    values.insert("message_type".into(), Json2::String(mtype.to_string()));
+    values.insert("date".into(), Json2::String(now));
+    // The gate authorized this post; author stays the real caller (ctx.uid above), but the insert
+    // runs elevated so users need no create ACL on mail.message (see the read path / mail ACLs).
+    let su = ctx.sudo();
+    match backend.db.insert_secured(mail, &su, backend.acls, backend.rules, &values).await {
+        Ok(mid) => json_status(StatusCode::CREATED, format!("{{\"id\": {mid}}}")),
+        Err(e) => write_error("message", e),
+    }
 }
 
 /// Issues an access + (stored) refresh token pair for `uid` with `groups` and company `scope`

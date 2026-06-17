@@ -9,10 +9,14 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "sales",
     version: "1.0.0",
     framework: ">=0.1, <0.2",
-    depends: &[ModuleDep { name: "base", req: "^1.0" }],
+    depends: &[ModuleDep { name: "base", req: "^1.0" }, ModuleDep { name: "mail", req: "^1.0" }],
     summary: "Sales order management",
 };
 meshble::register_module!(MANIFEST);
+
+// `sale.order` opts into the mail subsystem: it gains a chatter thread (messages now; tracking,
+// followers and activities in later slices), and the framework cleans that thread up on delete.
+meshble::register_mailed!("sale.order");
 
 /// The "base" of sale.order — now declared with `#[model]` (phase 2).
 /// The macro generates `ModelDescriptor` + `impl Model`; the field "types" are the DSL.
@@ -239,10 +243,10 @@ mod tests {
 
     #[test]
     fn module_closure_and_ownership() {
-        // Link base so its manifest/models are registered in this test binary.
-        let _ = meshble_mod_base::MANIFEST;
-        // Installing sales pulls in its dependency closure (base first, then sales).
-        assert_eq!(module_closure("sales").unwrap(), vec!["base", "sales"]);
+        // Link base and mail so their manifests/models are registered in this test binary.
+        let _ = (&meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+        // Installing sales pulls in its dependency closure, deps first (base, then mail, then sales).
+        assert_eq!(module_closure("sales").unwrap(), vec!["base", "mail", "sales"]);
         assert_eq!(module_closure("base").unwrap(), vec!["base"]);
         assert!(module_closure("nope").is_err(), "unknown module errors");
         // Each model maps to its owning module (the migration/serve gate).

@@ -9,12 +9,16 @@ repository.workspace = true
 
 [dependencies]
 meshble = { workspace = true }
-# Module dependency mirrors the manifest `depends` (base). Keeping Cargo deps and
+# Module dependency mirrors the manifest `depends` (base, mail). Keeping Cargo deps and
 # manifest deps aligned is intentional — a future lint can enforce the match.
 meshble-mod-base = { path = "../base", version = "1.0.0" }
+# sale.order opts into the mail subsystem (chatter), so sales depends on mail.
+meshble-mod-mail = { path = "../mail", version = "1.0.0" }
 
 [dev-dependencies]
 # Quote-to-order integration test exercises the models against a real database.
 meshble-db = { workspace = true }
+# Named in the test's link anchor so mail's inventory (manifest) is present in the test binary.
+meshble-mod-mail = { path = "../mail", version = "1.0.0" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde_json = "1"

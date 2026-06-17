@@ -1,0 +1,91 @@
+# Mini-design: subsystem `mail` per Meshble (headless-first, più snello di Odoo)
+
+> Analisi grounded sul sorgente Odoo 19 (`mail_thread.py` 5118L, `mail_message.py`, `mail_activity.py`,
+> `mail_followers.py`, `mail_tracking_value.py`). Obiettivo: **tenere i punti di forza, eliminare le
+> debolezze**, sfruttando il metamodello tipizzato + i registry compile-time + l'unico path di scrittura/
+> delete controllato di Meshble.
+
+## 1. Come fa Odoo (sintesi)
+Un modello "diventa" chatter aggiungendo `mail.thread` (+ `mail.activity.mixin`) al suo `_inherit`. Quattro
+tabelle condivise polimorfiche servono OGNI modello via `(res_model: Char, res_id: Integer)`:
+`mail.message` (log/commenti + audit), `mail.followers` (sottoscrizioni, con M2M ai `mail.message.subtype`),
+`mail.activity` (to-do con scadenza), `mail.notification` (consegna per-destinatario). Il tracking dei campi
+produce righe `mail.tracking.value` (colonne tipizzate sparse) postate come messaggio. In più: gateway email
+in ingresso (`mail.alias`), realtime bus/`Store()` per il client Discuss, e cron per coda mail + GC.
+
+## 2. Punti di forza da TENERE
+- **Opt-in riusabile**: una riga e un modello ha chatter/follower/activity/tracking, uniforme ovunque.
+- **Tabelle condivise**: una `mail.message` per tutti i modelli — niente proliferazione di tabelle per-modello.
+- **Tracking separato dai messaggi** ma renderizzato nello stesso thread (commenti umani + audit di sistema uniformi).
+- **`activity.state` DERIVATO dalla scadenza** (overdue/today/planned) → non va mai fuori sync, niente cron di "invecchiamento".
+- **Opt-in per-evento granulare** dei follower (un follower può seguire i commenti ma non i cambi di stato).
+- **Consegna/lettura per-destinatario** (unread, bounce) tracciabile.
+
+## 3. Debolezze da EVITARE
+- **NESSUNA integrità referenziale** sul link polimorfico (`res_model` Char + `res_id` Integer, no FK): orfani
+  alla cancellazione, GC manuale via override `unlink()`, lookup lenti senza i due indici compositi a mano.
+- **God-mixin da 5118 righe** (`mail_thread.py`): email-gateway + chatter + tracking + web-push + `Store` in un
+  unico AbstractModel con ~15 context-key. Non splittabile: non puoi adottare la chatter senza il gateway email.
+- **Tabella tracking sparsa** (~10 colonne tipizzate, una sola coppia non-null per riga); dispatch runtime stringly-typed.
+- **Subtype come tabella mutabile** la cui ogni modifica invalida una cache globale; indirezione + join in più sull'hot path.
+- **Fan-out notifiche**: una riga per destinatario per messaggio → tabelle enormi su record con molti follower + cron di GC.
+- **Accoppiamento al client web**: `Store()`/bus serializzano un grafo Discuss-shaped — il layer dati non è usabile headless.
+- **`activity_state` scritto 3 volte** (Python + 2 subquery SQL): tre fonti di verità per una regoletta.
+
+## 4. Design Meshble (più efficiente)
+
+### (a) Opt-in via REGISTRY, non god-mixin
+Un modello dichiara di essere "mailed" con un marker compile-time (side-registry come `register_acls!`/
+`external_tables`): `register_mailed!("sale.order")` → `MailedRegistration { model }` + `is_mailed(model)`.
+Il framework ITERA questo registry per: la pulizia alla cancellazione, il gating dell'API chatter (puoi postare
+solo su modelli mailed), e (futuro) le viste. **Niente mixin da 5000 righe, niente `_inherit` a runtime.**
+
+### (b) Modelli come normali `#[model]` Meshble (crate `modules/mail`)
+- `mail.message`: `res_model` Text, `res_id` Integer, `author_id` M2o(res.users), `message_type` Selection
+  (comment/notification/note), `body` Text, `date` **Datetime**, `parent_id` M2o(mail.message) per il threading.
+- `mail.activity`: `res_model`/`res_id`, `summary` Text, `date_deadline` **Date**, `user_id` M2o(res.users),
+  `active` Bool. Lo **state è DERIVATO** dalla scadenza nell'API (overdue/today/planned), niente colonna né cron.
+- `mail.follower`: `res_model`/`res_id`, `user_id` M2o(res.users), UNIQUE(res_model,res_id,user_id).
+- `mail.tracking`: `message_id` M2o(mail.message), `field` Text, `old_value` Text, `new_value` Text (valore
+  **serializzato dal `Value` tipizzato** — una sola coppia di colonne, non 10 sparse).
+
+### (c) Fix dell'integrità polimorfica — IL punto chiave
+Odoo non ha FK perché i record si cancellano per vie che bypassano l'ORM (SQL bulk, drop, uninstall). **Meshble
+ha UN SOLO path di delete** (`delete_secured`): aggiungo lì un **delete-cleanup hook** — quando si cancella un
+record di un modello mailed, si cancellano le sue righe `mail.message`/`mail.activity`/`mail.follower`
+(`WHERE res_model=? AND res_id=?`). Affidabile *perché* il path è unico (a differenza di Odoo). Più un indice
+composito `(res_model, res_id)`. Niente FK polimorfica fasulla, niente GC cron, niente CHECK a mano.
+
+### (d) Tracking che riusa il `Value` tipizzato
+Un campo `#[field(tracked)]` → registry `TrackedFieldRegistration`. Nel write path (`update_secured`), per un
+modello mailed, si diffano i valori vecchi/nuovi dei campi tracked e si crea UN messaggio `notification` con
+righe `mail.tracking` (old/new serializzati dal `Value`). Niente `track_visibility` runtime, niente snapshot
+precommit con chiavi f-string: il diff sfrutta il read del record già presente nel write path.
+
+### (e) API chatter HEADLESS (niente Store/bus)
+- `POST /api/:model/:id/message` (body, type?) → posta · `GET /api/:model/:id/messages` → thread (messaggi+tracking).
+- `POST /api/:model/:id/follow` / `unfollow` · `GET /api/:model/:id/followers`.
+- `POST /api/:model/:id/activity` (summary, date_deadline, user_id) · `GET /api/:model/:id/activities` ·
+  `POST /api/mail.activity/:id/done`.
+Tutto passa dal layer secured (post richiede Read sul record; ecc.). Risposta = JSON pulito, niente grafo Discuss.
+
+### (f) DROP / DEFER (esplicito)
+Gateway email in ingresso (`mail.alias`), bus/websocket/Discuss/`Store()`, web-push, **subtypes** (v1 = follow-all),
+e le righe `mail.notification` per-destinatario (l'unread si deriverà da messaggi + un marker last-read per utente,
+in una fetta successiva). Niente di tutto ciò serve a un ERP headless v1.
+
+## 5. Piano a fette (incrementi spedibili)
+1. **Fondazione** — `modules/mail` crate + `register_mailed!` (core registry) + modello `mail.message` + API
+   `POST/GET .../message(s)` + **delete-cleanup hook** in `delete_secured`. File: `modules/mail`, `core/registry.rs`,
+   `meshble/src/lib.rs` (macro), `meshble-db/src/lib.rs` (hook), `meshble-server/src/lib.rs` (routes), `cli` (link).
+2. **Tracking** — `#[field(tracked)]` registry + diff nel write path → messaggio `notification` + righe `mail.tracking`.
+3. **Activities** — `mail.activity` + API schedule/done/list, state derivato.
+4. **Followers** — `mail.follower` + follow/unfollow/list.
+5. **FE chatter** — widget chatter nel form generico (thread + box messaggio + activities).
+- **Retrofit**: marcare `sale.order` come mailed + tracciare `state`.
+
+## 6. Raccomandazione + rischi
+**Prima fetta**: la fondazione (registry opt-in + `mail.message` + post/list + cleanup hook) — è il minimo che
+rende la chatter reale ed è dove vivono le decisioni architetturali. **Rischio principale**: il link polimorfico —
+mitigato dal cleanup hook sull'unico delete path (forza di Meshble) + indice composito. Secondario: l'API chatter
+aggiunge route fuori dal pattern CRUD generico; vanno tenute coerenti col layer secured.

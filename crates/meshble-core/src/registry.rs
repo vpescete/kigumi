@@ -61,6 +61,25 @@ pub fn external_tables() -> Vec<&'static str> {
     inventory::iter::<ExternalTable>.into_iter().map(|e| e.model).collect()
 }
 
+/// A model that opts INTO the mail subsystem (chatter): it gains a thread of `mail.message`s,
+/// followers and activities, addressed by the polymorphic `(res_model, res_id)` link. Emitted by
+/// `register_mailed!`. Unlike Odoo's 5118-line `mail.thread` mixin, this is a one-line compile-time
+/// marker the framework iterates — to gate the chatter API and to clean up the thread on delete.
+pub struct MailedRegistration {
+    pub model: &'static str,
+}
+inventory::collect!(MailedRegistration);
+
+/// Names of all models that opted into the mail subsystem.
+pub fn mailed_models() -> Vec<&'static str> {
+    inventory::iter::<MailedRegistration>.into_iter().map(|e| e.model).collect()
+}
+
+/// Whether `model` has a mail thread (chatter enabled).
+pub fn is_mailed(model: &str) -> bool {
+    inventory::iter::<MailedRegistration>.into_iter().any(|e| e.model == model)
+}
+
 /// A related field (Odoo `related=`): a NON-stored, read-only mirror of a value reached by following
 /// a relational `path` (e.g. `order_id.currency_id`). Registered out-of-band (emitted by
 /// `#[field(related = "...")]`) so it adds no column to the metamodel — the value is resolved at read
