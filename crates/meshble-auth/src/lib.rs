@@ -209,10 +209,12 @@ mod tests {
         let ctx = auth.verify_access(&token).unwrap();
         assert_eq!(ctx.company_id, Some(2));
         assert_eq!(ctx.allowed_company_ids, vec![2, 5]);
-        assert!(ctx.company_scoped(), "a non-empty set activates isolation");
-        // No companies → unrestricted (the single-company default).
+        assert!(ctx.company_scoped(), "a non-empty set restricts to those companies");
+        // No companies → STILL company-scoped (M7 default-deny), but with an empty allowed set the
+        // caller sees only shared (NULL-company) rows — never everything. Only sudo is unrestricted.
         let plain = auth.verify_access(&auth.issue_access(7, vec![], None, vec![], 3600).unwrap()).unwrap();
-        assert!(!plain.company_scoped());
+        assert!(plain.company_scoped(), "a non-su caller is always company-scoped");
+        assert!(plain.allowed_company_ids.is_empty(), "no assignment → empty allowed set (shared-only)");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! M6 end-to-end: a user assigned to a company logs in and the access token carries that scope, so
 //! the secured data routes return only that company's rows — proving multi-company is enforced PER
-//! USER (no longer the empty=unrestricted stub). An unassigned user stays unrestricted, and the
-//! scope survives a token refresh. Requires `DATABASE_URL`; skipped otherwise.
+//! USER (no longer the empty=unrestricted stub). Under M7 default-deny an UNASSIGNED user sees only
+//! shared rows (here: none), and the scope survives a token refresh. Requires `DATABASE_URL`.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -108,10 +108,11 @@ async fn login_scopes_data_to_the_users_company() {
     let access2 = tok2["access_token"].as_str().unwrap().to_string();
     assert_eq!(visible_rows(app.clone(), &access2).await, 1, "scope survives refresh");
 
-    // An unassigned user is unrestricted (back-compat single-company default).
+    // M7 default-deny: an unassigned user is NOT god-mode — it sees only shared (NULL-company) rows,
+    // so with every row owned by a company it sees nothing.
     let (_, tokr) = post(app.clone(), "/auth/login", r#"{"login":"roamer","password":"pw"}"#).await;
     let accessr = tokr["access_token"].as_str().unwrap().to_string();
-    assert_eq!(visible_rows(app.clone(), &accessr).await, 2, "unassigned user sees every company");
+    assert_eq!(visible_rows(app.clone(), &accessr).await, 0, "unassigned user sees no company-owned rows");
 
     setup.drop_table(&m).await.unwrap();
     sqlx::query("DROP TABLE IF EXISTS csa_company").execute(setup.pool()).await.unwrap();

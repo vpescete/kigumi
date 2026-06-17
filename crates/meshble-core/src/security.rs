@@ -84,9 +84,14 @@ impl Ctx {
     pub fn is_su(&self) -> bool {
         self.su
     }
-    /// True iff the caller has a company restriction the engine should enforce (non-sudo + a set).
+    /// True iff the caller is subject to company scoping — i.e. ANY non-superuser. A non-su caller is
+    /// always company-restricted: with an allowed set they see those companies (plus shared rows);
+    /// with an EMPTY set they see only shared (NULL-company) rows — default-deny, never "see
+    /// everything". Only `sudo` is unrestricted. (Before M7 an empty set meant unrestricted; that
+    /// god-mode stub is now closed, mirroring Odoo where `res.users.company_id` is required so an
+    /// "unassigned, sees-all" user cannot exist and only the superuser bypasses company scoping.)
     pub fn company_scoped(&self) -> bool {
-        !self.su && !self.allowed_company_ids.is_empty()
+        !self.su
     }
 }
 

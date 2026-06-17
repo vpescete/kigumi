@@ -71,8 +71,9 @@ async fn record_rule_filters_through_a_relation() {
     sqlx::query("INSERT INTO rel_doc (title, company_id) VALUES ('acme-doc', $1), ('globex-doc', $2)")
         .bind(acme).bind(globex).execute(db.pool()).await.unwrap();
 
-    // Group "u" with the relation rule sees only docs whose company is Acme.
-    let ctx = Ctx::new(1, vec!["u".to_string()]);
+    // Caller is in both companies (so the M7 company filter admits both docs); the relation record
+    // rule then restricts to docs whose company is Acme.
+    let ctx = Ctx::new(1, vec!["u".to_string()]).in_companies(acme, vec![acme, globex]);
     let rows = db.find_secured(&doc, &ctx, ACLS, RULES, None).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["title"], "acme-doc");

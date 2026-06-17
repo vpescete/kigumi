@@ -73,10 +73,20 @@ async fn company_scope_isolates_rows() {
     assert_eq!(names(&rows), vec!["in-c1", "shared"], "C1 caller sees only C1 + shared");
     assert_eq!(db.count_secured(&doc, &in_c1, ACLS, RULES, None).await.unwrap(), 2, "count is company-scoped too");
 
-    // Unscoped (empty allowed — the M2 stub) and sudo see all three.
+    // M7 default-deny: an unassigned (empty allowed) non-su caller sees ONLY shared (NULL-company)
+    // rows — never everything. Only sudo is unrestricted.
     let unscoped = Ctx::new(1, vec!["u".to_string()]);
-    assert_eq!(db.find_secured(&doc, &unscoped, ACLS, RULES, None).await.unwrap().len(), 3);
-    assert_eq!(db.find_secured(&doc, &su, ACLS, RULES, None).await.unwrap().len(), 3);
+    assert_eq!(
+        names(&db.find_secured(&doc, &unscoped, ACLS, RULES, None).await.unwrap()),
+        vec!["shared"],
+        "unassigned caller sees only the shared row"
+    );
+    assert_eq!(db.find_secured(&doc, &su, ACLS, RULES, None).await.unwrap().len(), 3, "sudo sees all");
+    // ...and an unassigned caller cannot CREATE a company-scoped row (no active company to assign).
+    assert!(
+        db.insert_secured(&doc, &unscoped, ACLS, RULES, serde_json::json!({ "name": "x" }).as_object().unwrap()).await.is_err(),
+        "unassigned caller cannot create a company-scoped row"
+    );
 
     // find_one across the boundary is invisible; update/delete are no-ops.
     assert!(db.find_one_secured(&doc, &in_c1, ACLS, RULES, d2).await.unwrap().is_none(), "C2 doc not readable by C1");

@@ -283,6 +283,16 @@ async fn bootstrap_admin(db: &Db) -> Fallible {
         Ok(p) if !p.is_empty() => {
             db.upsert_user("admin", &hash_password(&p)?, &["user", "sales.user", "sales.manager", "admin"])
                 .await?;
+            // M7 default-deny: a user with no company sees only shared rows. Assign the admin to every
+            // existing company so it can operate. (Companies created later must be granted explicitly —
+            // Odoo behaves the same; only the superuser bypasses company scoping.)
+            if let Ok(company) = resolve_registered("res.company") {
+                let su = Ctx::new(0, vec![]).sudo();
+                let ids = db.find_ids_secured(&company, &su, &[], &[], None).await?;
+                if let Some(&first) = ids.first() {
+                    db.set_user_companies("admin", Some(first), &ids).await?;
+                }
+            }
             println!("bootstrapped admin user");
         }
         _ => eprintln!("warning: no admin user; set MESHBLE_ADMIN_PASSWORD to bootstrap one"),

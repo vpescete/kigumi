@@ -996,9 +996,11 @@ fn parse_o2m_command(field: &str, item: &Json) -> Result<O2mCommand, DbError> {
     })
 }
 
-/// The multi-company restriction for a company-scoped model, or None when the caller is unrestricted
-/// (sudo / empty allowed set) or the model has no `company_id`. A NULL company_id is a SHARED record,
-/// visible to every company (matching Odoo's multi-company semantics).
+/// The multi-company restriction for a company-scoped model, or None when the caller is sudo
+/// (unrestricted) or the model has no `company_id`. A non-superuser is ALWAYS restricted (M7
+/// default-deny): an allowed set yields `company_id IN (allowed) OR IS NULL`; an EMPTY set yields
+/// `company_id IS NULL` only — an unassigned user sees only shared records, never everything. A NULL
+/// company_id is a SHARED record, visible to every company (matching Odoo's multi-company semantics).
 fn company_filter(model: &ResolvedModel, ctx: &Ctx) -> Option<Domain> {
     if !ctx.company_scoped() {
         return None;
@@ -1010,11 +1012,12 @@ fn company_filter(model: &ResolvedModel, ctx: &Ctx) -> Option<Domain> {
     if !scoped {
         return None;
     }
-    Some(
-        Domain::field("company_id")
-            .in_(ctx.allowed_company_ids.clone())
-            .or(Domain::field("company_id").is_null()),
-    )
+    let shared = Domain::field("company_id").is_null();
+    Some(if ctx.allowed_company_ids.is_empty() {
+        shared // default-deny: no assignment → only shared (NULL-company) rows
+    } else {
+        Domain::field("company_id").in_(ctx.allowed_company_ids.clone()).or(shared)
+    })
 }
 
 /// SQL fragment ` AND (<company filter>)` for the id-based write / read-one paths, appending its
@@ -1029,11 +1032,11 @@ fn company_clause(model: &ResolvedModel, ctx: &Ctx, params: &mut Vec<Value>) -> 
 
 /// Enforces multi-company scoping on a WRITE payload for a company-scoped model (a Many2one named
 /// `company_id`). The single chokepoint reused by parent create, nested child create, and update.
-/// For a scoped caller (non-sudo, non-empty allowed set): an explicit `company_id` must be a non-null
-/// id WITHIN the allowed set (no writing a row into a foreign company; no NULL, which would publish a
-/// row as shared/visible to everyone); an unset `company_id` on CREATE is defaulted to the caller's
-/// active company. sudo and unrestricted callers are unaffected (create still defaults to the active
-/// company when one is set).
+/// For a restricted caller (any non-sudo user, M7 default-deny): an explicit `company_id` must be a
+/// non-null id WITHIN the allowed set (no writing a row into a foreign company; no NULL, which would
+/// publish a row as shared/visible to everyone); an unset `company_id` on CREATE is defaulted to the
+/// caller's active company, and a caller with no active company cannot create a company-scoped row.
+/// Only sudo is unaffected (create still defaults to the active company when one is set).
 fn apply_company_scope(
     model: &ResolvedModel,
     ctx: &Ctx,
@@ -1047,8 +1050,8 @@ fn apply_company_scope(
     if !scoped_model {
         return Ok(());
     }
-    // company_scoped() is non-sudo AND a non-empty allowed set, so sudo / unrestricted callers fall
-    // through to permissive behavior (create still defaults to an active company when one is set).
+    // company_scoped() is now "any non-sudo caller" (M7 default-deny), so only sudo falls through to
+    // permissive behavior (create still defaults to an active company when one is set).
     let restricted = ctx.company_scoped();
     let denied =
         |op: &'static str| DbError::AccessDenied { model: model.name.to_string(), operation: op };
@@ -1082,7 +1085,7 @@ fn apply_company_scope(
                         "company_id is required (no single active company in scope)".to_string(),
                     ))
                 }
-                None => {} // unrestricted, no active company → leave NULL (M2 stub)
+                None => {} // sudo only, no active company → leave NULL (shared)
             }
         }
         None => {}
