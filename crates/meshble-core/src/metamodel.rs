@@ -112,6 +112,13 @@ pub fn resolve(
 /// Verifies that each `depends` points to an existing field (first segment of the path).
 /// Antidote to Odoo's silent N+1: a broken dependency is an error, not a runtime bug.
 pub fn validate_depends(m: &ResolvedModel) -> Result<(), String> {
+    validate_depends_with_extra(m, &[])
+}
+
+/// Like [`validate_depends`], but `extra` lists additional valid first-segment names — the `_inherits`
+/// delegated fields, which have no column on `m` yet are readable on the record (so an on-read compute
+/// may depend on, e.g., the inherited `name`). The registry passes the delegated names here.
+pub fn validate_depends_with_extra(m: &ResolvedModel, extra: &[&str]) -> Result<(), String> {
     for f in &m.fields {
         // A non-stored (on-read) compute is evaluated same-record with no children loaded, so it
         // cannot aggregate over a relation. A dotted dependency there would silently read empty and
@@ -126,7 +133,7 @@ pub fn validate_depends(m: &ResolvedModel) -> Result<(), String> {
                 ));
             }
             let first = dep.split('.').next().unwrap_or(dep);
-            if !m.fields.iter().any(|x| x.name == first) {
+            if !m.fields.iter().any(|x| x.name == first) && !extra.contains(&first) {
                 return Err(format!(
                     "the field '{}' depends on a non-existent field '{}' (in \"{}\")",
                     f.name, first, dep

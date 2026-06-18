@@ -6,8 +6,8 @@
 //! monkey-patch that mutates a class at runtime.
 
 use crate::{
-    resolve, resolve_module_set, validate_depends, Acl, FieldDef, FieldKind, ModelDescriptor,
-    ModuleManifest, RecordRule, ResolutionError, ResolvedModel, FRAMEWORK_VERSION,
+    resolve, resolve_module_set, validate_depends_with_extra, Acl, FieldDef, FieldKind,
+    ModelDescriptor, ModuleManifest, RecordRule, ResolutionError, ResolvedModel, FRAMEWORK_VERSION,
 };
 
 /// Registration of a base model (emitted by `#[model]`).
@@ -427,7 +427,19 @@ pub fn resolve_registered(model: &str) -> Result<ResolvedModel, String> {
 
     let ext_fields: Vec<&'static [FieldDef]> = exts.iter().map(|e| (e.fields)()).collect();
     let m = resolve((base.descriptor)(), &ext_fields)?;
-    validate_depends(&m)?;
-    validate_inherits(model, &m)?; // delegation: acyclic chain, valid via FK, no name collision
+    // Delegation first: confirms the chain is acyclic + the parent resolves (so `parent_delegatable`
+    // below is safe and can't recurse into this model).
+    validate_inherits(model, &m)?;
+    // An on-read compute may depend on an inherited (delegated) field, which has no column on this
+    // model — compute the delegated names from the PARENT (never re-resolving this model) and allow them.
+    let delegated_names: Vec<&str> = match inherits_of(model) {
+        Some((parent, _via)) => parent_delegatable(parent)?
+            .into_iter()
+            .filter(|d| !m.fields.iter().any(|f| f.name == d.name))
+            .map(|d| d.name)
+            .collect(),
+        None => Vec::new(),
+    };
+    validate_depends_with_extra(&m, &delegated_names)?;
     Ok(m)
 }

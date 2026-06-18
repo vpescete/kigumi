@@ -134,6 +134,11 @@ pub struct ProductProduct {
     #[field(label = "Barcode")]
     barcode: Text,
 
+    // On-read display name: the (inherited) template name with the internal reference appended. Derived
+    // on every read — `name` is delegated from the template, `default_code` is the variant's own field.
+    #[field(label = "Display Name", compute = "product_display_name", depends = "name,default_code")]
+    display_name: Text,
+
     // The variant's OWN active flag, intentionally shadowing product.template.active: archiving one
     // variant (the generator does this when a combination is no longer selected) must not touch the
     // shared template or the other variants. Read/written on product.product, never delegated.
@@ -284,6 +289,14 @@ fn compute_line_subtotal(i: &ComputeInput) -> Value {
 fn compute_line_margin(i: &ComputeInput) -> Value {
     Value::Decimal((i.decimal("price_unit") - i.decimal("purchase_price")) * i.decimal("product_uom_qty"))
 }
+/// A variant's display name: the (inherited) template name, with the internal reference in parentheses
+/// when one is set. On-read — reads the delegated `name` and the variant's own `default_code`.
+fn product_display_name(i: &ComputeInput) -> Value {
+    let name = i.str("name");
+    let code = i.str("default_code");
+    Value::Str(if code.is_empty() { name.to_string() } else { format!("{name} ({code})") })
+}
+meshble::register_compute!("product_display_name", product_display_name);
 meshble::register_compute!("compute_amount", compute_amount);
 meshble::register_compute!("compute_margin", compute_margin);
 meshble::register_compute!("compute_line_subtotal", compute_line_subtotal);

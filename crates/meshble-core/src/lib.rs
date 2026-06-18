@@ -21,7 +21,7 @@ pub use compute::{compute_fn, compute_on_read, compute_stored, computed_fields, 
 pub use constraints::{check_constraints, has_constraints, ConstraintFn, ConstraintRegistration};
 pub use domain::{json_string, Condition, Domain, DomainError, FieldBuilder, Operator, Sql, Value};
 pub use manifest::{check_compat, resolve_module_set, ModuleDep, ModuleManifest, ResolutionError};
-pub use metamodel::{resolve, validate_depends, FieldDef, FieldKind, Model, ModelDescriptor, ResolvedModel};
+pub use metamodel::{resolve, validate_depends, validate_depends_with_extra, FieldDef, FieldKind, Model, ModelDescriptor, ResolvedModel};
 pub use registry::{
     delegated_fields, external_tables, inherits_of, is_mailed, mailed_models, migration_plan,
     module_closure, module_of, registered_acls, registered_group_names, registered_model_names,
