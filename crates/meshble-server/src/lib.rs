@@ -77,6 +77,8 @@ pub fn router_with_data(
             get(get_one_handler).patch(update_handler).delete(delete_handler),
         )
         .route("/api/:name/:id/action/:action", post(action_handler))
+        // Variant generation: materialize a product.template's attribute combinations into variants.
+        .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
         // Chatter (mail subsystem): a record's message thread. Gated by read access to the host.
         .route("/api/:name/:id/messages", get(messages_handler))
         .route("/api/:name/:id/message", post(post_message_handler))
@@ -439,6 +441,36 @@ async fn action_handler(
     match backend.db.run_action(model, &ctx, backend.acls, backend.rules, id, &action).await {
         Ok(()) => json_response(format!("{{\"ok\":true,\"action\":{}}}", serde_json::to_string(&action).unwrap_or_default())),
         Err(e) => write_error("action", e),
+    }
+}
+
+/// Generates `product.product` variants for a `product.template` (the cartesian product of its
+/// attribute lines). v1: product-template-specific, so the path name is pinned. Authorization +
+/// reconciliation live in the db layer; this handler only authenticates and shapes the response.
+async fn generate_variants_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    if name != "product.template" {
+        return (StatusCode::BAD_REQUEST, "generate_variants is only valid on product.template")
+            .into_response();
+    }
+    // 404 if product.template is not served (its module isn't installed).
+    if let Err(r) = resolve_model(&state, &name) {
+        return r;
+    }
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.generate_variants(&ctx, backend.acls, backend.rules, id).await {
+        Ok(o) => json_response(
+            serde_json::json!({ "created": o.created, "archived": o.archived, "kept": o.kept })
+                .to_string(),
+        ),
+        Err(e) => write_error("generate_variants", e),
     }
 }
 

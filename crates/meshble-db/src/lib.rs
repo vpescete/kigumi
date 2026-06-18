@@ -29,7 +29,7 @@ use serde_json::{Map, Value as Json};
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use sqlx::query::{Query, QueryScalar};
 use sqlx::{PgPool, Postgres, Row};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug)]
 pub enum DbError {
@@ -89,6 +89,27 @@ pub struct ListPage {
     pub data: Vec<Json>,
     pub total: i64,
 }
+
+/// The result of a variant-generation run: which `product.product` ids were created, archived, or
+/// left in place. Returned to the caller as a summary (slice 2 only ever creates; archive/keep are
+/// populated once reconciliation lands).
+#[derive(Debug, Default)]
+pub struct GenerateOutcome {
+    pub created: Vec<i64>,
+    pub archived: Vec<i64>,
+    pub kept: Vec<i64>,
+}
+
+// The product-variant model graph the generator operates on. Hardcoded here (like the mail
+// subsystem's table names) rather than threaded through a generic API for a single caller.
+const VG_TEMPLATE: &str = "product.template";
+const VG_VARIANT: &str = "product.product";
+const VG_LINE: &str = "product.template.attribute.line";
+const VG_PTAV: &str = "product.template.attribute.value";
+const VG_ATTRIBUTE: &str = "product.attribute";
+/// Hard cap on variants produced by one call — a runaway cartesian product (5 attributes x 10 values
+/// = 100k rows) must not explode the table in a single request.
+const MAX_VARIANTS: usize = 1000;
 
 impl Db {
     /// Connects to `url` (e.g. `postgres://user@host/db`).
@@ -408,6 +429,29 @@ impl Db {
         rules: &[RecordRule],
         values: &Map<String, Json>,
     ) -> Result<i64, DbError> {
+        let mut tx = self.pool.begin().await?;
+        let (id, record) = self.insert_secured_in_tx(model, ctx, acls, rules, values, &mut tx).await?;
+        tx.commit().await?;
+        // Grandparents are a separate aggregate (single-level by design); recompute post-commit. The
+        // call is idempotent (it reads current state), so a retry repairs it.
+        self.recompute_parents_of(model, &record).await?;
+        Ok(id)
+    }
+
+    /// The full secured create — ACL + D6, payload split, `_inherits` parent create/update, the row
+    /// itself, nested One2many children, and Many2many sets — all on the caller's transaction `tx`,
+    /// returning the new id and its column record. [`Db::insert_secured`] wraps this with begin/commit
+    /// and the post-commit grandparent recompute; the variant generator calls it repeatedly on ONE
+    /// transaction so a whole batch of variants (and their join rows) commits atomically.
+    async fn insert_secured_in_tx(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        values: &Map<String, Json>,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+    ) -> Result<(i64, BTreeMap<String, Value>), DbError> {
         if !check_access(Operation::Create, model.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "create" });
         }
@@ -415,8 +459,6 @@ impl Db {
         // Split the payload: scalar columns, One2many child-create payloads, Many2many sets, and
         // (_inherits) delegated parent fields.
         let (mut scalars, nested, m2m, delegated) = split_nested(model, values)?;
-
-        let mut tx = self.pool.begin().await?;
 
         // _inherits: the required `via` FK must point at a parent carrying the delegated fields. If the
         // caller gave `via`, update that existing parent with the delegated keys; otherwise auto-create
@@ -430,7 +472,7 @@ impl Db {
                     let pid = scalars.get(via).and_then(|v| v.as_i64()).ok_or_else(|| {
                         DbError::BadInput(format!("_inherits via '{via}' must be an integer id"))
                     })?;
-                    self.update_delegated_parent(&parent_model, ctx, acls, rules, pid, &delegated, &mut tx).await?;
+                    self.update_delegated_parent(&parent_model, ctx, acls, rules, pid, &delegated, tx).await?;
                 }
             } else {
                 if !check_access(Operation::Create, parent_model.name, ctx, acls) {
@@ -442,32 +484,27 @@ impl Db {
                 check_writable_fields(&parent_model, ctx, &delegated)?;
                 let mut pscalars = delegated.clone();
                 let (pid, _) =
-                    self.insert_scalars_in_tx(&parent_model, ctx, rules, &mut pscalars, &mut tx).await?;
+                    self.insert_scalars_in_tx(&parent_model, ctx, rules, &mut pscalars, tx).await?;
                 scalars.insert(via.to_string(), Json::from(pid));
             }
         }
 
         // Insert the child row itself (full secured-create treatment), in the same transaction.
-        let (id, record) = self.insert_scalars_in_tx(model, ctx, rules, &mut scalars, &mut tx).await?;
+        let (id, record) = self.insert_scalars_in_tx(model, ctx, rules, &mut scalars, tx).await?;
 
         // Nested One2many children: create-only on a brand-new parent, in the SAME transaction with
         // child ACL + record rules re-checked. Then recompute this parent's own aggregate from the
         // just-inserted children IN THIS TRANSACTION, so the row, children and aggregate commit
         // atomically. The parent is brand-new (its id is invisible to other txns) → no advisory lock.
         if !nested.is_empty() {
-            self.apply_nested_in_tx(&mut tx, ctx, acls, rules, &nested, id, false).await?;
-            recompute_columns_on(&mut tx, model, id).await?;
+            self.apply_nested_in_tx(tx, ctx, acls, rules, &nested, id, false).await?;
+            recompute_columns_on(tx, model, id).await?;
         }
         // Many2many sets, in the same transaction (atomic with the row + children).
         if !m2m.is_empty() {
-            apply_m2m_in_tx(&mut tx, id, &m2m).await?;
+            apply_m2m_in_tx(tx, id, &m2m).await?;
         }
-        tx.commit().await?;
-
-        // Grandparents are a separate aggregate (single-level by design); recompute post-commit. The
-        // call is idempotent (it reads current state), so a retry repairs it.
-        self.recompute_parents_of(model, &record).await?;
-        Ok(id)
+        Ok((id, record))
     }
 
     /// Inserts a row from a SCALAR-only payload inside `tx` with the full secured-create treatment
@@ -1001,6 +1038,189 @@ impl Db {
             return Err(DbError::BadInput("record not found or not permitted".to_string()));
         }
         Ok(())
+    }
+
+    /// Generates `product.product` variants for a template as the cartesian product of its attribute
+    /// lines' selected values. Slice 2: create-only (assumes no existing variants); reconciliation
+    /// (keep/archive/reactivate) lands in the next slice.
+    ///
+    /// Authorization mirrors an action: WRITE on `product.template` — which the ACL already restricts
+    /// to managers — plus template visibility. The actual creation then runs ELEVATED (after the gate,
+    /// like the mail subsystem): the join rows are engine-owned and not user-writable, and a manager
+    /// creating variants implicitly creates them. Every join row and every variant commits in ONE
+    /// transaction, so a failure mid-batch leaves no partial variant set.
+    pub async fn generate_variants(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        template_id: i64,
+    ) -> Result<GenerateOutcome, DbError> {
+        let template = resolve_registered(VG_TEMPLATE).map_err(DbError::BadInput)?;
+        let variant = resolve_registered(VG_VARIANT).map_err(DbError::BadInput)?;
+        let line_model = resolve_registered(VG_LINE).map_err(DbError::BadInput)?;
+        let ptav = resolve_registered(VG_PTAV).map_err(DbError::BadInput)?;
+        let attribute = resolve_registered(VG_ATTRIBUTE).map_err(DbError::BadInput)?;
+
+        // Gate: WRITE on the template (manager-only via ACL) + the template must be visible to the
+        // caller, so generation can't be aimed at a template the caller cannot see.
+        if !check_access(Operation::Write, template.name, ctx, acls) {
+            return Err(DbError::AccessDenied {
+                model: template.name.to_string(),
+                operation: "generate_variants",
+            });
+        }
+        if self.find_one_secured(&template, ctx, acls, rules, template_id).await?.is_none() {
+            return Err(DbError::BadInput("template not found or not permitted".to_string()));
+        }
+
+        // Past the gate, the engine's own reads/writes run elevated (the join rows are not user-writable).
+        let su = ctx.sudo();
+
+        // Read the template's attribute lines and their selected values (M2M projected as an id array).
+        let lines = self
+            .find_secured(&line_model, &su, acls, rules, Some(&Domain::field("product_tmpl_id").eq(template_id)))
+            .await?;
+
+        struct Line {
+            id: i64,
+            attribute_id: i64,
+            value_ids: Vec<i64>,
+        }
+        let mut parsed: Vec<Line> = Vec::new();
+        for l in &lines {
+            let id = l["id"].as_i64().ok_or_else(|| DbError::BadInput("attribute line missing id".into()))?;
+            let attribute_id = l["attribute_id"].as_i64().unwrap_or(0);
+            let mut value_ids: Vec<i64> = l["value_ids"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_i64()).collect())
+                .unwrap_or_default();
+            value_ids.sort_unstable(); // deterministic combo order, independent of array_agg
+            value_ids.dedup();
+            if value_ids.is_empty() {
+                continue; // a line with no selected values contributes nothing
+            }
+            parsed.push(Line { id, attribute_id, value_ids });
+        }
+
+        // Exclude `no_variant` attributes (informational only — they never multiply variants). Read by
+        // id directly: `id` is the implicit PK, not a domain-addressable field.
+        let attr_ids: Vec<i64> = parsed.iter().map(|l| l.attribute_id).collect();
+        if !attr_ids.is_empty() {
+            let sql = format!(
+                "SELECT id FROM {} WHERE create_variant = 'no_variant' AND id = ANY($1)",
+                attribute.table
+            );
+            let no_variant: HashSet<i64> = sqlx::query_scalar::<Postgres, i64>(&sql)
+                .bind(&attr_ids)
+                .fetch_all(&self.pool)
+                .await?
+                .into_iter()
+                .collect();
+            parsed.retain(|l| !no_variant.contains(&l.attribute_id));
+        }
+
+        // Bound the product before building it (saturating, so a huge product can't overflow usize).
+        let mut total: usize = 1;
+        for l in &parsed {
+            total = total.saturating_mul(l.value_ids.len());
+            if total > MAX_VARIANTS {
+                return Err(DbError::BadInput(format!("variant count exceeds the cap of {MAX_VARIANTS}")));
+            }
+        }
+
+        // Cartesian product → each combo is one (line_id, value_id) per line. Zero lines yields a
+        // single empty combo (a template with no variant attributes still has one variant — Odoo parity).
+        let mut combos: Vec<Vec<(i64, i64)>> = vec![Vec::new()];
+        for l in &parsed {
+            let mut next = Vec::with_capacity(combos.len() * l.value_ids.len());
+            for combo in &combos {
+                for &v in &l.value_ids {
+                    let mut c = combo.clone();
+                    c.push((l.id, v));
+                    next.push(c);
+                }
+            }
+            combos = next;
+        }
+
+        // One transaction: ensure each cell's join row exists (reused across combos), then create a
+        // variant per combo carrying its PTAV set + the template FK (so `_inherits` links the existing
+        // template, never a duplicate).
+        let mut tx = self.pool.begin().await?;
+        // Serialize concurrent generations of the SAME template: without this, two callers could each
+        // miss an existing join row in their cell lookup and both insert it (duplicate PTAV cell). The
+        // lock releases at commit; it also gives the slice-3 reconciliation a consistent snapshot.
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+            .bind(format!("variants:product_template:{template_id}"))
+            .execute(&mut *tx)
+            .await?;
+        let mut cell_ptav: HashMap<(i64, i64), i64> = HashMap::new();
+        let mut created: Vec<i64> = Vec::with_capacity(combos.len());
+        for combo in &combos {
+            let mut ptav_ids: Vec<i64> = Vec::with_capacity(combo.len());
+            for &(line_id, value_id) in combo {
+                let pid = match cell_ptav.get(&(line_id, value_id)) {
+                    Some(&p) => p,
+                    None => {
+                        let p = self
+                            .ensure_ptav_in_tx(&ptav, &su, acls, rules, &mut tx, template_id, line_id, value_id)
+                            .await?;
+                        cell_ptav.insert((line_id, value_id), p);
+                        p
+                    }
+                };
+                ptav_ids.push(pid);
+            }
+            let payload = serde_json::json!({
+                "product_tmpl_id": template_id,
+                "product_template_attribute_value_ids": ptav_ids,
+            });
+            let (vid, _) = self
+                .insert_secured_in_tx(&variant, &su, acls, rules, payload.as_object().unwrap(), &mut tx)
+                .await?;
+            created.push(vid);
+        }
+        tx.commit().await?;
+
+        Ok(GenerateOutcome { created, archived: Vec::new(), kept: Vec::new() })
+    }
+
+    /// Returns the `product.template.attribute.value` id for (line, value), creating it elevated if
+    /// absent. The caller (`generate_variants`) holds a per-template advisory lock, so the
+    /// lookup-then-insert is race-free against another generation of the same template.
+    #[allow(clippy::too_many_arguments)]
+    async fn ensure_ptav_in_tx(
+        &self,
+        ptav: &ResolvedModel,
+        su: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        template_id: i64,
+        line_id: i64,
+        value_id: i64,
+    ) -> Result<i64, DbError> {
+        let lookup = format!(
+            "SELECT id FROM {} WHERE attribute_line_id = $1 AND product_attribute_value_id = $2",
+            ptav.table
+        );
+        if let Some(id) = sqlx::query_scalar::<Postgres, i64>(&lookup)
+            .bind(line_id)
+            .bind(value_id)
+            .fetch_optional(&mut **tx)
+            .await?
+        {
+            return Ok(id);
+        }
+        let payload = serde_json::json!({
+            "product_tmpl_id": template_id,
+            "attribute_line_id": line_id,
+            "product_attribute_value_id": value_id,
+        });
+        let (id, _) =
+            self.insert_secured_in_tx(ptav, su, acls, rules, payload.as_object().unwrap(), tx).await?;
+        Ok(id)
     }
 
     /// Recomputes `parent`'s aggregate computed columns from its current children (a direct UPDATE,
