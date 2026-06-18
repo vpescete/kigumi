@@ -10,11 +10,12 @@ pub mod prelude {
         action_for, check_access, check_compat, compute_fn, compute_stored, computed_fields,
         delegated_fields, external_tables, field_accessible, field_required_groups, inherits_of,
         is_mailed, json_string, mailed_models, migration_plan, module_closure, module_of,
+        check_constraints, has_constraints, has_read_computes, compute_on_read,
         record_rule_domain, registered_acls, registered_group_names, registered_model_names,
         registered_rules, related_path, resolve, resolve_all_registered, resolve_module_set,
         resolve_modules, resolve_registered, tracked_fields, validate_depends, Acl, AclRegistration,
         ActionFn, ActionInput, ActionOutcome, ActionRegistration, ComputeFn, ComputeInput,
-        ComputeRegistration, Condition, Ctx, DelegatedField, Domain, DomainError, ExternalTable,
+        ComputeRegistration, ConstraintFn, ConstraintRegistration, Condition, Ctx, DelegatedField, Domain, DomainError, ExternalTable,
         FieldBuilder, FieldDef, FieldExtension, FieldGroupRegistration, FieldKind,
         InheritsRegistration, MailedRegistration, MigrationTarget, Model, ModelDescriptor,
         ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
@@ -44,6 +45,20 @@ macro_rules! register_compute {
     ($name:expr, $func:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::ComputeRegistration { name: $name, func: $func }
+        }
+    };
+}
+
+/// Registers a cross-record constraint (Odoo `@api.constrains`): `func` runs in the write transaction
+/// after the record + its children are written, and returns `Err(msg)` to reject (roll back) the write.
+/// `fields` are the triggers (empty = every write); list the WRITTEN fields and One2many field names
+/// that drive the invariant, plus any stored computed field it reads (those also trigger on update).
+/// Use at module top level: `meshble::register_constraint!("account.move", &["line_ids"], check_balanced);`
+#[macro_export]
+macro_rules! register_constraint {
+    ($model:expr, $fields:expr, $func:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::ConstraintRegistration { model: $model, fields: $fields, func: $func }
         }
     };
 }

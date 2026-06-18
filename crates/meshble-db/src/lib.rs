@@ -19,9 +19,9 @@ pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
-    action_for, check_access, compute_on_read, compute_stored, computed_fields, delegated_fields,
-    field_accessible, has_read_computes, inherits_of, is_mailed, record_rule_domain, related_path,
-    resolve_all_registered,
+    action_for, check_access, check_constraints, compute_on_read, compute_stored, computed_fields,
+    delegated_fields, field_accessible, has_constraints, has_read_computes, inherits_of, is_mailed,
+    record_rule_domain, related_path, resolve_all_registered,
     resolve_registered, tracked_fields, Acl, ActionInput, Children, Ctx, Domain, DomainError,
     FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
 };
@@ -507,6 +507,11 @@ impl Db {
         if !m2m.is_empty() {
             apply_m2m_in_tx(tx, id, &m2m).await?;
         }
+        // @api.constrains: validate the new record (+ its children) in-tx; a violation rolls it back.
+        // On create the whole record is new, so every constraint runs.
+        if has_constraints(model.name) {
+            check_constraints_in_tx(model, tx, id, None).await?;
+        }
         Ok((id, record))
     }
 
@@ -758,6 +763,19 @@ impl Db {
                 .execute(&mut *tx)
                 .await?;
             recompute_columns_on(&mut tx, model, id).await?;
+        }
+
+        // @api.constrains: validate the updated record (+ children) in-tx, AFTER the recompute so the
+        // constraint sees final computed values; a violation rolls the whole write back. Depends-scoped:
+        // a constraint runs only if one of its trigger fields changed — the caller-written fields PLUS
+        // the model's stored computed fields (which the recompute may have just changed and which are
+        // never in the payload), so a constraint may trigger on a computed total. Scope note: only the
+        // top-level written model's constraints run here — constraints on a child written via the
+        // parent's nested commands, or on an _inherits parent, are not evaluated (v1).
+        if has_constraints(model.name) {
+            let mut changed: Vec<String> = values.keys().cloned().collect();
+            changed.extend(computed_fields(model).iter().map(|c| c.to_string()));
+            check_constraints_in_tx(model, &mut tx, id, Some(&changed)).await?;
         }
 
         // Re-read the NEW text of tracked columns on the still-locked row (same `::text` rendering as
@@ -2074,6 +2092,25 @@ async fn read_children_on(
         }
     }
     Ok(children)
+}
+
+/// Runs the model's `@api.constrains` constraints over the just-written record `id` on `conn`,
+/// re-reading the record + its One2many children, and maps a violation to a typed `BadInput` (which
+/// rolls back the surrounding transaction). `changed` = the written field names, or None on create
+/// (every constraint runs). Caller gates on `has_constraints` so the extra read happens only when needed.
+async fn check_constraints_in_tx(
+    model: &ResolvedModel,
+    conn: &mut sqlx::PgConnection,
+    id: i64,
+    changed: Option<&[String]>,
+) -> Result<(), DbError> {
+    // The row was just written on THIS connection, so it must be visible. If it isn't, fail closed —
+    // never commit a record whose constraints went unchecked (a validation gate, not best-effort).
+    let record = read_record_on(&mut *conn, model, id).await?.ok_or_else(|| {
+        DbError::BadInput(format!("constraint check: '{}' row {id} vanished inside its own write", model.name))
+    })?;
+    let children = read_children_on(&mut *conn, model, id).await?;
+    check_constraints(model.name, changed, &record, &children).map_err(DbError::BadInput)
 }
 
 /// Recomputes `parent`'s stored computed columns from its current children and writes them, all on

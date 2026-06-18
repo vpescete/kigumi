@@ -19,6 +19,14 @@ pub struct ComputeInput<'a> {
     children: &'a Children,
 }
 
+impl<'a> ComputeInput<'a> {
+    /// Builds a read-only view over a record's `values` and its One2many `children`. Used by the
+    /// constraint engine (and internally by the compute engine).
+    pub fn new(values: &'a BTreeMap<String, Value>, children: &'a Children) -> Self {
+        ComputeInput { values, children }
+    }
+}
+
 impl ComputeInput<'_> {
     pub fn get(&self, field: &str) -> Option<&Value> {
         self.values.get(field)

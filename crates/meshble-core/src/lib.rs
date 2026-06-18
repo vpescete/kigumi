@@ -7,6 +7,7 @@
 
 mod action;
 mod compute;
+mod constraints;
 mod domain;
 mod manifest;
 mod metamodel;
@@ -17,6 +18,7 @@ pub use action::{
     action_for, actions_for, ActionFn, ActionInput, ActionOutcome, ActionRegistration,
 };
 pub use compute::{compute_fn, compute_on_read, compute_stored, computed_fields, has_read_computes, Children, ComputeFn, ComputeInput, ComputeRegistration};
+pub use constraints::{check_constraints, has_constraints, ConstraintFn, ConstraintRegistration};
 pub use domain::{json_string, Condition, Domain, DomainError, FieldBuilder, Operator, Sql, Value};
 pub use manifest::{check_compat, resolve_module_set, ModuleDep, ModuleManifest, ResolutionError};
 pub use metamodel::{resolve, validate_depends, FieldDef, FieldKind, Model, ModelDescriptor, ResolvedModel};
