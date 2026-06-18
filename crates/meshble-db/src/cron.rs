@@ -10,7 +10,18 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use meshble_core::{resolve_registered, transient_models};
+
 use crate::{Db, DbError};
+
+/// Postgres SQLSTATEs we tolerate when sweeping transient tables: the table or the `create_date`
+/// column may not exist yet (the wizard's module isn't migrated) — treat as nothing to sweep.
+fn is_missing_table_or_column(e: &sqlx::Error) -> bool {
+    matches!(
+        e.as_database_error().and_then(|d| d.code()).as_deref(),
+        Some("42P01") | Some("42703")
+    )
+}
 
 /// A scheduled job's body. The returned future borrows `db` for the duration of the run.
 pub type CronFn = for<'a> fn(&'a Db) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>>;
@@ -100,4 +111,49 @@ fn gc_done_activities(db: &Db) -> Pin<Box<dyn Future<Output = Result<(), DbError
 }
 meshble_core::inventory::submit! {
     CronRegistration { name: "gc_done_activities", interval_secs: 86_400, func: gc_done_activities }
+}
+
+impl Db {
+    /// Gives every transient model's `create_date` a `DEFAULT now()` (idempotent; `to_ddl` emits no
+    /// column default). Postgres then stamps `create_date` on EVERY insert path, so the GC cron can
+    /// reclaim rows by age regardless of how they were created. Tolerates an unmigrated table or a
+    /// model lacking `create_date`. Run during migrate, after the tables exist.
+    pub async fn ensure_transient_defaults(&self) -> Result<(), DbError> {
+        for model in transient_models() {
+            let Ok(m) = resolve_registered(model) else { continue };
+            // The table name is the compile-time descriptor's, never user input — safe to format.
+            let sql = format!("ALTER TABLE {} ALTER COLUMN create_date SET DEFAULT now()", m.table);
+            match sqlx::query(&sql).execute(&self.pool).await {
+                Ok(_) => {}
+                Err(e) if is_missing_table_or_column(&e) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
+    }
+
+    /// Reclaims ephemeral transient (wizard) rows older than the TTL, bounding their tables. Public so
+    /// it is unit-testable without the cron ledger; the `gc_transient_records` job is a thin wrapper.
+    /// ponytail: global 1-hour TTL for all transient models; a per-model knob can come if a wizard
+    /// ever needs a longer-lived scratchpad. Tolerates unmigrated transient tables (no-op).
+    pub async fn sweep_transient_records(&self) -> Result<(), DbError> {
+        for model in transient_models() {
+            let Ok(m) = resolve_registered(model) else { continue };
+            let sql = format!("DELETE FROM {} WHERE create_date < now() - interval '1 hour'", m.table);
+            match sqlx::query(&sql).execute(&self.pool).await {
+                Ok(_) => {}
+                Err(e) if is_missing_table_or_column(&e) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Builtin job: hourly sweep of aged transient (wizard) rows. Thin wrapper over `sweep_transient_records`.
+fn gc_transient_records(db: &Db) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + '_>> {
+    Box::pin(async move { db.sweep_transient_records().await })
+}
+meshble_core::inventory::submit! {
+    CronRegistration { name: "gc_transient_records", interval_secs: 3_600, func: gc_transient_records }
 }

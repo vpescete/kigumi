@@ -44,7 +44,30 @@ Many2many** (stored aggregates run over One2many via `sum_decimal`; `compute_on_
    sale.order `pricelist_id` + `apply_pricelist` action (writes `price_unit`, base = `lst_price`).
 3. **M15.3 — account.tax + line tax/discount + order amount split + purchase.order + invoicing seam.**
 4. **M15.4 — Wizard subsystem** (full): `register_wizard!` + transient model + `default_get` + GC cron;
-   `sale.order.discount` as the first wizard.
+   `sale.order.discount` as the first wizard. Concrete design:
+   - **Transient registry** — `register_transient!("model")` → `TransientRegistration{model}` in core
+     (`is_transient`/`transient_models()`, mirroring `is_mailed`). A transient model is a normal model
+     (own table, served, secured) whose rows are ephemeral.
+   - **GC timestamp via DB default** — `to_ddl` emits no column `DEFAULT`, so migration adds one: after
+     creating a transient model's table the CLI runs `ALTER TABLE <t> ALTER COLUMN create_date SET
+     DEFAULT now()`. Postgres then stamps `create_date` on **every** insert path (open endpoint, generic
+     POST, anything) — robust, zero hot-path. Transient models declare a nullable `create_date Datetime`.
+   - **GC cron** `gc_transient_records` (hourly): for each `transient_models()`, resolve its table and
+     `DELETE … WHERE create_date < now() - interval '1 hour'`; tolerate an unmigrated table (42P01).
+   - **Open + `default_get`** — `register_wizard!(model, default_get)` where `default_get: fn(&WizardContext)
+     -> Vec<(&'static str, Value)>` (pure, no DB in v1; DB-backed defaults are a later extension).
+     `WizardContext { active_model, active_id, active_ids }`. Endpoint `POST /api/:name/open` body
+     `{active_model?, active_id?, active_ids?}` → `default_get(ctx)` seeds → `insert_secured` under the
+     caller → returns the created record for the FE to contract-render.
+   - **Apply** — per-wizard service method + endpoint (the Odoo-faithful "button method"; the framework
+     does NOT generalize apply, exactly as `generate_variants`/`apply_pricelist` are dedicated). First
+     wizard `sale.order.discount` (fields `order_id` req, `discount` Decimal, `create_date`): `Db::
+     apply_sale_order_discount(id)` gates on `sale.order` WRITE, reads the transient, writes `discount`
+     onto every line of `order_id` under the caller ctx (line computes + order amounts cascade); endpoint
+     `POST /api/:name/:id/apply_discount` (pinned to `sale.order.discount`). ACL: `sales.user`
+     read/write/create, no delete (GC reclaims).
+   - **Slices**: (1) transient registry + migration default + GC cron; (2) `register_wizard!` + open
+     endpoint + `default_get` + `sale.order.discount` model; (3) `apply_sale_order_discount` + endpoint.
 5. **M15.5 — Report engine** (LAST): registration primitive (render fn, like `register_action!`) +
    secured HTML endpoint (`GET /api/:name/:id/report/:report`, secured entirely by `find_one_secured`)
    + sale.order quotation template + Rasterizer trait + typst PDF (501 when None) + content-addressed

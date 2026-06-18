@@ -317,6 +317,9 @@ async fn migrate_installed(db: &Db) -> Fallible {
     // Mail subsystem indexes for the polymorphic thread/tracking lookups (idempotent, tolerant if the
     // mail module isn't installed). The metamodel has no index DDL yet, so the framework ensures these.
     db.ensure_mail_indexes().await?;
+    // Transient (wizard) models: give each one's create_date a DEFAULT now() so every insert is
+    // timestamped and the GC cron can reclaim it (idempotent, tolerant if none are installed).
+    db.ensure_transient_defaults().await?;
     // Scheduled jobs: create the cron ledger and seed the registered jobs (idempotent).
     db.ensure_crons().await?;
     if installed.iter().any(|m| m == "base") {

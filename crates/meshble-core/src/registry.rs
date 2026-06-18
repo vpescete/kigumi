@@ -80,6 +80,25 @@ pub fn is_mailed(model: &str) -> bool {
     inventory::iter::<MailedRegistration>.into_iter().any(|e| e.model == model)
 }
 
+/// A model whose rows are ephemeral (Odoo's `TransientModel`): a wizard scratchpad with its own
+/// table, served and secured like any model, but periodically garbage-collected by age. Emitted by
+/// `register_transient!`. A transient model declares a nullable `create_date Datetime`; migration
+/// gives that column a `DEFAULT now()` so every insert is timestamped and the GC cron can reclaim it.
+pub struct TransientRegistration {
+    pub model: &'static str,
+}
+inventory::collect!(TransientRegistration);
+
+/// Names of all transient (ephemeral / wizard) models.
+pub fn transient_models() -> Vec<&'static str> {
+    inventory::iter::<TransientRegistration>.into_iter().map(|e| e.model).collect()
+}
+
+/// Whether `model` is transient (its rows are garbage-collected by age).
+pub fn is_transient(model: &str) -> bool {
+    inventory::iter::<TransientRegistration>.into_iter().any(|e| e.model == model)
+}
+
 /// A field whose changes are tracked in the chatter (Odoo's `tracking=True`). When a write changes
 /// it on a mailed model, the write path records a `notification` message + a typed `mail.tracking`
 /// row (old → new). Emitted by `#[field(tracked)]`. Compile-time, not runtime `track_visibility`.
