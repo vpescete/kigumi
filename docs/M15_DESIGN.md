@@ -72,6 +72,14 @@ Many2many** (stored aggregates run over One2many via `sum_decimal`; `compute_on_
    secured HTML endpoint (`GET /api/:name/:id/report/:report`, secured entirely by `find_one_secured`)
    + sale.order quotation template + Rasterizer trait + typst PDF (501 when None) + content-addressed
    `ir.attachment` cache + contract `reports` array.
+   - **Slices**: (1) `register_report!` + HTML endpoint + quotation template (HTML-escaped) + contract
+     `reports` array; (2) `Rasterizer` trait + `router_with_data_rasterized` + `?format=pdf` (501 when
+     None, rasterize + `application/pdf` when Some).
+   - **Shipped**: slices 1 + 2 — HTML reports end-to-end and the PDF rasterization seam.
+   - **Deferred (explicit, not silent)**: a concrete `Rasterizer` impl (typst/headless-Chromium) — the
+     trait is the pluggable seam, production answers PDF with 501 until one is attached; and the
+     content-addressed `ir.attachment` PDF cache — re-renders per request for now, since the dedup only
+     pays for itself behind a slow real rasterizer (noted with a `ponytail:` comment at the call site).
 
 ## Top risks (carried into implementation)
 

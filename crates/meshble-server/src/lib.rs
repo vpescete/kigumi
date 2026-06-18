@@ -30,6 +30,13 @@ use meshble_storage::{sha256_hex, BlobStore};
 // Re-exported so hosts (the CLI) and tests can construct a store without a direct meshble-storage dep.
 pub use meshble_storage::FsBlobStore;
 
+/// Rasterizes a rendered HTML report into PDF bytes. The seam for PDF output: a concrete backend
+/// (e.g. typst- or headless-Chromium-based) plugs in via `router_with_data_rasterized`. When none is
+/// configured the report endpoint serves HTML and answers `?format=pdf` with 501.
+pub trait Rasterizer: Send + Sync {
+    fn render_pdf(&self, html: &str) -> Result<Vec<u8>, String>;
+}
+
 /// Access tokens are short-lived; refresh tokens long-lived (and revocable/rotated server-side).
 const ACCESS_TTL: u64 = 900; // 15 minutes
 const REFRESH_TTL: u64 = 2_592_000; // 30 days
@@ -50,6 +57,7 @@ struct DataBackend {
     rules: &'static [RecordRule],
     auth: Arc<Authenticator>,
     blobs: Arc<dyn BlobStore>,
+    rasterizer: Option<Arc<dyn Rasterizer>>,
 }
 
 fn base_router() -> Router<AppState> {
@@ -66,7 +74,8 @@ pub fn router(models: Vec<ResolvedModel>) -> Router {
 
 /// Full router: metadata routes plus secured CRUD data endpoints. `auth_secret` is the HS256
 /// secret used to verify the `Authorization: Bearer <token>` of each data request into a `Ctx`.
-#[allow(clippy::too_many_arguments)]
+/// No PDF rasterizer is configured (report `?format=pdf` answers 501); see
+/// [`router_with_data_rasterized`] to attach one.
 pub fn router_with_data(
     models: Vec<ResolvedModel>,
     db: Db,
@@ -74,6 +83,21 @@ pub fn router_with_data(
     rules: &'static [RecordRule],
     auth_secret: impl Into<String>,
     blobs: Arc<dyn BlobStore>,
+) -> Router {
+    router_with_data_rasterized(models, db, acls, rules, auth_secret, blobs, None)
+}
+
+/// Like [`router_with_data`] but with a PDF rasterizer for report `?format=pdf` (None → those requests
+/// get 501).
+#[allow(clippy::too_many_arguments)]
+pub fn router_with_data_rasterized(
+    models: Vec<ResolvedModel>,
+    db: Db,
+    acls: &'static [Acl],
+    rules: &'static [RecordRule],
+    auth_secret: impl Into<String>,
+    blobs: Arc<dyn BlobStore>,
+    rasterizer: Option<Arc<dyn Rasterizer>>,
 ) -> Router {
     base_router()
         .route("/auth/login", post(login_handler))
@@ -122,6 +146,7 @@ pub fn router_with_data(
                 rules,
                 auth: Arc::new(Authenticator::new(auth_secret)),
                 blobs,
+                rasterizer,
             }),
         })
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
@@ -544,6 +569,7 @@ fn value_to_json(v: &Value) -> Json2 {
 async fn report_handler(
     State(state): State<AppState>,
     Path((name, id, report)): Path<(String, i64, String)>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Response {
     let model = match resolve_model(&state, &name) {
@@ -558,12 +584,42 @@ async fn report_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
+    let want_pdf = params.get("format").map(|f| f == "pdf").unwrap_or(false);
     match backend.db.find_one_secured(model, &ctx, backend.acls, backend.rules, id).await {
-        Ok(Some(rec)) => axum::response::Html((reg.func)(&rec)).into_response(),
+        Ok(Some(rec)) => {
+            let html = (reg.func)(&rec);
+            if !want_pdf {
+                return axum::response::Html(html).into_response();
+            }
+            // PDF is rendered by rasterizing the same HTML — only if a rasterizer is configured.
+            // ponytail: re-renders per request; a content-addressed ir.attachment cache lands with a
+            // concrete (slow) rasterizer, where the dedup actually pays for itself.
+            match &backend.rasterizer {
+                None => (StatusCode::NOT_IMPLEMENTED, "PDF rendering is not configured").into_response(),
+                Some(r) => match r.render_pdf(&html) {
+                    Ok(bytes) => pdf_response(bytes, reg.title, id),
+                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("PDF render failed: {e}")).into_response(),
+                },
+            }
+        }
         Ok(None) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
         Err(DbError::AccessDenied { .. }) => (StatusCode::FORBIDDEN, "access denied").into_response(),
         Err(e) => internal_error("report", e),
     }
+}
+
+/// A downloadable PDF response with a safe filename derived from the report title + record id. The
+/// title is a trusted compile-time string; non-alphanumerics are still squashed for the header.
+fn pdf_response(bytes: Vec<u8>, title: &str, id: i64) -> Response {
+    let safe: String = title.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "application/pdf".to_string()),
+            (axum::http::header::CONTENT_DISPOSITION, format!("inline; filename=\"{safe}-{id}.pdf\"")),
+        ],
+        bytes,
+    )
+        .into_response()
 }
 
 /// Applies the discount wizard onto its target order's lines. v1: pinned to sale.order.discount.

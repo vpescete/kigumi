@@ -13,8 +13,9 @@ use meshble_core::{
     ResolvedModel,
 };
 use meshble_db::Db;
-use meshble_server::router_with_data;
+use meshble_server::{router_with_data, router_with_data_rasterized, Rasterizer};
 use serde_json::{json, Value as Json};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 const SECRET: &str = "report-api-secret";
@@ -90,5 +91,34 @@ async fn report_endpoint_is_secured_by_record_read() {
     let (st, _) = get(app.clone(), "/api/test.doc/999999/report/slip", Some("u")).await;
     assert_eq!(st, StatusCode::NOT_FOUND, "unknown record");
 
+    // PDF requested but no rasterizer configured → 501.
+    let (st, _) = get(app.clone(), &format!("{uri}?format=pdf"), Some("u")).await;
+    assert_eq!(st, StatusCode::NOT_IMPLEMENTED, "no rasterizer → 501");
+
+    // Same seeded record, but a router WITH a rasterizer: ?format=pdf serves PDF bytes of the HTML.
+    let raster_db = Db::connect(&url).await.unwrap();
+    let blobs2 = std::sync::Arc::new(meshble_server::FsBlobStore::new(std::env::temp_dir().join("meshble_test_blobs")));
+    let raster: Option<Arc<dyn Rasterizer>> = Some(Arc::new(FakeRasterizer));
+    let app_pdf = router_with_data_rasterized(vec![m(&DOC)], raster_db, ACLS, &[], SECRET, blobs2, raster);
+    let resp = app_pdf
+        .oneshot(Request::builder().method("GET").uri(format!("{uri}?format=pdf")).header("authorization", bearer("u")).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers().get("content-type").unwrap(), "application/pdf");
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    assert!(bytes.starts_with(b"%PDF-fake"), "served the rasterizer's bytes");
+    assert!(String::from_utf8_lossy(&bytes).contains("<h1>Hello</h1>"), "rasterized the rendered HTML");
+
     seed.drop_table(&doc).await.unwrap();
+}
+
+/// A fake rasterizer: prefixes the HTML with a recognizable marker, no real PDF engine.
+struct FakeRasterizer;
+impl Rasterizer for FakeRasterizer {
+    fn render_pdf(&self, html: &str) -> Result<Vec<u8>, String> {
+        let mut v = b"%PDF-fake\n".to_vec();
+        v.extend_from_slice(html.as_bytes());
+        Ok(v)
+    }
 }
