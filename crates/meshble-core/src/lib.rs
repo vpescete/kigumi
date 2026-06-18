@@ -16,7 +16,7 @@ mod security;
 pub use action::{
     action_for, actions_for, ActionFn, ActionInput, ActionOutcome, ActionRegistration,
 };
-pub use compute::{compute_fn, compute_stored, computed_fields, Children, ComputeFn, ComputeInput, ComputeRegistration};
+pub use compute::{compute_fn, compute_on_read, compute_stored, computed_fields, has_read_computes, Children, ComputeFn, ComputeInput, ComputeRegistration};
 pub use domain::{json_string, Condition, Domain, DomainError, FieldBuilder, Operator, Sql, Value};
 pub use manifest::{check_compat, resolve_module_set, ModuleDep, ModuleManifest, ResolutionError};
 pub use metamodel::{resolve, validate_depends, FieldDef, FieldKind, Model, ModelDescriptor, ResolvedModel};

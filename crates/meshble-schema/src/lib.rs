@@ -157,11 +157,12 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
         fields.push(emit(&d.def, false));
     }
     // List view (D7): the columns a generic list renders. Default = the scalar (column-backed) fields
-    // plus related mirrors and delegated parent fields, in declaration order; One2many is not a column.
+    // plus on-read computes, related mirrors and delegated parent fields, in declaration order; One2many
+    // is not a column.
     let mut columns: Vec<String> = m
         .fields
         .iter()
-        .filter(|f| f.has_column() || related_path(m.name, f.name).is_some())
+        .filter(|f| f.has_column() || f.is_computed() || related_path(m.name, f.name).is_some())
         .map(|f| {
             format!(
                 "    {{ \"name\": {}, \"label\": {}, \"widget\": \"{}\" }}",
@@ -245,5 +246,27 @@ mod tests {
         // A typo'd rule field is an error at build/load time, not a silent broken UI.
         let rules = &[FieldRule { field: "state", rule: UiRule::Readonly, domain: bad }];
         assert!(to_ui_contract(&model(), rules).is_err());
+    }
+
+    #[test]
+    fn on_read_compute_is_contract_readonly_and_a_column() {
+        // A non-stored computed field (no DDL column) must still be in the contract — as a readonly
+        // form field AND a list column — so the generic FE shows the derived value.
+        static M: ModelDescriptor = ModelDescriptor {
+            name: "c.demo", table: "c_demo",
+            fields: &[
+                FieldDef { name: "qty", label: "Qty", kind: FieldKind::Integer, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
+                FieldDef { name: "doubled", label: "Doubled", kind: FieldKind::Integer, required: false, stored: false, compute: Some("x"), depends: &["qty"], default: None, unique: false, check: None },
+            ],
+        };
+        let m = resolve(&M, &[]).unwrap();
+        // No DDL column for the non-stored compute.
+        assert!(!to_ddl(&m).contains("doubled"), "non-stored compute has no column");
+        let c = to_ui_contract(&m, &[]).unwrap();
+        // Readonly form field.
+        assert!(c.contains("\"name\": \"doubled\", \"label\": \"Doubled\", \"widget\": \"integer\", \"required\": false, \"readonly\": true"));
+        // And a list column.
+        let list = c.split("\"list\"").nth(1).unwrap_or("");
+        assert!(list.contains("\"name\": \"doubled\""), "on-read compute is a list column: {list}");
     }
 }

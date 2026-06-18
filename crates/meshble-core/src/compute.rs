@@ -114,9 +114,35 @@ pub fn computed_fields(model: &ResolvedModel) -> Vec<&'static str> {
         .fields
         .iter()
         .filter(|f| f.has_column() && f.is_computed())
-        .filter(|f| f.compute.map(compute_fn).flatten().is_some())
+        .filter(|f| f.compute.and_then(compute_fn).is_some())
         .map(|f| f.name)
         .collect()
+}
+
+/// Evaluates the model's NON-stored computed fields (Odoo `compute=` without `store=True`) over a
+/// record's `values` at READ time, returning the (name, value) pairs to inject into the projection.
+/// These have no column and are never written — they are derived on every read. Same-record: `children`
+/// is empty, so a function reads the record's own scalar fields plus any related / delegated values
+/// already present in `values` (both are read alongside the columns), not its One2many children.
+pub fn compute_on_read(model: &ResolvedModel, values: &BTreeMap<String, Value>) -> Vec<(&'static str, Value)> {
+    let funcs: Vec<(&'static str, ComputeFn)> = model
+        .fields
+        .iter()
+        .filter(|f| !f.has_column() && f.is_computed())
+        .filter_map(|f| f.compute.and_then(compute_fn).map(|func| (f.name, func)))
+        .collect();
+    if funcs.is_empty() {
+        return Vec::new();
+    }
+    let empty = Children::new();
+    let input = ComputeInput { values, children: &empty };
+    funcs.into_iter().map(|(name, func)| (name, func(&input))).collect()
+}
+
+/// True iff the model has any NON-stored computed field (a cheap gate before doing the extra decode
+/// that [`compute_on_read`] needs).
+pub fn has_read_computes(model: &ResolvedModel) -> bool {
+    model.fields.iter().any(|f| !f.has_column() && f.is_computed())
 }
 
 /// Fills `values` with the result of each stored computed field whose function is registered,

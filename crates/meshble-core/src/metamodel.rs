@@ -110,7 +110,18 @@ pub fn resolve(
 /// Antidote to Odoo's silent N+1: a broken dependency is an error, not a runtime bug.
 pub fn validate_depends(m: &ResolvedModel) -> Result<(), String> {
     for f in &m.fields {
+        // A non-stored (on-read) compute is evaluated same-record with no children loaded, so it
+        // cannot aggregate over a relation. A dotted dependency there would silently read empty and
+        // return a wrong value — reject it (a stored aggregate must declare `store`).
+        let on_read = f.is_computed() && !f.has_column();
         for dep in f.depends {
+            if on_read && dep.contains('.') {
+                return Err(format!(
+                    "the on-read computed field '{}' cannot depend on a relational path '{}' \
+                     (non-stored computes are same-record only; add `store` to aggregate over children)",
+                    f.name, dep
+                ));
+            }
             let first = dep.split('.').next().unwrap_or(dep);
             if !m.fields.iter().any(|x| x.name == first) {
                 return Err(format!(
@@ -150,5 +161,23 @@ mod tests {
             required: false, stored: true, compute: Some("c"), depends: &["nope"], default: None, unique: false, check: None }];
         let m = resolve(&BASE, &[BAD]).unwrap();
         assert!(validate_depends(&m).is_err());
+    }
+
+    #[test]
+    fn on_read_compute_rejects_relational_depends() {
+        // A non-stored compute cannot aggregate over a relation (children aren't loaded on read).
+        static AGG: &[FieldDef] = &[FieldDef {
+            name: "total", label: "T", kind: FieldKind::Integer,
+            required: false, stored: false, compute: Some("c"), depends: &["name.x"], default: None, unique: false, check: None }];
+        let m = resolve(&BASE, &[AGG]).unwrap();
+        let e = validate_depends(&m).unwrap_err();
+        assert!(e.contains("same-record only"), "rejects dotted depends on on-read compute: {e}");
+
+        // A STORED compute with the same dotted dependency is fine (it aggregates at write time).
+        static STORED: &[FieldDef] = &[FieldDef {
+            name: "total", label: "T", kind: FieldKind::Integer,
+            required: false, stored: true, compute: Some("c"), depends: &["name.x"], default: None, unique: false, check: None }];
+        let m2 = resolve(&BASE, &[STORED]).unwrap();
+        assert!(validate_depends(&m2).is_ok(), "stored aggregate may depend on a relational path");
     }
 }

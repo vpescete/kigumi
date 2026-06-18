@@ -19,8 +19,9 @@ pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
-    action_for, check_access, compute_stored, computed_fields, delegated_fields, field_accessible,
-    inherits_of, is_mailed, record_rule_domain, related_path, resolve_all_registered,
+    action_for, check_access, compute_on_read, compute_stored, computed_fields, delegated_fields,
+    field_accessible, has_read_computes, inherits_of, is_mailed, record_rule_domain, related_path,
+    resolve_all_registered,
     resolve_registered, tracked_fields, Acl, ActionInput, Children, Ctx, Domain, DomainError,
     FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
 };
@@ -2305,6 +2306,14 @@ fn row_to_json(model: &ResolvedModel, row: &PgRow) -> Result<Json, DbError> {
     // Delegated (_inherits) fields are selected as subqueries — project them by the parent's kind.
     for d in delegated_fields(model.name).unwrap_or_default() {
         obj.insert(d.def.name.to_string(), decode_json(row, d.def.name, &d.def.kind)?);
+    }
+    // On-read (non-stored) computed fields: evaluate the registered fn over this row's decoded values
+    // (own + related + delegated) and inject the result. Output-only — they have no column.
+    if has_read_computes(model) {
+        let values = record_to_values(model, row);
+        for (name, val) in compute_on_read(model, &values) {
+            obj.insert(name.to_string(), value_to_json(&val));
+        }
     }
     Ok(Json::Object(obj))
 }
