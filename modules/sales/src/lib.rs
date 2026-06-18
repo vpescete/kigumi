@@ -38,6 +38,11 @@ pub struct SaleOrder {
     #[field(label = "Status", required, default = "draft", tracked, selection = "draft:Draft,sale:Confirmed,done:Done")]
     state: Selection,
 
+    // Invoicing seam: confirm sets it To Invoice; `create_invoice` flips it to Invoiced (no account.move
+    // in v1 — the full account module fills in the real posting behind this exact field/action).
+    #[field(label = "Invoice Status", required, default = "no", tracked, selection = "no:Nothing to Invoice,to_invoice:To Invoice,invoiced:Fully Invoiced")]
+    invoice_status: Selection,
+
     #[field(label = "Currency", required, target = "res.currency")]
     currency_id: Many2one,
 
@@ -508,6 +513,11 @@ pub static ACLS: &[Acl] = &[
     // Taxes: read by everyone in sales (referenced on lines), maintained by managers.
     Acl { model: "account.tax", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "account.tax", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    // Purchase orders + lines. v1 pragmatic: managed by the sales groups (a small team); dedicated
+    // purchase.user/manager groups are a later refinement.
+    Acl { model: "purchase.order", group: "sales.user", read: true, write: true, create: true, delete: false },
+    Acl { model: "purchase.order", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "purchase.order.line", group: "sales.user", read: true, write: true, create: true, delete: true },
     // Attribute configuration is user input: everyone in sales reads, managers maintain the attributes,
     // their values, and a template's attribute lines.
     Acl { model: "product.attribute", group: "sales.user", read: true, write: false, create: false, delete: false },
@@ -576,11 +586,22 @@ fn confirm_order(i: &ActionInput) -> Result<ActionOutcome, String> {
     match i.str("state") {
         "draft" => Ok(ActionOutcome::new()
             .set("state", Value::Str("sale".to_string()))
+            .set("invoice_status", Value::Str("to_invoice".to_string()))
             .assign_sequence("name", "SO")),
         s => Err(format!("can only confirm a draft order (state is '{s}')")),
     }
 }
 meshble::register_action!("sale.order", "confirm", confirm_order, &["sales.user"]);
+
+/// `create_invoice`: the invoicing seam — flips a confirmed order from To Invoice to Invoiced. v1 has
+/// no `account.move`; the full account module later posts the real invoice behind this same action.
+fn create_invoice(i: &ActionInput) -> Result<ActionOutcome, String> {
+    match i.str("invoice_status") {
+        "to_invoice" => Ok(ActionOutcome::new().set("invoice_status", Value::Str("invoiced".to_string()))),
+        s => Err(format!("nothing to invoice (invoice status is '{s}')")),
+    }
+}
+meshble::register_action!("sale.order", "create_invoice", create_invoice, &["sales.user"]);
 
 /// `done`: a confirmed sale is locked as done (its total then becomes read-only via the UI rule).
 fn set_done(i: &ActionInput) -> Result<ActionOutcome, String> {
@@ -590,6 +611,100 @@ fn set_done(i: &ActionInput) -> Result<ActionOutcome, String> {
     }
 }
 meshble::register_action!("sale.order", "done", set_done, &["sales.user"]);
+
+/// A purchase order (Odoo's `purchase.order`): the buy-side mirror of sale.order, sharing the line
+/// tax/total computes and the order amount aggregates. `confirm` assigns a PO number.
+#[model(name = "purchase.order", table = "purchase_order")]
+pub struct PurchaseOrder {
+    #[field(label = "Order Reference", default = "New")]
+    name: Text,
+
+    #[field(label = "Vendor", required, target = "res.partner")]
+    partner_id: Many2one,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+
+    #[field(label = "Order Lines", target = "purchase.order.line", inverse = "order_id")]
+    line_ids: One2many,
+
+    #[field(label = "Status", required, default = "draft", selection = "draft:Draft,purchase:Confirmed,done:Done")]
+    state: Selection,
+
+    #[field(label = "Currency", required, target = "res.currency")]
+    currency_id: Many2one,
+
+    #[field(label = "Untaxed Amount", compute = "compute_amount_untaxed", depends = "line_ids.price_subtotal", currency = "currency_id", store)]
+    amount_untaxed: Decimal,
+
+    #[field(label = "Taxes", compute = "compute_amount_tax", depends = "line_ids.price_tax", currency = "currency_id", store)]
+    amount_tax: Decimal,
+
+    #[field(label = "Total", compute = "compute_amount", depends = "line_ids.price_total", currency = "currency_id", store)]
+    amount_total: Decimal,
+}
+
+/// A purchase order line — the same shape as sale.order.line (same field names → it reuses the line
+/// tax/total compute functions verbatim).
+#[model(name = "purchase.order.line", table = "purchase_order_line")]
+pub struct PurchaseOrderLine {
+    #[field(label = "Order", required, target = "purchase.order")]
+    order_id: Many2one,
+
+    #[field(label = "Product", required, target = "product.product")]
+    product_id: Many2one,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+
+    #[field(label = "Description")]
+    name: Text,
+
+    #[field(label = "Quantity", required, default = "1")]
+    product_uom_qty: Decimal,
+
+    #[field(label = "Unit Price", required, default = "0")]
+    price_unit: Decimal,
+
+    #[field(label = "Disc.%", default = "0")]
+    discount: Decimal,
+
+    #[field(label = "Tax", target = "account.tax")]
+    tax_id: Many2one,
+
+    #[field(label = "Tax Rate %", default = "0")]
+    tax_rate: Decimal,
+
+    #[field(label = "Subtotal", compute = "compute_line_subtotal", depends = "product_uom_qty,price_unit,discount", store)]
+    price_subtotal: Decimal,
+
+    #[field(label = "Tax", compute = "compute_line_tax", depends = "product_uom_qty,price_unit,discount,tax_rate", store)]
+    price_tax: Decimal,
+
+    #[field(label = "Total", compute = "compute_line_total", depends = "product_uom_qty,price_unit,discount,tax_rate", store)]
+    price_total: Decimal,
+}
+
+/// `confirm`: a draft purchase order becomes confirmed and gets its PO number (the buy-side mirror of
+/// the sale confirm; Odoo requires a double validation for large POs — deferred).
+fn confirm_purchase(i: &ActionInput) -> Result<ActionOutcome, String> {
+    match i.str("state") {
+        "draft" => Ok(ActionOutcome::new()
+            .set("state", Value::Str("purchase".to_string()))
+            .assign_sequence("name", "PO")),
+        s => Err(format!("can only confirm a draft purchase order (state is '{s}')")),
+    }
+}
+meshble::register_action!("purchase.order", "confirm", confirm_purchase, &["sales.user"]);
+
+/// `done`: a confirmed purchase order is locked as received/done.
+fn done_purchase(i: &ActionInput) -> Result<ActionOutcome, String> {
+    match i.str("state") {
+        "purchase" => Ok(ActionOutcome::new().set("state", Value::Str("done".to_string()))),
+        s => Err(format!("can only finish a confirmed purchase order (state is '{s}')")),
+    }
+}
+meshble::register_action!("purchase.order", "done", done_purchase, &["sales.user"]);
 
 #[cfg(test)]
 mod tests {
@@ -763,8 +878,8 @@ mod tests {
         // The macro must produce the SAME descriptor as the hand-written version.
         let d = SaleOrder::descriptor();
         assert_eq!(d.name, "sale.order");
-        // name, partner_id, company_id, line_ids, state, currency_id, pricelist_id, amount_untaxed, amount_tax, amount_total
-        assert_eq!(d.fields.len(), 10);
+        // name, partner_id, company_id, line_ids, state, invoice_status, currency_id, pricelist_id, amount_untaxed, amount_tax, amount_total
+        assert_eq!(d.fields.len(), 11);
         let total = d.fields.iter().find(|f| f.name == "amount_total").unwrap();
         assert!(total.stored, "computed with `store` must be stored");
         assert_eq!(total.compute, Some("compute_amount"));
