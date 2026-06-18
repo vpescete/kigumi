@@ -41,6 +41,10 @@ pub struct SaleOrder {
     #[field(label = "Currency", required, target = "res.currency")]
     currency_id: Many2one,
 
+    // Optional pricelist; `apply_pricelist` resolves each line's unit price against it (same currency).
+    #[field(label = "Pricelist", target = "product.pricelist")]
+    pricelist_id: Many2one,
+
     #[field(label = "Total", compute = "compute_amount", depends = "line_ids.price_subtotal", currency = "currency_id", store)]
     amount_total: Decimal,
 }
@@ -180,6 +184,64 @@ pub struct ProductProduct {
 pub struct ProductTag {
     #[field(label = "Name", required, unique)]
     name: Text,
+}
+
+/// A pricelist (Odoo's `product.pricelist`): a named set of price rules in one currency. A sale order
+/// references a pricelist; `apply_pricelist` resolves each line's unit price against its items.
+#[model(name = "product.pricelist", table = "product_pricelist")]
+pub struct ProductPricelist {
+    #[field(label = "Name", required)]
+    name: Text,
+
+    #[field(label = "Currency", required, target = "res.currency")]
+    currency_id: Many2one,
+
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+}
+
+/// A pricelist rule (Odoo's `product.pricelist.item`). `applied_on` scopes the rule (most specific
+/// wins: variant > product > category > global); `compute_price` is a fixed price or a percentage
+/// discount off `base` (the variant's sales price or cost). `min_quantity` + the date window gate it.
+/// The flat subset: no formula/markup, no pricelist chaining, single currency (no FX) — those are later.
+#[model(name = "product.pricelist.item", table = "product_pricelist_item")]
+pub struct ProductPricelistItem {
+    #[field(label = "Pricelist", required, target = "product.pricelist")]
+    pricelist_id: Many2one,
+
+    // Scope, most-specific first. Odoo's 4 levels, kept as sortable string keys.
+    #[field(label = "Applied On", default = "3_global", selection = "0_product_variant:Variant,1_product:Product,2_product_category:Category,3_global:All Products")]
+    applied_on: Selection,
+
+    #[field(label = "Category", target = "product.category")]
+    categ_id: Many2one,
+
+    #[field(label = "Product", target = "product.template")]
+    product_tmpl_id: Many2one,
+
+    #[field(label = "Variant", target = "product.product")]
+    product_id: Many2one,
+
+    #[field(label = "Min. Quantity", default = "0")]
+    min_quantity: Decimal,
+
+    #[field(label = "Compute Price", default = "fixed", selection = "fixed:Fixed Price,percentage:Discount")]
+    compute_price: Selection,
+
+    #[field(label = "Fixed Price", default = "0")]
+    fixed_price: Decimal,
+
+    #[field(label = "Discount %", default = "0")]
+    percent_price: Decimal,
+
+    #[field(label = "Based On", default = "list_price", selection = "list_price:Sales Price,standard_price:Cost")]
+    base: Selection,
+
+    #[field(label = "Start Date")]
+    date_start: Date,
+
+    #[field(label = "End Date")]
+    date_end: Date,
 }
 
 /// A product attribute (Odoo's `product.attribute`): a configurable dimension of a product, e.g.
@@ -358,6 +420,11 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "product.product", group: "sales.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "product.tag", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "product.tag", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    // Pricelists: everyone in sales reads (to apply them); managers maintain the rules.
+    Acl { model: "product.pricelist", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.pricelist", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "product.pricelist.item", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.pricelist.item", group: "sales.manager", read: true, write: true, create: true, delete: true },
     // Attribute configuration is user input: everyone in sales reads, managers maintain the attributes,
     // their values, and a template's attribute lines.
     Acl { model: "product.attribute", group: "sales.user", read: true, write: false, create: false, delete: false },
@@ -592,7 +659,7 @@ mod tests {
         // The macro must produce the SAME descriptor as the hand-written version.
         let d = SaleOrder::descriptor();
         assert_eq!(d.name, "sale.order");
-        assert_eq!(d.fields.len(), 7); // name, partner_id, company_id, line_ids, state, currency_id, amount_total
+        assert_eq!(d.fields.len(), 8); // + pricelist_id (name, partner_id, company_id, line_ids, state, currency_id, pricelist_id, amount_total)
         let total = d.fields.iter().find(|f| f.name == "amount_total").unwrap();
         assert!(total.stored, "computed with `store` must be stored");
         assert_eq!(total.compute, Some("compute_amount"));

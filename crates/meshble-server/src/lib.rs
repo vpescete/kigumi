@@ -90,6 +90,8 @@ pub fn router_with_data(
         .route("/api/:name/:id/action/:action", post(action_handler))
         // Variant generation: materialize a product.template's attribute combinations into variants.
         .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
+        // Re-price a sale order's lines from its pricelist.
+        .route("/api/:name/:id/apply_pricelist", post(apply_pricelist_handler))
         // Attachments (ir.attachment): files on a record. List/download need host read; upload/delete
         // need host write. Bytes live in the content-addressed blob store; the row is metadata.
         .route("/api/:name/:id/attachments", get(list_attachments_handler).post(upload_attachment_handler))
@@ -489,6 +491,30 @@ async fn generate_variants_handler(
                 .to_string(),
         ),
         Err(e) => write_error("generate_variants", e),
+    }
+}
+
+/// Re-prices a sale order's lines from its pricelist. v1: pinned to sale.order. Authorization +
+/// currency check live in the db layer (apply_pricelist gates on order write, runs as the caller).
+async fn apply_pricelist_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    if name != "sale.order" {
+        return (StatusCode::BAD_REQUEST, "apply_pricelist is only valid on sale.order").into_response();
+    }
+    if let Err(r) = resolve_model(&state, &name) {
+        return r;
+    }
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.apply_pricelist(&ctx, backend.acls, backend.rules, id).await {
+        Ok(n) => json_response(serde_json::json!({ "priced": n }).to_string()),
+        Err(e) => write_error("apply_pricelist", e),
     }
 }
 
