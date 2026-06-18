@@ -22,6 +22,7 @@ pub mod prelude {
         RecordRule, RecordRuleRegistration, RelatedRegistration, ResolutionError, ResolvedModel,
         RuleDomain, Sql, TrackedFieldRegistration, TransientRegistration, Value, FRAMEWORK_VERSION,
         wizard_for, WizardContext, WizardDefaultGet, WizardRegistration,
+        report_for, reports_for, ReportFn, ReportRegistration,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
@@ -156,6 +157,19 @@ macro_rules! register_transient {
     ($model:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::TransientRegistration { model: $model }
+        }
+    };
+}
+
+/// Registers a report on a model: a pure render fn producing an HTML document for one record, exposed
+/// at `GET /api/<model>/<id>/report/<name>` (secured by read access to the record) and listed in the
+/// model's UI contract. `name` is the URL segment, `title` the human label. Use at module top level:
+/// `meshble::register_report!("sale.order", "quotation", "Quotation", render_quotation);`
+#[macro_export]
+macro_rules! register_report {
+    ($model:expr, $name:expr, $title:expr, $func:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::ReportRegistration { model: $model, name: $name, title: $title, func: $func }
         }
     };
 }

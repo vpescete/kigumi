@@ -736,9 +736,86 @@ fn default_get_discount(ctx: &WizardContext) -> Vec<(&'static str, Value)> {
     }
 }
 
+/// HTML-escapes a string for safe inclusion in a rendered report. Stored content (a line description,
+/// the order reference) is untrusted, so it must be escaped or it is a stored-XSS vector — the minimal
+/// entity set that neutralizes element/attribute injection.
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// Reads a JSON field as a display string (numbers and strings as-is, missing/null as a dash).
+fn field_str(v: &serde_json::Value, key: &str) -> String {
+    match v.get(key) {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Number(n)) => n.to_string(),
+        _ => "-".to_string(),
+    }
+}
+
+/// The `quotation` report for sale.order: an HTML document with the order header, the line table and
+/// the untaxed/tax/total summary. Reads only the fields `find_one_secured` returns (lines inlined) —
+/// no recompute, no extra reads. Relations show as ids in v1 (display-name fields are a later add).
+fn render_quotation(rec: &serde_json::Value) -> String {
+    let order_ref = esc(&field_str(rec, "name"));
+    let rows: String = rec
+        .get("line_ids")
+        .and_then(|v| v.as_array())
+        .map(|lines| {
+            lines
+                .iter()
+                .map(|l| {
+                    format!(
+                        "<tr><td>{}</td><td class=\"r\">{}</td><td class=\"r\">{}</td><td class=\"r\">{}</td><td class=\"r\">{}</td></tr>",
+                        esc(&field_str(l, "name")),
+                        esc(&field_str(l, "product_uom_qty")),
+                        esc(&field_str(l, "price_unit")),
+                        esc(&field_str(l, "discount")),
+                        esc(&field_str(l, "price_subtotal")),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let untaxed = esc(&field_str(rec, "amount_untaxed"));
+    let tax = esc(&field_str(rec, "amount_tax"));
+    let total = esc(&field_str(rec, "amount_total"));
+    format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Quotation {order_ref}</title>\
+         <style>body{{font-family:system-ui,sans-serif;margin:2rem;color:#111}}h1{{font-size:1.4rem}}\
+         table{{width:100%;border-collapse:collapse;margin-top:1rem}}th,td{{padding:.4rem .6rem;border-bottom:1px solid #ddd;text-align:left}}\
+         .r{{text-align:right}}tfoot td{{font-weight:600;border-top:2px solid #333}}</style></head>\
+         <body><h1>Quotation {order_ref}</h1>\
+         <table><thead><tr><th>Description</th><th class=\"r\">Qty</th><th class=\"r\">Unit Price</th><th class=\"r\">Disc.%</th><th class=\"r\">Subtotal</th></tr></thead>\
+         <tbody>{rows}</tbody>\
+         <tfoot>\
+         <tr><td colspan=\"4\" class=\"r\">Untaxed</td><td class=\"r\">{untaxed}</td></tr>\
+         <tr><td colspan=\"4\" class=\"r\">Tax</td><td class=\"r\">{tax}</td></tr>\
+         <tr><td colspan=\"4\" class=\"r\">Total</td><td class=\"r\">{total}</td></tr>\
+         </tfoot></table></body></html>"
+    )
+}
+meshble::register_report!("sale.order", "quotation", "Quotation", render_quotation);
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quotation_report_renders_lines_and_escapes_stored_content() {
+        let rec = serde_json::json!({
+            "name": "SO/00001",
+            "amount_untaxed": "180.00", "amount_tax": "0", "amount_total": "180.00",
+            "line_ids": [
+                { "name": "Widget <script>", "product_uom_qty": "2", "price_unit": "100", "discount": "10", "price_subtotal": "180.00" }
+            ]
+        });
+        let html = render_quotation(&rec);
+        assert!(html.contains("Quotation SO/00001"), "header carries the order reference");
+        assert!(html.contains("180.00"), "totals are rendered");
+        // The crux: untrusted stored content is HTML-escaped (no stored-XSS through a line description).
+        assert!(html.contains("Widget &lt;script&gt;"), "stored content is escaped");
+        assert!(!html.contains("Widget <script>"), "no unescaped markup leaks through");
+    }
 
     #[test]
     fn manifest_compatible_with_framework() {

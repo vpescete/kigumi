@@ -20,8 +20,8 @@ use axum::{
 use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{
-    check_access, field_accessible, is_mailed, wizard_for, Acl, Condition, Ctx, Domain, FieldKind,
-    Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
+    check_access, field_accessible, is_mailed, report_for, wizard_for, Acl, Condition, Ctx, Domain,
+    FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
 };
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
@@ -96,6 +96,8 @@ pub fn router_with_data(
         .route("/api/:name/open", post(open_wizard_handler))
         // Apply the discount wizard: write its discount onto the target order's lines.
         .route("/api/:name/:id/apply_discount", post(apply_discount_handler))
+        // Render a record's report as HTML (secured entirely by read access to the record).
+        .route("/api/:name/:id/report/:report", get(report_handler))
         // Attachments (ir.attachment): files on a record. List/download need host read; upload/delete
         // need host write. Bytes live in the content-addressed blob store; the row is metadata.
         .route("/api/:name/:id/attachments", get(list_attachments_handler).post(upload_attachment_handler))
@@ -533,6 +535,34 @@ fn value_to_json(v: &Value) -> Json2 {
         Value::Bool(b) => Json2::Bool(*b),
         Value::Null => Json2::Null,
         Value::List(xs) => Json2::Array(xs.iter().map(value_to_json).collect()),
+    }
+}
+
+/// Renders a registered report for one record as an HTML document. Security is read access to the
+/// record: `find_one_secured` applies the ACL, record rules and company scope, so being able to read
+/// the record is exactly what lets you print it. Unknown report name → 404.
+async fn report_handler(
+    State(state): State<AppState>,
+    Path((name, id, report)): Path<(String, i64, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let Some(reg) = report_for(&name, &report) else {
+        return (StatusCode::NOT_FOUND, "unknown report").into_response();
+    };
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.find_one_secured(model, &ctx, backend.acls, backend.rules, id).await {
+        Ok(Some(rec)) => axum::response::Html((reg.func)(&rec)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
+        Err(DbError::AccessDenied { .. }) => (StatusCode::FORBIDDEN, "access denied").into_response(),
+        Err(e) => internal_error("report", e),
     }
 }
 

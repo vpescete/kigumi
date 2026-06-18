@@ -7,7 +7,7 @@
 mod openapi;
 pub use openapi::openapi;
 
-use meshble_core::{actions_for, delegated_fields, is_mailed, json_string, related_path, Domain, DomainError, FieldDef, FieldKind, ResolvedModel};
+use meshble_core::{actions_for, delegated_fields, is_mailed, json_string, related_path, reports_for, Domain, DomainError, FieldDef, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
 fn pg_type(kind: &FieldKind) -> &'static str {
@@ -201,13 +201,20 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
         })
         .collect();
 
+    // Reports: the HTML/PDF documents a form can print for one record (GET .../report/<name>).
+    let reports: Vec<String> = reports_for(m.name)
+        .iter()
+        .map(|r| format!("    {{ \"name\": {}, \"title\": {} }}", json_string(r.name), json_string(r.title)))
+        .collect();
+
     Ok(format!(
-        "{{\n  \"model\": {},\n  \"type\": \"form\",\n  \"mailed\": {},\n  \"fields\": [\n{}\n  ],\n  \"list\": {{ \"columns\": [\n{}\n  ] }},\n  \"actions\": [\n{}\n  ]\n}}",
+        "{{\n  \"model\": {},\n  \"type\": \"form\",\n  \"mailed\": {},\n  \"fields\": [\n{}\n  ],\n  \"list\": {{ \"columns\": [\n{}\n  ] }},\n  \"actions\": [\n{}\n  ],\n  \"reports\": [\n{}\n  ]\n}}",
         json_string(m.name),
         is_mailed(m.name),
         fields.join(",\n"),
         columns.join(",\n"),
-        actions.join(",\n")
+        actions.join(",\n"),
+        reports.join(",\n")
     ))
 }
 

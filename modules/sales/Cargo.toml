@@ -11,6 +11,8 @@ repository.workspace = true
 meshble = { workspace = true }
 # Exact-money arithmetic in the line/tax compute functions (discount + tax factors).
 rust_decimal = "1"
+# The quotation report render fn reads the record JSON (find_one_secured's shape).
+serde_json = "1"
 # Module dependency mirrors the manifest `depends` (base, mail). Keeping Cargo deps and
 # manifest deps aligned is intentional — a future lint can enforce the match.
 meshble-mod-base = { path = "../base", version = "1.0.0" }
