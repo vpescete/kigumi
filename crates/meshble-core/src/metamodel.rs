@@ -4,6 +4,9 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FieldKind {
     Text,
+    /// Rich text (Postgres `text`), distinguished from [`FieldKind::Text`] by an "html" widget and a
+    /// server-side sanitization (a strict allowlist) applied on every write — stored XSS can't land.
+    Html,
     Integer,
     /// Non-exact floating point (Postgres `double precision`) — quantities, weights, factors, rates.
     /// For money use [`FieldKind::Decimal`] (exact).

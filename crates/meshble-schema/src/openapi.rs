@@ -46,6 +46,7 @@ fn model_schema(m: &ResolvedModel) -> Value {
 fn field_schema(f: &FieldDef) -> Value {
     let mut s = match &f.kind {
         FieldKind::Text => json!({ "type": "string" }),
+        FieldKind::Html => json!({ "type": "string", "format": "html" }),
         FieldKind::Selection(opts) => {
             let variants: Vec<Value> = opts.iter().map(|(k, _)| Value::from(*k)).collect();
             json!({ "type": "string", "enum": variants })

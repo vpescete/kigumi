@@ -1945,7 +1945,7 @@ fn default_json(field: &FieldDef) -> Option<Json> {
         FieldKind::Integer | FieldKind::Many2one { .. } => Json::from(d.parse::<i64>().ok()?),
         FieldKind::Float => Json::from(d.parse::<f64>().ok()?),
         // Decimals + dates travel as strings → parsed/validated by json_to_value.
-        FieldKind::Decimal { .. } | FieldKind::Text | FieldKind::Selection(_) | FieldKind::Date | FieldKind::Datetime => {
+        FieldKind::Decimal { .. } | FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) | FieldKind::Date | FieldKind::Datetime => {
             Json::from(d.to_string())
         }
         FieldKind::One2many { .. } | FieldKind::Many2many { .. } => return None,
@@ -1986,6 +1986,10 @@ fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
     Ok(match (&field.kind, jv) {
         (_, Json::Null) => Value::Null,
         (FieldKind::Text, Json::String(s)) => Value::Str(s.clone()),
+        // Rich text: sanitize on write with a strict allowlist (ammonia) so stored XSS can never land
+        // — <script>, event-handler attributes and javascript: URLs are stripped before the value is
+        // ever stored. The stored value is already safe, so any reader/renderer can trust it.
+        (FieldKind::Html, Json::String(s)) => Value::Str(ammonia::clean(s)),
         (FieldKind::Selection(opts), Json::String(s)) => {
             if !opts.iter().any(|(k, _)| k == s) {
                 return Err(DbError::BadInput(format!(
@@ -2028,7 +2032,7 @@ fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
 /// and is a no-op for non-null values already of that type.
 fn pg_cast(kind: &FieldKind) -> &'static str {
     match kind {
-        FieldKind::Text | FieldKind::Selection(_) => "text",
+        FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) => "text",
         FieldKind::Integer | FieldKind::Many2one { .. } => "bigint",
         FieldKind::Float => "double precision",
         FieldKind::Decimal { .. } => "numeric",
@@ -2247,7 +2251,7 @@ fn related_subquery(model: &ResolvedModel, path: &str) -> Result<String, DbError
 /// kind. NULL → `Value::Null`. Shared by own-field and delegated-field decoding.
 fn decode_value(row: &PgRow, name: &str, kind: &FieldKind) -> Value {
     match kind {
-        FieldKind::Text | FieldKind::Selection(_) => {
+        FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) => {
             row.try_get::<Option<String>, _>(name).ok().flatten().map(Value::Str).unwrap_or(Value::Null)
         }
         FieldKind::Integer | FieldKind::Many2one { .. } => {
@@ -2306,7 +2310,7 @@ fn record_to_values(model: &ResolvedModel, row: &PgRow) -> BTreeMap<String, Valu
 /// a JSON string (preserves precision). Shared by own-field and delegated-field projection.
 fn decode_json(row: &PgRow, name: &str, kind: &FieldKind) -> Result<Json, DbError> {
     Ok(match kind {
-        FieldKind::Text | FieldKind::Selection(_) => {
+        FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) => {
             row.try_get::<Option<String>, _>(name)?.map(Json::from).unwrap_or(Json::Null)
         }
         FieldKind::Integer | FieldKind::Many2one { .. } => {

@@ -108,8 +108,9 @@ pub struct ProductTemplate {
     #[field(label = "Cost", default = "0", tracked)]
     standard_price: Decimal,
 
+    // Rich text (Odoo's product description is HTML): sanitized on write, rendered as an html widget.
     #[field(label = "Description")]
-    description: Text,
+    description: Html,
 
     #[field(label = "Active", default = "true")]
     active: Bool,

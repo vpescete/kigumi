@@ -334,7 +334,7 @@ fn coerce(kind: &FieldKind, raw: &str) -> Result<Value, String> {
         FieldKind::Float => Value::Float(raw.parse::<f64>().map_err(|_| format!("'{raw}' is not a number"))?),
         FieldKind::Bool => Value::Bool(matches!(raw, "true" | "1" | "t" | "yes")),
         // Date/Datetime filters travel as ISO strings; Postgres validates the cast at query time.
-        FieldKind::Text | FieldKind::Selection(_) | FieldKind::Date | FieldKind::Datetime => {
+        FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) | FieldKind::Date | FieldKind::Datetime => {
             Value::Str(raw.to_string())
         }
         FieldKind::One2many { .. } | FieldKind::Many2many { .. } => {

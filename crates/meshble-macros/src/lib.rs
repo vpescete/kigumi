@@ -255,6 +255,7 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
 
     let kind = match kind_name.as_str() {
         "Text" => quote! { ::meshble::prelude::FieldKind::Text },
+        "Html" => quote! { ::meshble::prelude::FieldKind::Html },
         "Integer" => quote! { ::meshble::prelude::FieldKind::Integer },
         "Float" => quote! { ::meshble::prelude::FieldKind::Float },
         "Bool" => quote! { ::meshble::prelude::FieldKind::Bool },
@@ -305,7 +306,7 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
         other => {
             return Err(err(
                 &f.ty,
-                &format!("unknown field type: `{other}` (use Text/Integer/Float/Decimal/Bool/Date/Datetime/Selection/Many2one/One2many/Many2many)"),
+                &format!("unknown field type: `{other}` (use Text/Html/Integer/Float/Decimal/Bool/Date/Datetime/Selection/Many2one/One2many/Many2many)"),
             ))
         }
     };

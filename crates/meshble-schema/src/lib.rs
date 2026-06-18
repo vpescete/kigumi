@@ -12,7 +12,7 @@ use meshble_core::{actions_for, delegated_fields, is_mailed, json_string, relate
 /// Postgres SQL type for a field with a column.
 fn pg_type(kind: &FieldKind) -> &'static str {
     match kind {
-        FieldKind::Text | FieldKind::Selection(_) => "text",
+        FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) => "text",
         FieldKind::Integer => "bigint",
         FieldKind::Float => "double precision",
         FieldKind::Decimal { .. } => "numeric",
@@ -56,6 +56,7 @@ pub fn to_ddl(m: &ResolvedModel) -> String {
 fn widget(kind: &FieldKind) -> &'static str {
     match kind {
         FieldKind::Text => "char",
+        FieldKind::Html => "html",
         FieldKind::Integer => "integer",
         FieldKind::Float => "float",
         FieldKind::Decimal { currency_field: Some(_) } => "monetary",
