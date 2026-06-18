@@ -10,24 +10,32 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use axum::{
+    body::Bytes,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{
-    field_accessible, is_mailed, Acl, Condition, Ctx, Domain, FieldKind, Operator, RecordRule,
-    ResolvedModel, Value,
+    check_access, field_accessible, is_mailed, Acl, Condition, Ctx, Domain, FieldKind, Operation,
+    Operator, RecordRule, ResolvedModel, Value,
 };
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
+use meshble_storage::{sha256_hex, BlobStore};
+
+// Re-exported so hosts (the CLI) and tests can construct a store without a direct meshble-storage dep.
+pub use meshble_storage::FsBlobStore;
 
 /// Access tokens are short-lived; refresh tokens long-lived (and revocable/rotated server-side).
 const ACCESS_TTL: u64 = 900; // 15 minutes
 const REFRESH_TTL: u64 = 2_592_000; // 30 days
+/// Maximum request body, bounding an upload (and any JSON write) in memory. Explicit so it is neither
+/// axum's restrictive 2 MB default nor unbounded. Config-driven sizing is a later enhancement.
+const MAX_BODY_BYTES: usize = 25 * 1024 * 1024;
 
 #[derive(Clone)]
 struct AppState {
@@ -41,6 +49,7 @@ struct DataBackend {
     acls: &'static [Acl],
     rules: &'static [RecordRule],
     auth: Arc<Authenticator>,
+    blobs: Arc<dyn BlobStore>,
 }
 
 fn base_router() -> Router<AppState> {
@@ -57,12 +66,14 @@ pub fn router(models: Vec<ResolvedModel>) -> Router {
 
 /// Full router: metadata routes plus secured CRUD data endpoints. `auth_secret` is the HS256
 /// secret used to verify the `Authorization: Bearer <token>` of each data request into a `Ctx`.
+#[allow(clippy::too_many_arguments)]
 pub fn router_with_data(
     models: Vec<ResolvedModel>,
     db: Db,
     acls: &'static [Acl],
     rules: &'static [RecordRule],
     auth_secret: impl Into<String>,
+    blobs: Arc<dyn BlobStore>,
 ) -> Router {
     base_router()
         .route("/auth/login", post(login_handler))
@@ -79,6 +90,11 @@ pub fn router_with_data(
         .route("/api/:name/:id/action/:action", post(action_handler))
         // Variant generation: materialize a product.template's attribute combinations into variants.
         .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
+        // Attachments (ir.attachment): files on a record. List/download need host read; upload/delete
+        // need host write. Bytes live in the content-addressed blob store; the row is metadata.
+        .route("/api/:name/:id/attachments", get(list_attachments_handler).post(upload_attachment_handler))
+        .route("/api/attachment/:aid/content", get(download_attachment_handler))
+        .route("/api/attachment/:aid", delete(delete_attachment_handler))
         // Chatter (mail subsystem): a record's message thread. Gated by read access to the host.
         .route("/api/:name/:id/messages", get(messages_handler))
         .route("/api/:name/:id/message", post(post_message_handler))
@@ -97,8 +113,10 @@ pub fn router_with_data(
                 acls,
                 rules,
                 auth: Arc::new(Authenticator::new(auth_secret)),
+                blobs,
             }),
         })
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
 }
 
 /// Verifies the request's bearer token into a trusted `Ctx`, or a 401 response. This is real
@@ -574,6 +592,200 @@ async fn chatter_gate(
 fn thread_filter(name: &str, id: i64) -> Domain {
     Domain::Cond(Condition { field: "res_model".into(), op: Operator::Eq, value: Value::Str(name.to_string()) })
         .and(Domain::Cond(Condition { field: "res_id".into(), op: Operator::Eq, value: Value::Int(id) }))
+}
+
+/// Strips a header-unsafe string down to printable ASCII (no control chars, no `"`), or a fallback —
+/// so a stored filename / mimetype cannot inject into a response header on download.
+fn header_safe(s: &str, fallback: &str) -> String {
+    let cleaned: String =
+        s.chars().filter(|c| c.is_ascii() && !c.is_ascii_control() && *c != '"').collect();
+    if cleaned.trim().is_empty() {
+        fallback.to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Gates an attachment request: the host model must be served and the host record visible to the
+/// caller (read). For a mutation (`write`), the caller must also hold Write on the host model — you
+/// modify a record's attachment set only if you can modify the record. The single access chokepoint.
+async fn attachment_gate(
+    state: &AppState,
+    backend: &DataBackend,
+    ctx: &Ctx,
+    name: &str,
+    id: i64,
+    write: bool,
+) -> Result<(), Response> {
+    let host = resolve_model(state, name)?;
+    if write && !check_access(Operation::Write, name, ctx, backend.acls) {
+        return Err((StatusCode::FORBIDDEN, "access denied").into_response());
+    }
+    match backend.db.find_one_secured(host, ctx, backend.acls, backend.rules, id).await {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err((StatusCode::NOT_FOUND, "not found or not permitted").into_response()),
+        Err(DbError::AccessDenied { .. }) => Err((StatusCode::FORBIDDEN, "access denied").into_response()),
+        Err(e) => Err(internal_error("attachment-gate", e)),
+    }
+}
+
+/// Shared opening of the host-anchored attachment endpoints: authenticate, gate on the host record,
+/// resolve the served `ir.attachment` model. Returns `(backend, ctx, attachment_model)`.
+async fn attachment_setup<'a>(
+    state: &'a AppState,
+    headers: &HeaderMap,
+    name: &str,
+    id: i64,
+    write: bool,
+) -> Result<(&'a DataBackend, Ctx, &'a ResolvedModel), Response> {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = authenticate(backend, headers)?;
+    attachment_gate(state, backend, &ctx, name, id, write).await?;
+    let model = served_model(state, "ir.attachment")?;
+    Ok((backend, ctx, model))
+}
+
+/// `GET /api/:name/:id/attachments` — list a record's attachment metadata (no bytes). Host read gate.
+async fn list_attachments_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    let (backend, ctx, att) = match attachment_setup(&state, &headers, &name, id, false).await {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
+    // The gate IS the access decision; read the (admin-only) attachment model elevated.
+    let su = ctx.sudo();
+    match backend.db.find_secured(att, &su, backend.acls, backend.rules, Some(&thread_filter(&name, id))).await {
+        Ok(rows) => json_response(serde_json::json!({ "data": rows }).to_string()),
+        Err(e) => write_error("attachments", e),
+    }
+}
+
+/// `POST /api/:name/:id/attachments` — upload a file onto a record. Host WRITE gate. The raw body is
+/// the bytes; `X-Filename` and `Content-Type` headers carry the name and mimetype.
+async fn upload_attachment_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let (backend, ctx, att) = match attachment_setup(&state, &headers, &name, id, true).await {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
+    if body.is_empty() {
+        return (StatusCode::BAD_REQUEST, "empty upload").into_response();
+    }
+    let filename = headers.get("x-filename").and_then(|v| v.to_str().ok()).unwrap_or("file").to_string();
+    let mimetype = headers.get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("application/octet-stream").to_string();
+    let sha = sha256_hex(&body);
+    // Store the bytes (content-addressed, verified, deduplicated) BEFORE recording the metadata.
+    if let Err(e) = backend.blobs.put(&sha, &body).await {
+        return internal_error("attachment-put", e);
+    }
+    let su = ctx.sudo();
+    let payload = serde_json::json!({
+        "name": filename,
+        "res_model": name,
+        "res_id": id,
+        "mimetype": mimetype,
+        "file_size": body.len() as i64,
+        "checksum": sha,
+    });
+    match backend.db.insert_secured(att, &su, backend.acls, backend.rules, payload.as_object().unwrap()).await {
+        Ok(aid) => json_status(
+            StatusCode::CREATED,
+            serde_json::json!({ "id": aid, "name": filename, "mimetype": mimetype, "file_size": body.len(), "checksum": sha }).to_string(),
+        ),
+        Err(e) => write_error("attachment", e),
+    }
+}
+
+/// `GET /api/attachment/:aid/content` — stream an attachment's bytes. Gated by READ on its HOST record.
+async fn download_attachment_handler(
+    State(state): State<AppState>,
+    Path(aid): Path<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let att = match served_model(&state, "ir.attachment") {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    // Read the attachment row elevated, then gate on READ of the host record it is attached to.
+    let su = ctx.sudo();
+    let row = match backend.db.find_one_secured(att, &su, backend.acls, backend.rules, aid).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return (StatusCode::NOT_FOUND, "attachment not found").into_response(),
+        Err(e) => return write_error("attachment", e),
+    };
+    let res_model = row.get("res_model").and_then(|v| v.as_str()).unwrap_or("");
+    let res_id = row.get("res_id").and_then(|v| v.as_i64()).unwrap_or(0);
+    if let Err(r) = attachment_gate(&state, backend, &ctx, res_model, res_id, false).await {
+        return r;
+    }
+    let checksum = row.get("checksum").and_then(|v| v.as_str()).unwrap_or("");
+    let mimetype = header_safe(row.get("mimetype").and_then(|v| v.as_str()).unwrap_or(""), "application/octet-stream");
+    let filename = header_safe(row.get("name").and_then(|v| v.as_str()).unwrap_or(""), "file");
+    // Serve INLINE only for a safe allowlist (images / pdf). Anything else — notably a user-uploaded
+    // text/html blob — is forced to download (`attachment`) with `nosniff`, so it can never execute as
+    // script in the app's origin. The uploader controls the mimetype, so inline-by-default is unsafe.
+    let disposition = match mimetype.as_str() {
+        "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "application/pdf" => "inline",
+        _ => "attachment",
+    };
+    match backend.blobs.get(checksum).await {
+        Ok(bytes) => (
+            [
+                ("content-type", mimetype),
+                ("content-disposition", format!("{disposition}; filename=\"{filename}\"")),
+                ("x-content-type-options", "nosniff".to_string()),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(e) => internal_error("attachment-get", e),
+    }
+}
+
+/// `DELETE /api/attachment/:aid` — remove an attachment row. Gated by WRITE on its HOST record. The
+/// blob is left for GC (it may be shared by another attachment via content-address dedup).
+async fn delete_attachment_handler(
+    State(state): State<AppState>,
+    Path(aid): Path<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let att = match served_model(&state, "ir.attachment") {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let su = ctx.sudo();
+    let row = match backend.db.find_one_secured(att, &su, backend.acls, backend.rules, aid).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return (StatusCode::NOT_FOUND, "attachment not found").into_response(),
+        Err(e) => return write_error("attachment", e),
+    };
+    let res_model = row.get("res_model").and_then(|v| v.as_str()).unwrap_or("");
+    let res_id = row.get("res_id").and_then(|v| v.as_i64()).unwrap_or(0);
+    if let Err(r) = attachment_gate(&state, backend, &ctx, res_model, res_id, true).await {
+        return r;
+    }
+    match backend.db.delete_secured(att, &su, backend.acls, backend.rules, aid).await {
+        Ok(0) => (StatusCode::NOT_FOUND, "attachment not found").into_response(),
+        Ok(_) => json_response(serde_json::json!({ "deleted": 1 }).to_string()),
+        Err(e) => write_error("attachment", e),
+    }
 }
 
 /// `GET /api/:name/:id/messages` — the record's message thread, oldest first (by id).

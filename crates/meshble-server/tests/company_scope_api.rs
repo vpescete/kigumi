@@ -94,7 +94,8 @@ async fn login_scopes_data_to_the_users_company() {
     // Assigning a company to a non-existent user is an error, not a silent no-op.
     assert!(setup.set_user_companies("ghost", Some(c1), &[]).await.is_err());
 
-    let app = router_with_data(vec![model()], Db::connect(&url).await.unwrap(), ACLS, RULES, SECRET);
+    let blobs = std::sync::Arc::new(meshble_server::FsBlobStore::new(std::env::temp_dir().join("meshble_test_blobs")));
+    let app = router_with_data(vec![model()], Db::connect(&url).await.unwrap(), ACLS, RULES, SECRET, blobs);
 
     // The scoped user's login token sees only its company's row.
     let (s, tok) = post(app.clone(), "/auth/login", r#"{"login":"scoped","password":"pw"}"#).await;

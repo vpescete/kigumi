@@ -114,7 +114,8 @@ async fn generate_variants_endpoint_authorization() {
 
     let app_db = Db::connect(&url).await.unwrap();
     let models = vec![m(&ATTRIBUTE), m(&ATTR_VALUE), m(&TEMPLATE), m(&VARIANT), m(&LINE), m(&PTAV)];
-    let app = router_with_data(models, app_db, ACLS, &[], SECRET);
+    let blobs = std::sync::Arc::new(meshble_server::FsBlobStore::new(std::env::temp_dir().join("meshble_test_blobs")));
+    let app = router_with_data(models, app_db, ACLS, &[], SECRET, blobs);
 
     let gen = format!("/api/product.template/{t}/generate_variants");
 

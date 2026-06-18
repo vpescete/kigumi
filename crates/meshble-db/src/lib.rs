@@ -1470,11 +1470,14 @@ impl Db {
             q = bind_query(q, v);
         }
         let affected = q.execute(&self.pool).await?.rows_affected();
-        // Polymorphic-integrity fix: a mailed record's thread (messages/activities/followers) is
-        // linked by (res_model, res_id), which the metamodel can't express as an FK. Clean it here —
-        // reliable because this is Meshble's ONLY delete path (unlike Odoo, where bulk SQL orphans it).
-        if affected > 0 && is_mailed(model.name) {
-            self.cleanup_thread(model.name, id).await?;
+        // Polymorphic-integrity fix: a record's attachments and (if mailed) its thread are linked by
+        // (res_model, res_id), which the metamodel can't express as an FK. Clean them on this — Meshble's
+        // ONLY delete path (unlike Odoo, where bulk SQL orphans them).
+        if affected > 0 {
+            self.cleanup_attachments(model.name, id).await?;
+            if is_mailed(model.name) {
+                self.cleanup_thread(model.name, id).await?;
+            }
         }
         for (parent, pid) in parents {
             self.recompute_parent(&parent, pid).await?;
@@ -1508,6 +1511,19 @@ impl Db {
             self.exec_tolerant(&sql, model_name, id).await?;
         }
         Ok(())
+    }
+
+    /// Removes a deleted record's attachment rows (polymorphic `(res_model, res_id)`). The blobs are
+    /// NOT reclaimed here: a content-addressed blob can be shared across records by dedup, so freeing it
+    /// is a separate mark-sweep GC (deferred to the operations milestone). Tolerates the attachment
+    /// table not being migrated. Runs on EVERY delete (any record may carry attachments), not just mailed.
+    async fn cleanup_attachments(&self, model_name: &str, id: i64) -> Result<(), DbError> {
+        self.exec_tolerant(
+            "DELETE FROM meshble_attachment WHERE res_model = $1 AND res_id = $2",
+            model_name,
+            id,
+        )
+        .await
     }
 
     /// Runs a `(res_model, res_id)`-parameterized DELETE, tolerating a missing table (42P01 →
@@ -1605,6 +1621,8 @@ impl Db {
             // Composite UNIQUE makes following idempotent (one subscription per user per record) and
             // indexes the follower lookup. The metamodel can't express composite uniqueness yet.
             "CREATE UNIQUE INDEX IF NOT EXISTS mail_follower_uniq ON mail_follower (res_model, res_id, user_id)",
+            // ir.attachment shares the polymorphic shape; index its host lookup (list + delete-cleanup).
+            "CREATE INDEX IF NOT EXISTS meshble_attachment_res_idx ON meshble_attachment (res_model, res_id)",
         ] {
             match sqlx::query(sql).execute(&self.pool).await {
                 Ok(_) => {}

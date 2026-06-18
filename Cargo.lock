@@ -1212,6 +1212,7 @@ dependencies = [
  "meshble-mod-mail",
  "meshble-mod-sales",
  "meshble-server",
+ "meshble-storage",
  "serde_json",
  "tokio",
 ]
@@ -1325,9 +1326,11 @@ dependencies = [
  "meshble-core",
  "meshble-db",
  "meshble-schema",
+ "meshble-storage",
  "rust_decimal",
  "serde_json",
  "sqlx",
+ "tempfile",
  "tokio",
  "tower",
 ]

@@ -123,14 +123,45 @@ pub struct ResUsers {
 }
 meshble::register_external!("res.users");
 
+/// Attachment (Odoo's `ir.attachment`): a file attached to any record via a polymorphic
+/// `(res_model, res_id)` link (no FK — like the mail thread). The bytes live in the content-addressed
+/// blob store keyed by `checksum` (sha256); this row holds only metadata. Generic CRUD is admin-only —
+/// uploads/downloads go through the gated `/attachments` endpoints, which run elevated after a host
+/// access check (read to list/download, write to upload/delete).
+#[model(name = "ir.attachment", table = "meshble_attachment")]
+pub struct IrAttachment {
+    #[field(label = "Name", required)]
+    name: Text,
+
+    /// The host record this file is attached to (polymorphic, no FK — like the mail thread).
+    #[field(label = "Resource Model")]
+    res_model: Text,
+
+    #[field(label = "Resource ID")]
+    res_id: Integer,
+
+    #[field(label = "Mime Type")]
+    mimetype: Text,
+
+    #[field(label = "File Size")]
+    file_size: Integer,
+
+    /// sha256 of the content — the blob-store key. Identical bytes deduplicate to one blob.
+    #[field(label = "Checksum")]
+    checksum: Text,
+}
+
 /// Base ACLs: the everyday `user` group reads the foundational reference data and the group list;
 /// the user directory (`res.users`) is admin-only (read-only — account changes go through auth).
+/// `ir.attachment` generic CRUD is admin-only: end users reach files through the gated `/attachments`
+/// endpoints (which check host access and run elevated), never the raw model.
 pub static ACLS: &[Acl] = &[
     Acl { model: "res.currency", group: "user", read: true, write: false, create: false, delete: false },
     Acl { model: "res.partner", group: "user", read: true, write: true, create: true, delete: false },
     Acl { model: "res.company", group: "user", read: true, write: false, create: false, delete: false },
     Acl { model: "res.groups", group: "user", read: true, write: false, create: false, delete: false },
     Acl { model: "res.users", group: "admin", read: true, write: false, create: false, delete: false },
+    Acl { model: "ir.attachment", group: "admin", read: true, write: true, create: true, delete: true },
 ];
 meshble::register_acls!(ACLS);
 

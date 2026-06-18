@@ -62,7 +62,8 @@ async fn main() {
 
     let token = Authenticator::new(SECRET).issue_access(1, vec!["user".to_string()], None, vec![], 86_400).unwrap();
     let db_app = Db::connect(&url).await.unwrap();
-    let app = router_with_data(vec![model], db_app, ACLS, RULES, SECRET)
+    let blobs = std::sync::Arc::new(meshble_server::FsBlobStore::new(std::env::temp_dir().join("meshble_demo_blobs")));
+    let app = router_with_data(vec![model], db_app, ACLS, RULES, SECRET, blobs)
         .route("/", get(|| async { Html(UI) }));
 
     let addr = "127.0.0.1:8099";

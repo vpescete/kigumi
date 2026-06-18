@@ -80,7 +80,8 @@ async fn auth_lifecycle() {
     setup.upsert_user("tester", &hash_password("pw").unwrap(), &["u"]).await.unwrap();
 
     let app_db = Db::connect(&url).await.unwrap();
-    let app = router_with_data(vec![model()], app_db, ACLS, RULES, SECRET);
+    let blobs = std::sync::Arc::new(meshble_server::FsBlobStore::new(std::env::temp_dir().join("meshble_test_blobs")));
+    let app = router_with_data(vec![model()], app_db, ACLS, RULES, SECRET, blobs);
 
     // Wrong password and unknown user both → 401 (no user enumeration).
     assert_eq!(post(app.clone(), "/auth/login", r#"{"login":"tester","password":"nope"}"#).await.0, StatusCode::UNAUTHORIZED);

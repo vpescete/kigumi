@@ -441,7 +441,18 @@ async fn serve(s: Settings) -> Fallible {
         }
     });
 
-    let app = router_with_data(models, db, acls, rules, s.secrets.jwt_secret.clone());
+    // Content-addressed blob store for attachments. The root is config-driven (validated present for
+    // the fs backend); identical bytes deduplicate to one immutable file.
+    let blob_root = s
+        .config
+        .storage
+        .path
+        .clone()
+        .ok_or("storage.path is required for the fs blob store")?;
+    let blobs: std::sync::Arc<dyn meshble_storage::BlobStore> =
+        std::sync::Arc::new(meshble_storage::FsBlobStore::new(blob_root));
+
+    let app = router_with_data(models, db, acls, rules, s.secrets.jwt_secret.clone(), blobs);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("meshble serving on http://{bind}  ({} models)", registered_model_names().len());

@@ -85,7 +85,8 @@ async fn secured_data_endpoint_enforces_rules() {
     }
 
     let app_db = Db::connect(&url).await.unwrap();
-    let app = router_with_data(vec![model()], app_db, ACLS, RULES, SECRET);
+    let blobs = std::sync::Arc::new(meshble_server::FsBlobStore::new(std::env::temp_dir().join("meshble_test_blobs")));
+    let app = router_with_data(vec![model()], app_db, ACLS, RULES, SECRET, blobs);
 
     // Group "u": the record rule restricts to active rows → alpha, beta only.
     let (status, body) = get(app.clone(), "/api/widget", Some("u")).await;
@@ -165,7 +166,8 @@ async fn write_path_enforces_acl_and_rules() {
     seed.create_table(&m).await.unwrap();
 
     let app_db = Db::connect(&url).await.unwrap();
-    let app = router_with_data(vec![resolve(&WRITE_MODEL, &[]).unwrap()], app_db, WRITE_ACLS, WRITE_RULES, SECRET);
+    let blobs = std::sync::Arc::new(meshble_server::FsBlobStore::new(std::env::temp_dir().join("meshble_test_blobs")));
+    let app = router_with_data(vec![resolve(&WRITE_MODEL, &[]).unwrap()], app_db, WRITE_ACLS, WRITE_RULES, SECRET, blobs);
 
     // Create (group "u" has Create) → 201.
     let (s, body) = req(app.clone(), "POST", "/api/widget", Some("u"), Some(r#"{"name":"keep","active":true}"#)).await;

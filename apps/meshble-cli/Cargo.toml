@@ -16,6 +16,7 @@ meshble-config = { workspace = true }
 meshble-db = { workspace = true }
 meshble-server = { workspace = true }
 meshble-auth = { workspace = true }
+meshble-storage = { workspace = true }
 # Linked so their models/ACLs/rules self-register into the catalog (inventory).
 meshble-mod-base = { path = "../../modules/base" }
 meshble-mod-mail = { path = "../../modules/mail" }
