@@ -94,6 +94,8 @@ pub fn router_with_data(
         .route("/api/:name/:id/apply_pricelist", post(apply_pricelist_handler))
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
+        // Apply the discount wizard: write its discount onto the target order's lines.
+        .route("/api/:name/:id/apply_discount", post(apply_discount_handler))
         // Attachments (ir.attachment): files on a record. List/download need host read; upload/delete
         // need host write. Bytes live in the content-addressed blob store; the row is metadata.
         .route("/api/:name/:id/attachments", get(list_attachments_handler).post(upload_attachment_handler))
@@ -531,6 +533,30 @@ fn value_to_json(v: &Value) -> Json2 {
         Value::Bool(b) => Json2::Bool(*b),
         Value::Null => Json2::Null,
         Value::List(xs) => Json2::Array(xs.iter().map(value_to_json).collect()),
+    }
+}
+
+/// Applies the discount wizard onto its target order's lines. v1: pinned to sale.order.discount.
+/// Authorization (WRITE on sale.order) + the percent range check live in the db layer.
+async fn apply_discount_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    if name != "sale.order.discount" {
+        return (StatusCode::BAD_REQUEST, "apply_discount is only valid on sale.order.discount").into_response();
+    }
+    if let Err(r) = resolve_model(&state, &name) {
+        return r;
+    }
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.apply_sale_order_discount(&ctx, backend.acls, backend.rules, id).await {
+        Ok(n) => json_response(serde_json::json!({ "discounted": n }).to_string()),
+        Err(e) => write_error("apply_discount", e),
     }
 }
 
