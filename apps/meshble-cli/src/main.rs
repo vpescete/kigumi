@@ -18,6 +18,9 @@ use meshble_server::router_with_data;
 
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
+/// How often the scheduler checks for due cron jobs (each job's own interval lives in the DB).
+const CRON_TICK_SECS: u64 = 60;
+
 /// Forces the module crates to link so their `inventory` registrations are present in this binary.
 fn link_modules() {
     let _ = (&meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST, &meshble_mod_sales::MANIFEST);
@@ -314,6 +317,8 @@ async fn migrate_installed(db: &Db) -> Fallible {
     // Mail subsystem indexes for the polymorphic thread/tracking lookups (idempotent, tolerant if the
     // mail module isn't installed). The metamodel has no index DDL yet, so the framework ensures these.
     db.ensure_mail_indexes().await?;
+    // Scheduled jobs: create the cron ledger and seed the registered jobs (idempotent).
+    db.ensure_crons().await?;
     if installed.iter().any(|m| m == "base") {
         seed_base_data(db).await?;
     }
@@ -423,6 +428,19 @@ async fn serve(s: Settings) -> Fallible {
     if db_acl_count > 0 || db_rule_count > 0 {
         println!("loaded {db_acl_count} runtime ACL override(s), {db_rule_count} runtime rule(s)");
     }
+    // Background scheduler: each registered cron job has its own interval persisted in meshble_cron;
+    // this fixed tick only bounds how promptly a due job is observed. The claim is atomic + SKIP
+    // LOCKED, so running several server processes is safe (no double-run).
+    let cron_db = db.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(CRON_TICK_SECS)).await;
+            if let Err(e) = cron_db.run_due_crons().await {
+                eprintln!("meshble cron tick failed: {e:?}");
+            }
+        }
+    });
+
     let app = router_with_data(models, db, acls, rules, s.secrets.jwt_secret.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;

@@ -8,12 +8,14 @@
 
 mod access_store;
 mod auth_store;
+mod cron;
 mod migration;
 mod module_store;
 mod sequence;
 mod settings;
 pub use access_store::{AclRow, RuleRow};
 pub use auth_store::UserRow;
+pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
@@ -75,7 +77,9 @@ impl From<DomainError> for DbError {
     }
 }
 
-/// A connection pool to a Postgres database.
+/// A connection pool to a Postgres database. `Clone` shares the same pool (cheap; `PgPool` is an
+/// `Arc` internally) — e.g. to hand a handle to the background cron scheduler.
+#[derive(Clone)]
 pub struct Db {
     pool: PgPool,
 }
