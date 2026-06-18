@@ -53,6 +53,37 @@ pub struct SaleMargin {
     margin: Decimal,
 }
 
+/// A product category (Odoo's `product.category`): a hierarchical grouping of products. Self-
+/// referential (a category has an optional parent).
+#[model(name = "product.category", table = "product_category")]
+pub struct ProductCategory {
+    #[field(label = "Name", required)]
+    name: Text,
+
+    #[field(label = "Parent Category", target = "product.category")]
+    parent_id: Many2one,
+}
+
+/// A unit of measure (Odoo's `uom.uom`, simplified): a named unit with a ratio to its category's
+/// reference unit and a rounding precision. Products are sold/stocked in a UoM.
+#[model(name = "uom.uom", table = "uom_uom")]
+pub struct UomUom {
+    #[field(label = "Unit of Measure", required)]
+    name: Text,
+
+    #[field(label = "Type", default = "reference", selection = "bigger:Bigger than the reference,reference:Reference for this category,smaller:Smaller than the reference")]
+    uom_type: Selection,
+
+    #[field(label = "Ratio", default = "1")]
+    factor: Float,
+
+    #[field(label = "Rounding Precision", default = "0.01")]
+    rounding: Float,
+
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+}
+
 /// Product template (Odoo's `product.template`): the SHARED definition of a product — the fields
 /// every variant has in common. Variants (`product.product`) inherit these via `_inherits`, so N
 /// variants share ONE template row with no duplication and no template→variant sync.
@@ -64,6 +95,12 @@ pub struct ProductTemplate {
     // Named `product_type` (not `type`: a SQL reserved word and a Rust keyword).
     #[field(label = "Type", default = "consu", selection = "consu:Goods,service:Service")]
     product_type: Selection,
+
+    #[field(label = "Product Category", target = "product.category")]
+    categ_id: Many2one,
+
+    #[field(label = "Unit of Measure", target = "uom.uom")]
+    uom_id: Many2one,
 
     #[field(label = "Sales Price", default = "0", tracked)]
     list_price: Decimal,
@@ -180,6 +217,11 @@ pub fn resolved_sale_order() -> ResolvedModel {
 pub static ACLS: &[Acl] = &[
     Acl { model: "sale.order", group: "sales.user", read: true, write: true, create: true, delete: false },
     Acl { model: "sale.order.line", group: "sales.user", read: true, write: true, create: true, delete: true },
+    // Catalog reference data (categories, units): read by everyone in sales, maintained by managers.
+    Acl { model: "product.category", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.category", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "uom.uom", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "uom.uom", group: "sales.manager", read: true, write: true, create: true, delete: true },
     // Templates mirror variants: everyone in sales reads, managers maintain. A manager creating a
     // variant auto-creates its template, so the create/write ACLs must match product.product's.
     Acl { model: "product.template", group: "sales.user", read: true, write: false, create: false, delete: false },
