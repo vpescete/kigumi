@@ -47,6 +47,8 @@ fn field_schema(f: &FieldDef) -> Value {
     let mut s = match &f.kind {
         FieldKind::Text => json!({ "type": "string" }),
         FieldKind::Html => json!({ "type": "string", "format": "html" }),
+        // An Image is an attachment id (the bytes are fetched via the attachment content endpoint).
+        FieldKind::Image => json!({ "type": "integer", "format": "int64" }),
         FieldKind::Selection(opts) => {
             let variants: Vec<Value> = opts.iter().map(|(k, _)| Value::from(*k)).collect();
             json!({ "type": "string", "enum": variants })

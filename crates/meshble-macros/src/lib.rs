@@ -256,6 +256,7 @@ fn build_field(f: &syn::Field) -> syn::Result<TokenStream2> {
     let kind = match kind_name.as_str() {
         "Text" => quote! { ::meshble::prelude::FieldKind::Text },
         "Html" => quote! { ::meshble::prelude::FieldKind::Html },
+        "Image" => quote! { ::meshble::prelude::FieldKind::Image },
         "Integer" => quote! { ::meshble::prelude::FieldKind::Integer },
         "Float" => quote! { ::meshble::prelude::FieldKind::Float },
         "Bool" => quote! { ::meshble::prelude::FieldKind::Bool },

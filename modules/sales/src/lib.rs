@@ -112,6 +112,12 @@ pub struct ProductTemplate {
     #[field(label = "Description")]
     description: Html,
 
+    // A product image: an ir.attachment whose bytes live in the blob store. Set after uploading the
+    // image as an attachment to the product; the FE renders it via the attachment content endpoint.
+    // Delegated to the variant, which inherits the template image unless it sets its own.
+    #[field(label = "Image")]
+    image: Image,
+
     #[field(label = "Active", default = "true")]
     active: Bool,
 }
@@ -443,6 +449,19 @@ mod tests {
             tags.kind,
             FieldKind::Many2many { target: "product.tag", relation: "product_product_tag_rel", column: "product_id", target_column: "tag_id" }
         ));
+    }
+
+    #[test]
+    fn product_image_is_an_attachment_fk_with_image_widget() {
+        let m = resolve_registered("product.template").unwrap();
+        let img = m.fields.iter().find(|f| f.name == "image").unwrap();
+        assert!(matches!(img.kind, FieldKind::Image));
+        assert!(img.has_column(), "Image is a stored FK column");
+        let ddl = to_ddl(&m);
+        assert!(ddl.contains("image bigint REFERENCES meshble_attachment(id)"), "image FK in DDL: {ddl}");
+        let contract = to_ui_contract(&m, &[]).unwrap();
+        assert!(contract.contains("\"name\": \"image\""), "image in contract");
+        assert!(contract.contains("\"widget\": \"image\""), "image widget");
     }
 
     #[test]

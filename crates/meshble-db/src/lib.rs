@@ -1960,7 +1960,7 @@ fn default_json(field: &FieldDef) -> Option<Json> {
     let d = field.default?;
     Some(match field.kind {
         FieldKind::Bool => Json::Bool(matches!(d, "true" | "1" | "t" | "yes")),
-        FieldKind::Integer | FieldKind::Many2one { .. } => Json::from(d.parse::<i64>().ok()?),
+        FieldKind::Integer | FieldKind::Many2one { .. } | FieldKind::Image => Json::from(d.parse::<i64>().ok()?),
         FieldKind::Float => Json::from(d.parse::<f64>().ok()?),
         // Decimals + dates travel as strings → parsed/validated by json_to_value.
         FieldKind::Decimal { .. } | FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) | FieldKind::Date | FieldKind::Datetime => {
@@ -2017,12 +2017,12 @@ fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
             }
             Value::Str(s.clone())
         }
-        (FieldKind::Integer | FieldKind::Many2one { .. }, Json::Number(n)) => {
+        (FieldKind::Integer | FieldKind::Many2one { .. } | FieldKind::Image, Json::Number(n)) => {
             Value::Int(n.as_i64().ok_or_else(bad)?)
         }
-        // Accept a numeric STRING for an integer/relation field (HTML number inputs and some clients
-        // serialize ids as strings) — coerce at the boundary rather than fail with a type error.
-        (FieldKind::Integer | FieldKind::Many2one { .. }, Json::String(s)) => {
+        // Accept a numeric STRING for an integer/relation/image field (HTML number inputs and some
+        // clients serialize ids as strings) — coerce at the boundary rather than fail with a type error.
+        (FieldKind::Integer | FieldKind::Many2one { .. } | FieldKind::Image, Json::String(s)) => {
             Value::Int(s.trim().parse().map_err(|_| bad())?)
         }
         // Exact decimal: parse from the number's canonical STRING (not f64) so 0.01 etc. are exact;
@@ -2051,7 +2051,7 @@ fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {
 fn pg_cast(kind: &FieldKind) -> &'static str {
     match kind {
         FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) => "text",
-        FieldKind::Integer | FieldKind::Many2one { .. } => "bigint",
+        FieldKind::Integer | FieldKind::Many2one { .. } | FieldKind::Image => "bigint",
         FieldKind::Float => "double precision",
         FieldKind::Decimal { .. } => "numeric",
         FieldKind::Bool => "boolean",
@@ -2272,7 +2272,7 @@ fn decode_value(row: &PgRow, name: &str, kind: &FieldKind) -> Value {
         FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) => {
             row.try_get::<Option<String>, _>(name).ok().flatten().map(Value::Str).unwrap_or(Value::Null)
         }
-        FieldKind::Integer | FieldKind::Many2one { .. } => {
+        FieldKind::Integer | FieldKind::Many2one { .. } | FieldKind::Image => {
             row.try_get::<Option<i64>, _>(name).ok().flatten().map(Value::Int).unwrap_or(Value::Null)
         }
         FieldKind::Float => {
@@ -2331,7 +2331,7 @@ fn decode_json(row: &PgRow, name: &str, kind: &FieldKind) -> Result<Json, DbErro
         FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) => {
             row.try_get::<Option<String>, _>(name)?.map(Json::from).unwrap_or(Json::Null)
         }
-        FieldKind::Integer | FieldKind::Many2one { .. } => {
+        FieldKind::Integer | FieldKind::Many2one { .. } | FieldKind::Image => {
             row.try_get::<Option<i64>, _>(name)?.map(Json::from).unwrap_or(Json::Null)
         }
         FieldKind::Float => row.try_get::<Option<f64>, _>(name)?.map(Json::from).unwrap_or(Json::Null),

@@ -19,7 +19,8 @@ fn pg_type(kind: &FieldKind) -> &'static str {
         FieldKind::Bool => "boolean",
         FieldKind::Date => "date",
         FieldKind::Datetime => "timestamptz",
-        FieldKind::Many2one { .. } => "bigint",
+        // An Image is a bigint FK to ir.attachment (the FK clause is added in `to_ddl`).
+        FieldKind::Many2one { .. } | FieldKind::Image => "bigint",
         // No column on this model: One2many lives on the inverse, Many2many in a junction table.
         FieldKind::One2many { .. } | FieldKind::Many2many { .. } => "",
     }
@@ -34,8 +35,11 @@ pub fn to_ddl(m: &ResolvedModel) -> String {
     let mut lines = vec!["  id bigserial PRIMARY KEY".to_string()];
     for f in m.fields.iter().filter(|f| f.has_column()) {
         let mut col = format!("  {} {}", f.name, pg_type(&f.kind));
-        if let FieldKind::Many2one { target } = f.kind {
-            col.push_str(&format!(" REFERENCES {}(id)", table_of(target)));
+        match f.kind {
+            FieldKind::Many2one { target } => col.push_str(&format!(" REFERENCES {}(id)", table_of(target))),
+            // An Image references the attachment table directly (ir.attachment → meshble_attachment).
+            FieldKind::Image => col.push_str(" REFERENCES meshble_attachment(id)"),
+            _ => {}
         }
         if f.required {
             col.push_str(" NOT NULL");
@@ -57,6 +61,7 @@ fn widget(kind: &FieldKind) -> &'static str {
     match kind {
         FieldKind::Text => "char",
         FieldKind::Html => "html",
+        FieldKind::Image => "image",
         FieldKind::Integer => "integer",
         FieldKind::Float => "float",
         FieldKind::Decimal { currency_field: Some(_) } => "monetary",

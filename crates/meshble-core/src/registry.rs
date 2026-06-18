@@ -304,7 +304,13 @@ pub fn migration_plan() -> Result<Vec<MigrationTarget>, String> {
     let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); n];
     for (i, m) in models.iter().enumerate() {
         for f in &m.fields {
-            if let crate::FieldKind::Many2one { target } = f.kind {
+            // An Image is a real FK to ir.attachment, so it constrains ordering like a Many2one.
+            let target = match f.kind {
+                crate::FieldKind::Many2one { target } => Some(target),
+                crate::FieldKind::Image => Some("ir.attachment"),
+                _ => None,
+            };
+            if let Some(target) = target {
                 if let Some(&j) = index.get(target) {
                     if j != i {
                         indeg[i] += 1;

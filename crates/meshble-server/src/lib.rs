@@ -343,7 +343,7 @@ fn build_leaf(model: &ResolvedModel, field: &str, op: &str, raw: &str) -> Result
 /// Coerces a query string to a typed [`Value`] for the field's kind.
 fn coerce(kind: &FieldKind, raw: &str) -> Result<Value, String> {
     Ok(match kind {
-        FieldKind::Integer | FieldKind::Many2one { .. } => {
+        FieldKind::Integer | FieldKind::Many2one { .. } | FieldKind::Image => {
             Value::Int(raw.parse().map_err(|_| format!("'{raw}' is not an integer"))?)
         }
         FieldKind::Decimal { .. } => {

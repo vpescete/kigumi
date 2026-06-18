@@ -7,6 +7,10 @@ pub enum FieldKind {
     /// Rich text (Postgres `text`), distinguished from [`FieldKind::Text`] by an "html" widget and a
     /// server-side sanitization (a strict allowlist) applied on every write — stored XSS can't land.
     Html,
+    /// An image: a bigint FK to `ir.attachment` (the bytes live in the content-addressed blob store).
+    /// Read/written as the attachment id; rendered by fetching the attachment's content. Set the field
+    /// after uploading the attachment to the record.
+    Image,
     Integer,
     /// Non-exact floating point (Postgres `double precision`) — quantities, weights, factors, rates.
     /// For money use [`FieldKind::Decimal`] (exact).
