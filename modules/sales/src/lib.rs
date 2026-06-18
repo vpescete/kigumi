@@ -136,6 +136,12 @@ pub struct ProductProduct {
     // First-class Many2many: variant tags through a junction table.
     #[field(label = "Tags", target = "product.tag", relation = "product_product_tag_rel", column = "product_id", target_column = "tag_id")]
     tag_ids: Many2many,
+
+    // The exact attribute combination this variant represents: the set of `product.template.attribute.value`
+    // rows (one per attribute line). The variant-generation engine sets this; the combo key derived from
+    // it is how regeneration recognises an existing variant (so it is kept/reactivated, never duplicated).
+    #[field(label = "Attribute Values", target = "product.template.attribute.value", relation = "variant_ptav_rel", column = "product_id", target_column = "ptav_id")]
+    product_template_attribute_value_ids: Many2many,
 }
 
 /// A product tag/label (the comodel of `product.product.tag_ids`).
@@ -143,6 +149,75 @@ pub struct ProductProduct {
 pub struct ProductTag {
     #[field(label = "Name", required, unique)]
     name: Text,
+}
+
+/// A product attribute (Odoo's `product.attribute`): a configurable dimension of a product, e.g.
+/// "Color" or "Size". Its values (`product.attribute.value`) are combined across a template's
+/// attribute lines to generate variants.
+#[model(name = "product.attribute", table = "product_attribute")]
+pub struct ProductAttribute {
+    #[field(label = "Attribute", required)]
+    name: Text,
+
+    // `always` values multiply into variants; `no_variant` values are informational only and are
+    // excluded from the cartesian product (Odoo also has `dynamic`, dropped for v1).
+    #[field(label = "Variant Creation", default = "always", selection = "always:Instantly,no_variant:Never (option)")]
+    create_variant: Selection,
+
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+}
+
+/// A possible value of an attribute (Odoo's `product.attribute.value`), e.g. "Red" of "Color".
+#[model(name = "product.attribute.value", table = "product_attribute_value")]
+pub struct ProductAttributeValue {
+    #[field(label = "Value", required)]
+    name: Text,
+
+    #[field(label = "Attribute", required, target = "product.attribute")]
+    attribute_id: Many2one,
+
+    // Deterministic ordering of values within an attribute → a stable, order-independent combo key.
+    #[field(label = "Sequence", default = "10")]
+    sequence: Integer,
+}
+
+/// A template's attribute line (Odoo's `product.template.attribute.line`): on THIS template, which
+/// attribute is configured and which of its values are selected. One line per (template, attribute);
+/// the engine reads `value_ids` to build the cartesian product.
+#[model(name = "product.template.attribute.line", table = "product_template_attribute_line")]
+pub struct ProductTemplateAttributeLine {
+    #[field(label = "Product Template", required, target = "product.template")]
+    product_tmpl_id: Many2one,
+
+    #[field(label = "Attribute", required, target = "product.attribute")]
+    attribute_id: Many2one,
+
+    // The selected values for this attribute on this template (a subset of the attribute's values).
+    // The engine reads this through the standard M2M projection (it consumes these descriptor column
+    // names — `line_id`/`value_id` — never hand-written SQL), so the junction naming is internal.
+    #[field(label = "Values", target = "product.attribute.value", relation = "ptal_value_rel", column = "line_id", target_column = "value_id")]
+    value_ids: Many2many,
+}
+
+/// The per-template instance of a chosen value (Odoo's `product.template.attribute.value`): the join
+/// row tying a generated variant to one cell of its combination. `product_tmpl_id` is denormalized
+/// for fast diff queries. Odoo's `price_extra`/`ptav_active` are deferred (additive later).
+///
+/// Engine-managed, NOT user input: it is read-only over the API (the generation engine creates these
+/// elevated, after the manager gate, like the mail subsystem). That, plus the engine's per-template
+/// advisory lock and a composite-unique index added in the engine slice, keeps it free of duplicate
+/// `(attribute_line_id, product_attribute_value_id)` cells that would split one combo across two ids.
+#[model(name = "product.template.attribute.value", table = "product_template_attribute_value")]
+pub struct ProductTemplateAttributeValue {
+    #[field(label = "Product Template", required, target = "product.template")]
+    product_tmpl_id: Many2one,
+
+    #[field(label = "Attribute Line", required, target = "product.template.attribute.line")]
+    attribute_line_id: Many2one,
+
+    #[field(label = "Attribute Value", required, target = "product.attribute.value")]
+    product_attribute_value_id: Many2one,
 }
 
 /// A line of a sale order: a product, a quantity, a unit price. `price_subtotal` and `margin` are
@@ -230,6 +305,19 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "product.product", group: "sales.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "product.tag", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "product.tag", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    // Attribute configuration is user input: everyone in sales reads, managers maintain the attributes,
+    // their values, and a template's attribute lines.
+    Acl { model: "product.attribute", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.attribute", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "product.attribute.value", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.attribute.value", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "product.template.attribute.line", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.template.attribute.line", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    // PTAV is the engine's generated join row, NOT user input: read-only for everyone. The generation
+    // engine creates it elevated (after the manager gate), so no user-facing create path can inject a
+    // duplicate cell out from under the engine's per-template lock.
+    Acl { model: "product.template.attribute.value", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.template.attribute.value", group: "sales.manager", read: true, write: false, create: false, delete: false },
 ];
 
 fn not_done() -> Domain {
@@ -334,6 +422,44 @@ mod tests {
         assert!(matches!(
             tags.kind,
             FieldKind::Many2many { target: "product.tag", relation: "product_product_tag_rel", column: "product_id", target_column: "tag_id" }
+        ));
+    }
+
+    #[test]
+    fn variant_models_shape() {
+        // Pin the field names/relations the generation engine hardcodes (later slices), so a rename
+        // breaks here loudly rather than silently mis-wiring the engine.
+        let attr = resolve_registered("product.attribute").unwrap();
+        assert!(matches!(
+            attr.fields.iter().find(|f| f.name == "create_variant").unwrap().kind,
+            FieldKind::Selection(&[("always", _), ("no_variant", _)])
+        ));
+
+        let val = resolve_registered("product.attribute.value").unwrap();
+        assert!(matches!(val.fields.iter().find(|f| f.name == "attribute_id").unwrap().kind, FieldKind::Many2one { target: "product.attribute" }));
+        assert!(matches!(val.fields.iter().find(|f| f.name == "sequence").unwrap().kind, FieldKind::Integer));
+
+        let line = resolve_registered("product.template.attribute.line").unwrap();
+        let value_ids = line.fields.iter().find(|f| f.name == "value_ids").unwrap();
+        assert!(!value_ids.has_column(), "value_ids is a junction-backed M2M");
+        assert!(matches!(
+            value_ids.kind,
+            FieldKind::Many2many { target: "product.attribute.value", relation: "ptal_value_rel", column: "line_id", target_column: "value_id" }
+        ));
+
+        let ptav = resolve_registered("product.template.attribute.value").unwrap();
+        for (f, t) in [("product_tmpl_id", "product.template"), ("attribute_line_id", "product.template.attribute.line"), ("product_attribute_value_id", "product.attribute.value")] {
+            let fd = ptav.fields.iter().find(|x| x.name == f).unwrap();
+            assert!(fd.required, "{f} is required");
+            assert!(matches!(fd.kind, FieldKind::Many2one { target } if target == t));
+        }
+
+        // The variant's combo link — a SECOND Many2many on product.product (besides tag_ids).
+        let prod = resolve_registered("product.product").unwrap();
+        let combo = prod.fields.iter().find(|f| f.name == "product_template_attribute_value_ids").unwrap();
+        assert!(matches!(
+            combo.kind,
+            FieldKind::Many2many { target: "product.template.attribute.value", relation: "variant_ptav_rel", column: "product_id", target_column: "ptav_id" }
         ));
     }
 
