@@ -778,6 +778,24 @@ impl Db {
             check_constraints_in_tx(model, &mut tx, id, Some(&changed)).await?;
         }
 
+        // M15.1: a PTAV `price_extra` edit re-materializes `price_extra` on every variant whose combo
+        // includes this cell (the Many2many aggregate is stored, not computed on read). In-tx, so the
+        // refresh commits atomically with the edit.
+        if model.name == VG_PTAV && affected > 0 && cols.iter().any(|(c, _)| *c == "price_extra") {
+            let variant = resolve_registered(VG_VARIANT).map_err(DbError::BadInput)?;
+            let ptav = resolve_registered(VG_PTAV).map_err(DbError::BadInput)?;
+            let vids: Vec<i64> = sqlx::query_scalar(&format!(
+                "SELECT product_id FROM {} WHERE ptav_id = $1",
+                VG_VARIANT_PTAV_REL
+            ))
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+            for vid in vids {
+                self.set_variant_price_extra_in_tx(&variant, &ptav, &mut tx, vid).await?;
+            }
+        }
+
         // Re-read the NEW text of tracked columns on the still-locked row (same `::text` rendering as
         // the old snapshot). Tracked columns are non-computed, so the recompute above can't touch them.
         let new_text = snapshot_text(&mut tx, model.table, &track_cols, id, false).await?;
@@ -1255,6 +1273,9 @@ impl Db {
                     if !first_active {
                         self.set_variant_active_in_tx(&variant, &mut tx, first_id, true).await?;
                     }
+                    // Regeneration is a full refresh: re-materialize the kept variant's price_extra so a
+                    // PTAV price change since the last run is picked up.
+                    self.set_variant_price_extra_in_tx(&variant, &ptav, &mut tx, first_id).await?;
                     kept.push(first_id);
                     for &(dup_id, dup_active) in &variants[1..] {
                         if dup_active {
@@ -1285,6 +1306,8 @@ impl Db {
                     let (vid, _) = self
                         .insert_secured_in_tx(&variant, &su, acls, rules, payload.as_object().unwrap(), &mut tx)
                         .await?;
+                    // Materialize the new variant's price_extra from its just-inserted PTAV set.
+                    self.set_variant_price_extra_in_tx(&variant, &ptav, &mut tx, vid).await?;
                     created.push(vid);
                 }
             }
@@ -1343,6 +1366,30 @@ impl Db {
         let (id, _) =
             self.insert_secured_in_tx(ptav, su, acls, rules, payload.as_object().unwrap(), tx).await?;
         Ok(id)
+    }
+
+    /// Materializes a variant's `price_extra` = SUM of its combo PTAVs' `price_extra` — the Many2many
+    /// aggregate the compute engine can't do on read. Recomputed only at the two bounded write points
+    /// (generation, and a PTAV `price_extra` edit), the M2M analogue of `recompute_columns_on`. The
+    /// SUM is taken in-tx so a just-inserted PTAV set is visible. Idempotent.
+    async fn set_variant_price_extra_in_tx(
+        &self,
+        variant: &ResolvedModel,
+        ptav: &ResolvedModel,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        variant_id: i64,
+    ) -> Result<(), DbError> {
+        let sql = format!(
+            "UPDATE {v} SET price_extra = COALESCE(\
+                 (SELECT SUM(p.price_extra) FROM {rel} r JOIN {ptav} p ON p.id = r.ptav_id \
+                  WHERE r.product_id = $1), 0) \
+             WHERE id = $1",
+            v = variant.table,
+            rel = VG_VARIANT_PTAV_REL,
+            ptav = ptav.table,
+        );
+        sqlx::query(&sql).bind(variant_id).execute(&mut **tx).await?;
+        Ok(())
     }
 
     /// Sets a variant's own `active` flag inside `tx` (archive / reactivate during reconciliation). A

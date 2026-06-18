@@ -145,6 +145,17 @@ pub struct ProductProduct {
     #[field(label = "Display Name", compute = "product_display_name", depends = "name,default_code")]
     display_name: Text,
 
+    // The variant's price surcharge = SUM of its combo's PTAV price_extra. The compute engine can't
+    // aggregate over a Many2many on read, so this is MATERIALIZED (stored) by the generation engine and
+    // a PTAV-price_extra-edit hook — the M2M analogue of recompute_columns_on. Engine-maintained.
+    #[field(label = "Variant Extra Price", default = "0", groups = "base.system")]
+    price_extra: Decimal,
+
+    // The variant's effective sales price = template list_price (delegated) + the variant surcharge.
+    // Same-record on-read compute (both inputs are on the record: list_price delegated, price_extra own).
+    #[field(label = "Sales Price", compute = "variant_lst_price", depends = "list_price,price_extra")]
+    lst_price: Decimal,
+
     // The variant's OWN active flag, intentionally shadowing product.template.active: archiving one
     // variant (the generator does this when a combination is no longer selected) must not touch the
     // shared template or the other variants. Read/written on product.product, never delegated.
@@ -156,9 +167,11 @@ pub struct ProductProduct {
     tag_ids: Many2many,
 
     // The exact attribute combination this variant represents: the set of `product.template.attribute.value`
-    // rows (one per attribute line). The variant-generation engine sets this; the combo key derived from
-    // it is how regeneration recognises an existing variant (so it is kept/reactivated, never duplicated).
-    #[field(label = "Attribute Values", target = "product.template.attribute.value", relation = "variant_ptav_rel", column = "product_id", target_column = "ptav_id")]
+    // rows (one per attribute line). Engine-LOCKED (groups = base.system): only the generation engine
+    // (sudo) sets it — a manager writing it would corrupt the combo identity AND leave the materialized
+    // price_extra stale, so the lock closes both. The combo key derived from it is how regeneration
+    // recognises an existing variant (so it is kept/reactivated, never duplicated).
+    #[field(label = "Attribute Values", target = "product.template.attribute.value", relation = "variant_ptav_rel", column = "product_id", target_column = "ptav_id", groups = "base.system")]
     product_template_attribute_value_ids: Many2many,
 }
 
@@ -311,6 +324,12 @@ fn product_display_name(i: &ComputeInput) -> Value {
     Value::Str(if code.is_empty() { name.to_string() } else { format!("{name} ({code})") })
 }
 meshble::register_compute!("product_display_name", product_display_name);
+/// A variant's effective sales price: the (inherited) template list_price plus the variant's own
+/// materialized surcharge. On-read, same-record (both inputs are on the variant record).
+fn variant_lst_price(i: &ComputeInput) -> Value {
+    Value::Decimal(i.decimal("list_price") + i.decimal("price_extra"))
+}
+meshble::register_compute!("variant_lst_price", variant_lst_price);
 meshble::register_compute!("compute_amount", compute_amount);
 meshble::register_compute!("compute_margin", compute_margin);
 meshble::register_compute!("compute_line_subtotal", compute_line_subtotal);
@@ -474,6 +493,11 @@ mod tests {
         // The manager has WRITE on the model (so it can edit price_extra), but not create/delete.
         let mgr = ACLS.iter().find(|a| a.model == "product.template.attribute.value" && a.group == "sales.manager").unwrap();
         assert!(mgr.write && !mgr.create && !mgr.delete, "manager edits price_extra, engine owns combos");
+        // On the VARIANT: the combo M2M and the materialized price_extra are engine-locked too — only
+        // the generation engine writes them. lst_price (the effective price) stays readable.
+        assert_eq!(field_required_groups("product.product", "product_template_attribute_value_ids"), Some(&["base.system"][..]));
+        assert_eq!(field_required_groups("product.product", "price_extra"), Some(&["base.system"][..]));
+        assert_eq!(field_required_groups("product.product", "lst_price"), None);
     }
 
     #[test]

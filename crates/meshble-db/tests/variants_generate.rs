@@ -45,6 +45,7 @@ static VARIANT: ModelDescriptor = ModelDescriptor {
     fields: &[
         m2o("product_tmpl_id", "product.template", true),
         FieldDef { name: "active", label: "active", kind: FieldKind::Bool, required: false, stored: true, compute: None, depends: &[], default: Some("true"), unique: false, check: None },
+        FieldDef { name: "price_extra", label: "Extra", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: None, depends: &[], default: Some("0"), unique: false, check: None },
         m2m("product_template_attribute_value_ids", "product.template.attribute.value", "variant_ptav_rel", "product_id", "ptav_id"),
     ],
 };
@@ -64,6 +65,7 @@ static PTAV: ModelDescriptor = ModelDescriptor {
         m2o("product_tmpl_id", "product.template", true),
         m2o("attribute_line_id", "product.template.attribute.line", true),
         m2o("product_attribute_value_id", "product.attribute.value", true),
+        FieldDef { name: "price_extra", label: "Extra", kind: FieldKind::Decimal { currency_field: None }, required: false, stored: true, compute: None, depends: &[], default: Some("0"), unique: false, check: None },
     ],
 };
 fn attribute_desc() -> &'static ModelDescriptor { &ATTRIBUTE }
