@@ -19,6 +19,10 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
 };
 meshble::register_module!(MANIFEST);
 
+// Retrofit: res.partner (a base model the mail module depends on) gains a chatter thread. Declared
+// here, in the mail module, so base needs no dependency on mail (mail → base, never the reverse).
+meshble::register_mailed!("res.partner");
+
 /// A thread message: a human comment or a system audit entry, attached to any record via the
 /// polymorphic `(res_model, res_id)` link. One shared table serves every mailed model — no
 /// per-model message table. Append-only (no write/delete ACL for users); ordered by `id` (a

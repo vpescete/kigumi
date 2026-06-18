@@ -65,10 +65,10 @@ pub struct ProductTemplate {
     #[field(label = "Type", default = "consu", selection = "consu:Goods,service:Service")]
     product_type: Selection,
 
-    #[field(label = "Sales Price", default = "0")]
+    #[field(label = "Sales Price", default = "0", tracked)]
     list_price: Decimal,
 
-    #[field(label = "Cost", default = "0")]
+    #[field(label = "Cost", default = "0", tracked)]
     standard_price: Decimal,
 
     #[field(label = "Description")]
@@ -77,6 +77,9 @@ pub struct ProductTemplate {
     #[field(label = "Active", default = "true")]
     active: Bool,
 }
+
+// Retrofit: a product (template) has a chatter thread; price changes are tracked as audit entries.
+meshble::register_mailed!("product.template");
 
 /// Product variant (Odoo's `product.product`): a sellable unit that `_inherits` its product.template
 /// through the required `product_tmpl_id` FK, transparently exposing the template's name/price/etc.
