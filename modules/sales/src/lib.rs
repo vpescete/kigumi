@@ -228,14 +228,22 @@ pub struct ProductTemplateAttributeLine {
 /// `(attribute_line_id, product_attribute_value_id)` cells that would split one combo across two ids.
 #[model(name = "product.template.attribute.value", table = "product_template_attribute_value")]
 pub struct ProductTemplateAttributeValue {
-    #[field(label = "Product Template", required, target = "product.template")]
+    // The 3 structural FKs are engine-LOCKED via D6 (`groups = "base.system"`, a group no user holds):
+    // only the generation engine (sudo) may set them, so a manager editing `price_extra` (write ACL)
+    // physically cannot mutate them — check_writable_fields rejects them on every secured write path.
+    #[field(label = "Product Template", required, target = "product.template", groups = "base.system")]
     product_tmpl_id: Many2one,
 
-    #[field(label = "Attribute Line", required, target = "product.template.attribute.line")]
+    #[field(label = "Attribute Line", required, target = "product.template.attribute.line", groups = "base.system")]
     attribute_line_id: Many2one,
 
-    #[field(label = "Attribute Value", required, target = "product.attribute.value")]
+    #[field(label = "Attribute Value", required, target = "product.attribute.value", groups = "base.system")]
     product_attribute_value_id: Many2one,
+
+    // The per-template-per-value price surcharge — the ONE field a manager may edit. Materialized into
+    // product.product.price_extra (sum over a variant's PTAVs) by the engine and a PTAV-write hook.
+    #[field(label = "Extra Price", default = "0")]
+    price_extra: Decimal,
 }
 
 /// A line of a sale order: a product, a quantity, a unit price. `price_subtotal` and `margin` are
@@ -339,11 +347,11 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "product.attribute.value", group: "sales.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "product.template.attribute.line", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "product.template.attribute.line", group: "sales.manager", read: true, write: true, create: true, delete: true },
-    // PTAV is the engine's generated join row, NOT user input: read-only for everyone. The generation
-    // engine creates it elevated (after the manager gate), so no user-facing create path can inject a
-    // duplicate cell out from under the engine's per-template lock.
+    // PTAV is the engine's generated join row: the engine (sudo) creates/deletes the cells, and a
+    // manager may WRITE only `price_extra` (the 3 structural FKs are D6-locked to base.system, so a
+    // manager write cannot touch them). No user create/delete — combos stay engine-owned.
     Acl { model: "product.template.attribute.value", group: "sales.user", read: true, write: false, create: false, delete: false },
-    Acl { model: "product.template.attribute.value", group: "sales.manager", read: true, write: false, create: false, delete: false },
+    Acl { model: "product.template.attribute.value", group: "sales.manager", read: true, write: true, create: false, delete: false },
 ];
 
 fn not_done() -> Domain {
@@ -449,6 +457,23 @@ mod tests {
             tags.kind,
             FieldKind::Many2many { target: "product.tag", relation: "product_product_tag_rel", column: "product_id", target_column: "tag_id" }
         ));
+    }
+
+    #[test]
+    fn ptav_structural_fks_are_engine_locked_price_extra_open() {
+        // The 3 combo-identity FKs require the engine-only `base.system` group (no user holds it →
+        // only sudo writes them, via the generation engine); price_extra is ungated (manager-writable).
+        for f in ["product_tmpl_id", "attribute_line_id", "product_attribute_value_id"] {
+            assert_eq!(
+                field_required_groups("product.template.attribute.value", f),
+                Some(&["base.system"][..]),
+                "{f} must be engine-locked"
+            );
+        }
+        assert_eq!(field_required_groups("product.template.attribute.value", "price_extra"), None);
+        // The manager has WRITE on the model (so it can edit price_extra), but not create/delete.
+        let mgr = ACLS.iter().find(|a| a.model == "product.template.attribute.value" && a.group == "sales.manager").unwrap();
+        assert!(mgr.write && !mgr.create && !mgr.delete, "manager edits price_extra, engine owns combos");
     }
 
     #[test]
