@@ -20,8 +20,8 @@ use axum::{
 use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{
-    check_access, field_accessible, is_mailed, Acl, Condition, Ctx, Domain, FieldKind, Operation,
-    Operator, RecordRule, ResolvedModel, Value,
+    check_access, field_accessible, is_mailed, wizard_for, Acl, Condition, Ctx, Domain, FieldKind,
+    Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
 };
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
@@ -92,6 +92,8 @@ pub fn router_with_data(
         .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
         // Re-price a sale order's lines from its pricelist.
         .route("/api/:name/:id/apply_pricelist", post(apply_pricelist_handler))
+        // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
+        .route("/api/:name/open", post(open_wizard_handler))
         // Attachments (ir.attachment): files on a record. List/download need host read; upload/delete
         // need host write. Bytes live in the content-addressed blob store; the row is metadata.
         .route("/api/:name/:id/attachments", get(list_attachments_handler).post(upload_attachment_handler))
@@ -515,6 +517,68 @@ async fn apply_pricelist_handler(
     match backend.db.apply_pricelist(&ctx, backend.acls, backend.rules, id).await {
         Ok(n) => json_response(serde_json::json!({ "priced": n }).to_string()),
         Err(e) => write_error("apply_pricelist", e),
+    }
+}
+
+/// Converts a metamodel [`Value`] into JSON for the secured insert path (decimals stay strings to
+/// preserve precision, matching the rest of the API).
+fn value_to_json(v: &Value) -> Json2 {
+    match v {
+        Value::Str(s) => Json2::String(s.clone()),
+        Value::Int(n) => Json2::Number((*n).into()),
+        Value::Float(f) => serde_json::Number::from_f64(*f).map(Json2::Number).unwrap_or(Json2::Null),
+        Value::Decimal(d) => Json2::String(d.to_string()),
+        Value::Bool(b) => Json2::Bool(*b),
+        Value::Null => Json2::Null,
+        Value::List(xs) => Json2::Array(xs.iter().map(value_to_json).collect()),
+    }
+}
+
+/// Opens a wizard (transient model): computes its server-side defaults from the open context, creates
+/// the scratchpad row under the caller, and returns it for the frontend to contract-render. The model
+/// must be `register_wizard!`-bound (else 400). Authorization is the normal create ACL on the model.
+async fn open_wizard_handler(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<Json2>,
+) -> Response {
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let Some(wizard) = wizard_for(&name) else {
+        return (StatusCode::BAD_REQUEST, "not a wizard model").into_response();
+    };
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    // The open context (Odoo's active_model / active_id / active_ids) — all optional.
+    let wctx = WizardContext {
+        active_model: body.get("active_model").and_then(|v| v.as_str()).map(str::to_string),
+        active_id: body.get("active_id").and_then(Json2::as_i64),
+        active_ids: body
+            .get("active_ids")
+            .and_then(Json2::as_array)
+            .map(|a| a.iter().filter_map(Json2::as_i64).collect())
+            .unwrap_or_default(),
+    };
+    let seed: serde_json::Map<String, Json2> = (wizard.default_get)(&wctx)
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), value_to_json(&v)))
+        .collect();
+    let id = match backend.db.insert_secured(model, &ctx, backend.acls, backend.rules, &seed).await {
+        Ok(id) => id,
+        Err(e) => return write_error("open", e),
+    };
+    match backend.db.find_one_secured(model, &ctx, backend.acls, backend.rules, id).await {
+        Ok(Some(rec)) => {
+            json_status(StatusCode::CREATED, serde_json::to_string(&rec).unwrap_or_else(|_| "{}".to_string()))
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
+        Err(e) => write_error("open", e),
     }
 }
 

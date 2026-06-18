@@ -21,6 +21,7 @@ pub mod prelude {
         ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
         RecordRule, RecordRuleRegistration, RelatedRegistration, ResolutionError, ResolvedModel,
         RuleDomain, Sql, TrackedFieldRegistration, TransientRegistration, Value, FRAMEWORK_VERSION,
+        wizard_for, WizardContext, WizardDefaultGet, WizardRegistration,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
@@ -155,6 +156,20 @@ macro_rules! register_transient {
     ($model:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::TransientRegistration { model: $model }
+        }
+    };
+}
+
+/// Registers a wizard: binds a transient `model` to its `default_get` (the server-side seed computed
+/// from the open context), exposing `POST /api/<model>/open`. The model must also be
+/// `register_transient!`-marked. Apply logic is a dedicated per-wizard service method + endpoint
+/// (like `apply_pricelist`), not part of this registration. Use at module top level:
+/// `meshble::register_wizard!("sale.order.discount", default_get_discount);`
+#[macro_export]
+macro_rules! register_wizard {
+    ($model:expr, $default_get:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::WizardRegistration { model: $model, default_get: $default_get }
         }
     };
 }

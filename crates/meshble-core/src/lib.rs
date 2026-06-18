@@ -13,10 +13,12 @@ mod manifest;
 mod metamodel;
 mod registry;
 mod security;
+mod wizard;
 
 pub use action::{
     action_for, actions_for, ActionFn, ActionInput, ActionOutcome, ActionRegistration,
 };
+pub use wizard::{wizard_for, WizardContext, WizardDefaultGet, WizardRegistration};
 pub use compute::{compute_fn, compute_on_read, compute_stored, computed_fields, has_read_computes, Children, ComputeFn, ComputeInput, ComputeRegistration};
 pub use constraints::{check_constraints, has_constraints, ConstraintFn, ConstraintRegistration};
 pub use domain::{json_string, Condition, Domain, DomainError, FieldBuilder, Operator, Sql, Value};

@@ -518,6 +518,9 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "purchase.order", group: "sales.user", read: true, write: true, create: true, delete: false },
     Acl { model: "purchase.order", group: "sales.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "purchase.order.line", group: "sales.user", read: true, write: true, create: true, delete: true },
+    // Discount wizard (transient): opened, edited and applied by anyone in sales; the GC cron reclaims
+    // the scratchpad rows, so no delete right is granted.
+    Acl { model: "sale.order.discount", group: "sales.user", read: true, write: true, create: true, delete: false },
     // Attribute configuration is user input: everyone in sales reads, managers maintain the attributes,
     // their values, and a template's attribute lines.
     Acl { model: "product.attribute", group: "sales.user", read: true, write: false, create: false, delete: false },
@@ -705,6 +708,33 @@ fn done_purchase(i: &ActionInput) -> Result<ActionOutcome, String> {
     }
 }
 meshble::register_action!("purchase.order", "done", done_purchase, &["sales.user"]);
+
+/// A discount wizard (Odoo's `sale.order.discount`): a transient scratchpad that applies a percentage
+/// discount to every line of its target order. Opened with `order_id` seeded from the active record;
+/// the `apply_discount` service method (slice 3) writes `discount` onto the lines.
+#[model(name = "sale.order.discount", table = "sale_order_discount")]
+pub struct SaleOrderDiscount {
+    #[field(label = "Order", required, target = "sale.order")]
+    order_id: Many2one,
+
+    #[field(label = "Discount %", default = "0")]
+    discount: Decimal,
+
+    // GC timestamp: migration gives this a DEFAULT now(); the transient cron reclaims aged rows.
+    #[field(label = "Created")]
+    create_date: Datetime,
+}
+meshble::register_transient!("sale.order.discount");
+meshble::register_wizard!("sale.order.discount", default_get_discount);
+
+/// `default_get` for the discount wizard: seed `order_id` from the open context's active record. With
+/// no active record the seed is empty (the required `order_id` then makes the open fail — by design).
+fn default_get_discount(ctx: &WizardContext) -> Vec<(&'static str, Value)> {
+    match ctx.active_id {
+        Some(id) => vec![("order_id", Value::Int(id))],
+        None => vec![],
+    }
+}
 
 #[cfg(test)]
 mod tests {
