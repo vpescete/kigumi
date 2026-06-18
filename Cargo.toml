@@ -19,5 +19,6 @@ meshble-auth = { path = "crates/meshble-auth", version = "0.1.0" }
 meshble-config = { path = "crates/meshble-config", version = "0.1.0" }
 meshble-server = { path = "crates/meshble-server", version = "0.1.0" }
 meshble-macros = { path = "crates/meshble-macros", version = "0.1.0" }
+meshble-storage = { path = "crates/meshble-storage", version = "0.1.0" }
 meshble = { path = "crates/meshble", version = "0.1.0" }
 semver = "1"
