@@ -61,7 +61,7 @@ fn child_resolves_and_exposes_delegated_parent_scalars() {
 }
 
 // --- validation error paths (each registers a deliberately-invalid child) ---
-// collision: own field `name` shadows the parent's `name`.
+// shadow: own field `name` intentionally shadows the parent's `name` (Odoo behaviour — allowed).
 static COLLIDE: ModelDescriptor = ModelDescriptor { name: "inh.collide", table: "inh_collide", fields: &[
     FieldDef { name: "c_id", label: "T", kind: FieldKind::Many2one { target: "inh.tpl" }, required: true, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
     FieldDef { name: "name", label: "Name", kind: FieldKind::Text, required: false, stored: true, compute: None, depends: &[], default: None, unique: false, check: None },
@@ -92,15 +92,25 @@ meshble_core::inventory::submit! { InheritsRegistration { model: "inh.cycb", par
 
 #[test]
 fn invalid_inherits_declarations_are_rejected() {
-    // Name collision with an inherited field is an error (no silent override).
-    let e = resolve_registered("inh.collide").unwrap_err();
-    assert!(e.contains("collides"), "collision error: {e}");
     // via field that is not a Many2one to the parent is an error.
     let e = resolve_registered("inh.badvia").unwrap_err();
     assert!(e.contains("Many2one"), "bad-via error: {e}");
     // An inherits cycle is rejected (resolution terminates with a clear error).
     let e = resolve_registered("inh.cyca").unwrap_err();
     assert!(e.contains("cycle"), "cycle error: {e}");
+}
+
+#[test]
+fn own_field_shadows_inherited_field() {
+    // An own field of the same name as a parent's intentionally SHADOWS it (Odoo behaviour): the
+    // child resolves, owns its own `name` column, and that name is NOT delegated — while the other
+    // parent scalars still are. This is what lets product.product have its own `active`.
+    let child = resolve_registered("inh.collide").unwrap();
+    assert!(child.fields.iter().any(|f| f.name == "name"), "shadowed field is the child's own column");
+    let deleg = delegated_fields("inh.collide").unwrap();
+    let names: Vec<&str> = deleg.iter().map(|d| d.def.name).collect();
+    assert!(!names.contains(&"name"), "shadowed name is not delegated");
+    assert!(names.contains(&"list_price"), "non-shadowed parent scalars are still delegated");
 }
 
 #[test]

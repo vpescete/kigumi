@@ -158,9 +158,11 @@ fn check_inherits_acyclic(model: &str) -> Result<(), String> {
     Err(format!("'_inherits' chain from '{model}' is too deep (possible cycle)"))
 }
 
-/// Validates a model's `_inherits` declaration against its resolved own fields: the chain is acyclic,
-/// the `via` field is a required Many2one to the parent, and no own field collides with a delegated
-/// parent field (no silent override — unlike Odoo). Called by `resolve_registered` after the merge.
+/// Validates a model's `_inherits` declaration against its resolved own fields: the chain is acyclic
+/// and the `via` field is a required Many2one to the parent. A child field whose name matches a
+/// delegated parent field SHADOWS it (Odoo behaviour): the child owns that column and the name is not
+/// delegated (`delegated_fields` excludes it). This is what lets `product.product` carry its own
+/// `active` independently of the shared `product.template.active`. Called by `resolve_registered`.
 fn validate_inherits(model: &str, own: &ResolvedModel) -> Result<(), String> {
     let Some((parent, via)) = inherits_of(model) else { return Ok(()) };
     check_inherits_acyclic(model)?;
@@ -178,20 +180,16 @@ fn validate_inherits(model: &str, own: &ResolvedModel) -> Result<(), String> {
     if !vf.required {
         return Err(format!("'_inherits' on '{model}': via field '{via}' must be required"));
     }
-    for d in parent_delegatable(parent)? {
-        if own.fields.iter().any(|f| f.name == d.name) {
-            return Err(format!(
-                "'_inherits' on '{model}': field '{}' collides with inherited '{parent}.{}'",
-                d.name, d.name
-            ));
-        }
-    }
+    // Confirm the parent is itself resolvable (surfaces a parent error here rather than at read time);
+    // name overlaps are intentional shadows, resolved by `delegated_fields`, so they are not errors.
+    parent_delegatable(parent)?;
     Ok(())
 }
 
 /// The fields `model` delegates to its `_inherits` parent (empty if it is not a child). Each is read
-/// via the parent through the `via` FK; the child does NOT have a column for it. Shadowed names (a
-/// child field of the same name) are excluded — though `validate_inherits` already rejects collisions.
+/// via the parent through the `via` FK; the child does NOT have a column for it. A name the child also
+/// declares (an intentional shadow, e.g. `product.product.active` over `product.template.active`) is
+/// excluded — the child's own column wins and the parent's is not delegated.
 pub fn delegated_fields(model: &str) -> Result<Vec<DelegatedField>, String> {
     let Some((parent, via)) = inherits_of(model) else { return Ok(Vec::new()) };
     let child = resolve_registered(model)?;

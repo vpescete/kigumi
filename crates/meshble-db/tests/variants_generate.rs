@@ -44,6 +44,7 @@ static VARIANT: ModelDescriptor = ModelDescriptor {
     table: "product_product",
     fields: &[
         m2o("product_tmpl_id", "product.template", true),
+        FieldDef { name: "active", label: "active", kind: FieldKind::Bool, required: false, stored: true, compute: None, depends: &[], default: Some("true"), unique: false, check: None },
         m2m("product_template_attribute_value_ids", "product.template.attribute.value", "variant_ptav_rel", "product_id", "ptav_id"),
     ],
 };

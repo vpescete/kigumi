@@ -29,7 +29,7 @@ use serde_json::{Map, Value as Json};
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use sqlx::query::{Query, QueryScalar};
 use sqlx::{PgPool, Postgres, Row};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Debug)]
 pub enum DbError {
@@ -90,9 +90,9 @@ pub struct ListPage {
     pub total: i64,
 }
 
-/// The result of a variant-generation run: which `product.product` ids were created, archived, or
-/// left in place. Returned to the caller as a summary (slice 2 only ever creates; archive/keep are
-/// populated once reconciliation lands).
+/// The result of a variant-generation run: which `product.product` ids were created, archived (a
+/// combination no longer selected), or kept (an existing variant matched a desired combination, left
+/// active or reactivated). A no-op regeneration returns all three empty except `kept`.
 #[derive(Debug, Default)]
 pub struct GenerateOutcome {
     pub created: Vec<i64>,
@@ -107,6 +107,8 @@ const VG_VARIANT: &str = "product.product";
 const VG_LINE: &str = "product.template.attribute.line";
 const VG_PTAV: &str = "product.template.attribute.value";
 const VG_ATTRIBUTE: &str = "product.attribute";
+/// The junction (product.product.product_template_attribute_value_ids) linking a variant to its cells.
+const VG_VARIANT_PTAV_REL: &str = "variant_ptav_rel";
 /// Hard cap on variants produced by one call — a runaway cartesian product (5 attributes x 10 values
 /// = 100k rows) must not explode the table in a single request.
 const MAX_VARIANTS: usize = 1000;
@@ -1041,8 +1043,10 @@ impl Db {
     }
 
     /// Generates `product.product` variants for a template as the cartesian product of its attribute
-    /// lines' selected values. Slice 2: create-only (assumes no existing variants); reconciliation
-    /// (keep/archive/reactivate) lands in the next slice.
+    /// lines' selected values, reconciling against the variants that already exist: a combination with
+    /// a matching variant is kept (reactivated if it was archived), a missing combination is created,
+    /// and an active variant whose combination is no longer selected is ARCHIVED (never deleted — it
+    /// may carry stock / order history). Idempotent: a regeneration with no attribute change is a no-op.
     ///
     /// Authorization mirrors an action: WRITE on `product.template` — which the ACL already restricts
     /// to managers — plus template visibility. The actual creation then runs ELEVATED (after the gate,
@@ -1144,46 +1148,145 @@ impl Db {
             combos = next;
         }
 
-        // One transaction: ensure each cell's join row exists (reused across combos), then create a
-        // variant per combo carrying its PTAV set + the template FK (so `_inherits` links the existing
-        // template, never a duplicate).
+        // Each desired combo is keyed by its sorted set of attribute-VALUE ids — an order-independent
+        // identity that survives regeneration (so an existing variant is recognised, not duplicated).
+        let mut desired_keys: HashSet<Vec<i64>> = HashSet::new();
+        let desired: Vec<(Vec<i64>, &Vec<(i64, i64)>)> = combos
+            .iter()
+            .map(|c| {
+                let mut k: Vec<i64> = c.iter().map(|&(_, v)| v).collect();
+                k.sort_unstable();
+                k.dedup(); // a true SET, symmetric with the existing-variant key (a degenerate config
+                // could select one value on two lines; dedup keeps the keys comparable / idempotent)
+                (k, c)
+            })
+            .collect();
+
         let mut tx = self.pool.begin().await?;
         // Serialize concurrent generations of the SAME template: without this, two callers could each
-        // miss an existing join row in their cell lookup and both insert it (duplicate PTAV cell). The
-        // lock releases at commit; it also gives the slice-3 reconciliation a consistent snapshot.
+        // miss an existing join row in their cell lookup and both insert it (duplicate PTAV cell), and
+        // their reconciliations would race. The lock releases at commit and gives this reconciliation a
+        // consistent snapshot of the template's current variants.
         sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
             .bind(format!("variants:product_template:{template_id}"))
             .execute(&mut *tx)
             .await?;
-        let mut cell_ptav: HashMap<(i64, i64), i64> = HashMap::new();
-        let mut created: Vec<i64> = Vec::with_capacity(combos.len());
-        for combo in &combos {
-            let mut ptav_ids: Vec<i64> = Vec::with_capacity(combo.len());
-            for &(line_id, value_id) in combo {
-                let pid = match cell_ptav.get(&(line_id, value_id)) {
-                    Some(&p) => p,
-                    None => {
-                        let p = self
-                            .ensure_ptav_in_tx(&ptav, &su, acls, rules, &mut tx, template_id, line_id, value_id)
-                            .await?;
-                        cell_ptav.insert((line_id, value_id), p);
-                        p
-                    }
-                };
-                ptav_ids.push(pid);
+
+        // Snapshot the template's existing variants (active or archived) and the combo each represents,
+        // so reconciliation keeps/reactivates matches and archives only the truly-stale ones.
+        let mut existing: HashMap<Vec<i64>, Vec<(i64, bool)>> = HashMap::new();
+        {
+            let vrows = sqlx::query(&format!(
+                "SELECT id, active FROM {} WHERE product_tmpl_id = $1",
+                variant.table
+            ))
+            .bind(template_id)
+            .fetch_all(&mut *tx)
+            .await?;
+            let mut active_of: HashMap<i64, bool> = HashMap::new();
+            for r in &vrows {
+                // NULL-safe: `active` is nullable at the DB level (a default, not NOT NULL), so a row
+                // planted with active=null must not panic the decode — treat NULL as active.
+                active_of.insert(r.get::<i64, _>("id"), r.get::<Option<bool>, _>("active").unwrap_or(true));
             }
-            let payload = serde_json::json!({
-                "product_tmpl_id": template_id,
-                "product_template_attribute_value_ids": ptav_ids,
-            });
-            let (vid, _) = self
-                .insert_secured_in_tx(&variant, &su, acls, rules, payload.as_object().unwrap(), &mut tx)
-                .await?;
-            created.push(vid);
+            // Each variant's combo = the set of attribute-value ids behind its PTAV links.
+            let mut vset: HashMap<i64, BTreeSet<i64>> = HashMap::new();
+            let prows = sqlx::query(&format!(
+                "SELECT r.{rel_col} AS vid, p.product_attribute_value_id AS val \
+                 FROM {rel} r JOIN {ptav} p ON p.id = r.{rel_target} \
+                 WHERE p.product_tmpl_id = $1",
+                rel = VG_VARIANT_PTAV_REL,
+                rel_col = "product_id",
+                rel_target = "ptav_id",
+                ptav = ptav.table,
+            ))
+            .bind(template_id)
+            .fetch_all(&mut *tx)
+            .await?;
+            for r in &prows {
+                vset.entry(r.get::<i64, _>("vid")).or_default().insert(r.get::<i64, _>("val"));
+            }
+            for (&id, &active) in &active_of {
+                let key: Vec<i64> =
+                    vset.get(&id).map(|s| s.iter().copied().collect()).unwrap_or_default();
+                existing.entry(key).or_default().push((id, active));
+            }
+            // Deterministic survivor among any duplicate variants for one combo: keep the active row
+            // with the lowest id (reactivate only when none is active). Without this, the bucket order
+            // is HashMap-random and a {active, archived} pair could flip which sibling id is canonical
+            // on each regeneration — churning the id that anchors a combo's stock / order history.
+            for v in existing.values_mut() {
+                v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            }
+        }
+
+        let mut cell_ptav: HashMap<(i64, i64), i64> = HashMap::new();
+        let mut created: Vec<i64> = Vec::new();
+        let mut archived: Vec<i64> = Vec::new();
+        let mut kept: Vec<i64> = Vec::new();
+
+        // Desired combos: keep/reactivate an existing variant, or create one. Any duplicate variants
+        // for the same desired combo (e.g. from a pre-reconciliation create-only run) are archived so
+        // the template converges to exactly one active variant per combination.
+        for (key, combo) in &desired {
+            desired_keys.insert(key.clone());
+            match existing.get(key).filter(|v| !v.is_empty()) {
+                Some(variants) => {
+                    let (first_id, first_active) = variants[0];
+                    if !first_active {
+                        self.set_variant_active_in_tx(&variant, &mut tx, first_id, true).await?;
+                    }
+                    kept.push(first_id);
+                    for &(dup_id, dup_active) in &variants[1..] {
+                        if dup_active {
+                            self.set_variant_active_in_tx(&variant, &mut tx, dup_id, false).await?;
+                            archived.push(dup_id);
+                        }
+                    }
+                }
+                None => {
+                    let mut ptav_ids: Vec<i64> = Vec::with_capacity(combo.len());
+                    for &(line_id, value_id) in combo.iter() {
+                        let pid = match cell_ptav.get(&(line_id, value_id)) {
+                            Some(&p) => p,
+                            None => {
+                                let p = self
+                                    .ensure_ptav_in_tx(&ptav, &su, acls, rules, &mut tx, template_id, line_id, value_id)
+                                    .await?;
+                                cell_ptav.insert((line_id, value_id), p);
+                                p
+                            }
+                        };
+                        ptav_ids.push(pid);
+                    }
+                    let payload = serde_json::json!({
+                        "product_tmpl_id": template_id,
+                        "product_template_attribute_value_ids": ptav_ids,
+                    });
+                    let (vid, _) = self
+                        .insert_secured_in_tx(&variant, &su, acls, rules, payload.as_object().unwrap(), &mut tx)
+                        .await?;
+                    created.push(vid);
+                }
+            }
+        }
+
+        // Stale: active variants whose combo is no longer selected are ARCHIVED, never deleted (they
+        // may carry stock / order history). A later regeneration that re-selects the combo reactivates
+        // them above (same id, no duplicate).
+        for (key, variants) in &existing {
+            if !desired_keys.contains(key) {
+                for &(id, active) in variants {
+                    if active {
+                        self.set_variant_active_in_tx(&variant, &mut tx, id, false).await?;
+                        archived.push(id);
+                    }
+                }
+            }
         }
         tx.commit().await?;
 
-        Ok(GenerateOutcome { created, archived: Vec::new(), kept: Vec::new() })
+        Ok(GenerateOutcome { created, archived, kept })
     }
 
     /// Returns the `product.template.attribute.value` id for (line, value), creating it elevated if
@@ -1221,6 +1324,24 @@ impl Db {
         let (id, _) =
             self.insert_secured_in_tx(ptav, su, acls, rules, payload.as_object().unwrap(), tx).await?;
         Ok(id)
+    }
+
+    /// Sets a variant's own `active` flag inside `tx` (archive / reactivate during reconciliation). A
+    /// direct UPDATE on the variant's own column — never the delegated template field — so it touches
+    /// only this variant, not the shared template or its siblings.
+    async fn set_variant_active_in_tx(
+        &self,
+        variant: &ResolvedModel,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        id: i64,
+        active: bool,
+    ) -> Result<(), DbError> {
+        sqlx::query(&format!("UPDATE {} SET active = $1 WHERE id = $2", variant.table))
+            .bind(active)
+            .bind(id)
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
     }
 
     /// Recomputes `parent`'s aggregate computed columns from its current children (a direct UPDATE,

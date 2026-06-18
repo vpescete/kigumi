@@ -129,6 +129,9 @@ inventory::collect!(FieldGroupRegistration);
 /// aware (`_inherits`): a restriction on an inherited field lives on the PARENT model, so when the
 /// field is not restricted directly on `model` we fall back to the parent — otherwise an inherited
 /// field would expose its restricted value through the child (read/order/filter). Recurses the chain.
+/// Shadow-aware: a name the child declares as its OWN column (e.g. `product.product.active` over
+/// `product.template.active`) does NOT borrow the parent's restriction — only genuinely delegated
+/// fields fall back, so a group added to the parent never silently gates the child's own column.
 pub fn field_required_groups(model: &str, field: &str) -> Option<&'static [&'static str]> {
     if let Some(groups) = inventory::iter::<FieldGroupRegistration>
         .into_iter()
@@ -138,7 +141,13 @@ pub fn field_required_groups(model: &str, field: &str) -> Option<&'static [&'sta
         return Some(groups);
     }
     if let Some((parent, _via)) = crate::inherits_of(model) {
-        return field_required_groups(parent, field);
+        // The field is delegated only if the child has no own column for it (a shadow keeps its column).
+        let is_own_column = crate::resolve_registered(model)
+            .map(|m| m.fields.iter().any(|f| f.name == field))
+            .unwrap_or(false);
+        if !is_own_column {
+            return field_required_groups(parent, field);
+        }
     }
     None
 }

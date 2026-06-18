@@ -133,6 +133,12 @@ pub struct ProductProduct {
     #[field(label = "Barcode")]
     barcode: Text,
 
+    // The variant's OWN active flag, intentionally shadowing product.template.active: archiving one
+    // variant (the generator does this when a combination is no longer selected) must not touch the
+    // shared template or the other variants. Read/written on product.product, never delegated.
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+
     // First-class Many2many: variant tags through a junction table.
     #[field(label = "Tags", target = "product.tag", relation = "product_product_tag_rel", column = "product_id", target_column = "tag_id")]
     tag_ids: Many2many,
