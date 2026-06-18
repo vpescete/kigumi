@@ -45,7 +45,14 @@ pub struct SaleOrder {
     #[field(label = "Pricelist", target = "product.pricelist")]
     pricelist_id: Many2one,
 
-    #[field(label = "Total", compute = "compute_amount", depends = "line_ids.price_subtotal", currency = "currency_id", store)]
+    // The amount split, each an exact aggregate over the lines (One2many cascade).
+    #[field(label = "Untaxed Amount", compute = "compute_amount_untaxed", depends = "line_ids.price_subtotal", currency = "currency_id", store)]
+    amount_untaxed: Decimal,
+
+    #[field(label = "Taxes", compute = "compute_amount_tax", depends = "line_ids.price_tax", currency = "currency_id", store)]
+    amount_tax: Decimal,
+
+    #[field(label = "Total", compute = "compute_amount", depends = "line_ids.price_total", currency = "currency_id", store)]
     amount_total: Decimal,
 }
 
@@ -321,6 +328,31 @@ pub struct ProductTemplateAttributeValue {
     price_extra: Decimal,
 }
 
+/// A tax (Odoo's `account.tax`, minimal subset). A sale/purchase line references one tax via `tax_id`;
+/// the line's stored `tax_rate` is what drives its tax computation (a stored compute can't read a
+/// related row at write time). The full account module later ADOPTS this model via `#[extend]` (same
+/// name, no migration). v1: single tax per line, percentage only, round-per-line.
+#[model(name = "account.tax", table = "account_tax")]
+pub struct AccountTax {
+    #[field(label = "Tax Name", required)]
+    name: Text,
+
+    #[field(label = "Tax Scope", default = "sale", selection = "sale:Sales,purchase:Purchases,none:None")]
+    type_tax_use: Selection,
+
+    #[field(label = "Tax Computation", default = "percent", selection = "percent:Percentage of Price,fixed:Fixed")]
+    amount_type: Selection,
+
+    #[field(label = "Amount", default = "0")]
+    amount: Decimal,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+}
+
 /// A line of a sale order: a product, a quantity, a unit price. `price_subtotal` and `margin` are
 /// stored same-record computes; the order rolls them up into `amount_total` / `margin` through the
 /// aggregate cascade (`recompute_parent`).
@@ -354,29 +386,73 @@ pub struct SaleOrderLine {
     #[field(label = "Cost", default = "0", groups = "sales.manager")]
     purchase_price: Decimal,
 
-    #[field(label = "Subtotal", compute = "compute_line_subtotal", depends = "product_uom_qty,price_unit", store)]
+    #[field(label = "Disc.%", default = "0")]
+    discount: Decimal,
+
+    // The named tax that applies (reference), plus the effective rate the computes use. The rate is a
+    // plain stored field (the tax_id -> tax_rate sync is onchange territory, deferred); a stored compute
+    // cannot read a related row at write time, so the rate lives on the line.
+    #[field(label = "Tax", target = "account.tax")]
+    tax_id: Many2one,
+
+    #[field(label = "Tax Rate %", default = "0")]
+    tax_rate: Decimal,
+
+    #[field(label = "Subtotal", compute = "compute_line_subtotal", depends = "product_uom_qty,price_unit,discount", store)]
     price_subtotal: Decimal,
 
-    #[field(label = "Margin", compute = "compute_line_margin", depends = "price_unit,purchase_price,product_uom_qty", store)]
+    #[field(label = "Tax", compute = "compute_line_tax", depends = "product_uom_qty,price_unit,discount,tax_rate", store)]
+    price_tax: Decimal,
+
+    #[field(label = "Total", compute = "compute_line_total", depends = "product_uom_qty,price_unit,discount,tax_rate", store)]
+    price_total: Decimal,
+
+    #[field(label = "Margin", compute = "compute_line_margin", depends = "price_unit,purchase_price,product_uom_qty,discount", store)]
     margin: Decimal,
 }
 
-/// `amount_total` of an order = exact sum of its lines' subtotals.
+use rust_decimal::Decimal;
+/// (1 - discount/100) — the net factor a line discount applies to its gross amount.
+fn net_factor(i: &ComputeInput) -> Decimal {
+    Decimal::ONE - i.decimal("discount") / Decimal::from(100)
+}
+/// A line's net amount = quantity × unit price × (1 - discount%). The shared base of subtotal/tax/total.
+fn line_net(i: &ComputeInput) -> Decimal {
+    i.decimal("product_uom_qty") * i.decimal("price_unit") * net_factor(i)
+}
+
+/// `amount_total` of an order = exact sum of its lines' taxed totals.
 fn compute_amount(i: &ComputeInput) -> Value {
+    Value::Decimal(i.sum_decimal("line_ids", "price_total"))
+}
+/// Untaxed amount = exact sum of the lines' (discounted) subtotals.
+fn compute_amount_untaxed(i: &ComputeInput) -> Value {
     Value::Decimal(i.sum_decimal("line_ids", "price_subtotal"))
+}
+/// Taxes = exact sum of the lines' tax amounts.
+fn compute_amount_tax(i: &ComputeInput) -> Value {
+    Value::Decimal(i.sum_decimal("line_ids", "price_tax"))
 }
 /// `margin` of an order = exact sum of its lines' margins.
 fn compute_margin(i: &ComputeInput) -> Value {
     Value::Decimal(i.sum_decimal("line_ids", "margin"))
 }
-/// A line's subtotal = quantity × unit price (exact money).
+/// A line's subtotal = the discounted net (quantity × unit price × (1 - discount%)).
 fn compute_line_subtotal(i: &ComputeInput) -> Value {
-    Value::Decimal(i.decimal("product_uom_qty") * i.decimal("price_unit"))
+    Value::Decimal(line_net(i))
 }
-/// A line's margin = (unit price − cost) × quantity. Computed from the raw inputs, NOT from
-/// `price_subtotal`, because every same-record compute reads the pre-write snapshot (no chaining).
+/// A line's tax amount = its discounted net × tax rate%. Computed from raw inputs (no chaining off
+/// the computed subtotal — every same-record compute reads the pre-write snapshot).
+fn compute_line_tax(i: &ComputeInput) -> Value {
+    Value::Decimal(line_net(i) * (i.decimal("tax_rate") / Decimal::from(100)))
+}
+/// A line's taxed total = net × (1 + tax rate%).
+fn compute_line_total(i: &ComputeInput) -> Value {
+    Value::Decimal(line_net(i) * (Decimal::ONE + i.decimal("tax_rate") / Decimal::from(100)))
+}
+/// A line's margin = (unit price − cost) × quantity × (1 - discount%). From the raw inputs (no chaining).
 fn compute_line_margin(i: &ComputeInput) -> Value {
-    Value::Decimal((i.decimal("price_unit") - i.decimal("purchase_price")) * i.decimal("product_uom_qty"))
+    Value::Decimal((i.decimal("price_unit") - i.decimal("purchase_price")) * i.decimal("product_uom_qty") * net_factor(i))
 }
 /// A variant's display name: the (inherited) template name, with the internal reference in parentheses
 /// when one is set. On-read — reads the delegated `name` and the variant's own `default_code`.
@@ -393,8 +469,12 @@ fn variant_lst_price(i: &ComputeInput) -> Value {
 }
 meshble::register_compute!("variant_lst_price", variant_lst_price);
 meshble::register_compute!("compute_amount", compute_amount);
+meshble::register_compute!("compute_amount_untaxed", compute_amount_untaxed);
+meshble::register_compute!("compute_amount_tax", compute_amount_tax);
 meshble::register_compute!("compute_margin", compute_margin);
 meshble::register_compute!("compute_line_subtotal", compute_line_subtotal);
+meshble::register_compute!("compute_line_tax", compute_line_tax);
+meshble::register_compute!("compute_line_total", compute_line_total);
 meshble::register_compute!("compute_line_margin", compute_line_margin);
 
 /// Resolves the module's complete model from the catalog (base + auto-registered extensions).
@@ -425,6 +505,9 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "product.pricelist", group: "sales.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "product.pricelist.item", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "product.pricelist.item", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    // Taxes: read by everyone in sales (referenced on lines), maintained by managers.
+    Acl { model: "account.tax", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "account.tax", group: "sales.manager", read: true, write: true, create: true, delete: true },
     // Attribute configuration is user input: everyone in sales reads, managers maintain the attributes,
     // their values, and a template's attribute lines.
     Acl { model: "product.attribute", group: "sales.user", read: true, write: false, create: false, delete: false },
@@ -655,15 +738,37 @@ mod tests {
     }
 
     #[test]
+    fn line_discount_and_tax_computes() {
+        use meshble::prelude::{Children, ComputeInput};
+        use rust_decimal::Decimal;
+        use std::collections::BTreeMap;
+        use std::str::FromStr;
+        let mut v: BTreeMap<String, Value> = BTreeMap::new();
+        v.insert("product_uom_qty".into(), Value::Decimal(Decimal::from(2)));
+        v.insert("price_unit".into(), Value::Decimal(Decimal::from(100)));
+        v.insert("discount".into(), Value::Decimal(Decimal::from(10)));
+        v.insert("tax_rate".into(), Value::Decimal(Decimal::from(22)));
+        v.insert("purchase_price".into(), Value::Decimal(Decimal::from(60)));
+        let children = Children::new();
+        let i = ComputeInput::new(&v, &children);
+        // net = 2 * 100 * (1 - 10%) = 180
+        assert_eq!(compute_line_subtotal(&i), Value::Decimal(Decimal::from(180)));
+        assert_eq!(compute_line_tax(&i), Value::Decimal(Decimal::from_str("39.60").unwrap())); // 180 * 22%
+        assert_eq!(compute_line_total(&i), Value::Decimal(Decimal::from_str("219.60").unwrap())); // 180 * 1.22
+        assert_eq!(compute_line_margin(&i), Value::Decimal(Decimal::from(72))); // (100-60)*2*0.9
+    }
+
+    #[test]
     fn macro_generates_correct_descriptor() {
         // The macro must produce the SAME descriptor as the hand-written version.
         let d = SaleOrder::descriptor();
         assert_eq!(d.name, "sale.order");
-        assert_eq!(d.fields.len(), 8); // + pricelist_id (name, partner_id, company_id, line_ids, state, currency_id, pricelist_id, amount_total)
+        // name, partner_id, company_id, line_ids, state, currency_id, pricelist_id, amount_untaxed, amount_tax, amount_total
+        assert_eq!(d.fields.len(), 10);
         let total = d.fields.iter().find(|f| f.name == "amount_total").unwrap();
         assert!(total.stored, "computed with `store` must be stored");
         assert_eq!(total.compute, Some("compute_amount"));
-        assert_eq!(total.depends, &["line_ids.price_subtotal"]);
+        assert_eq!(total.depends, &["line_ids.price_total"]);
         let lines = d.fields.iter().find(|f| f.name == "line_ids").unwrap();
         assert!(!lines.has_column(), "one2many has no column");
     }

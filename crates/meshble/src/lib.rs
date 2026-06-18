@@ -14,7 +14,7 @@ pub mod prelude {
         record_rule_domain, registered_acls, registered_group_names, registered_model_names,
         registered_rules, related_path, resolve, resolve_all_registered, resolve_module_set,
         resolve_modules, resolve_registered, tracked_fields, validate_depends, Acl, AclRegistration,
-        ActionFn, ActionInput, ActionOutcome, ActionRegistration, ComputeFn, ComputeInput,
+        ActionFn, ActionInput, ActionOutcome, ActionRegistration, Children, ComputeFn, ComputeInput,
         ComputeRegistration, ConstraintFn, ConstraintRegistration, Condition, Ctx, DelegatedField, Domain, DomainError, ExternalTable,
         FieldBuilder, FieldDef, FieldExtension, FieldGroupRegistration, FieldKind,
         InheritsRegistration, MailedRegistration, MigrationTarget, Model, ModelDescriptor,
