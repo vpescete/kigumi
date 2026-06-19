@@ -113,6 +113,34 @@ body * {
     box-shadow var(--dur-base) var(--ease-in-out);
 }
 
+/* Overlay enter animations (reduced-motion zeroes the duration → they appear instantly). */
+.msh-dialog-in {
+  animation: msh-dialog-in var(--dur-slow) var(--ease-out);
+}
+@keyframes msh-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.msh-toast-in {
+  animation: msh-toast-in var(--dur-base) var(--ease-out);
+}
+@keyframes msh-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Loading skeleton shimmer (reduced-motion kills the animation → a static surface2 block). */
 .msh-skeleton {
   background: linear-gradient(90deg, var(--color-surface2), var(--color-border), var(--color-surface2));

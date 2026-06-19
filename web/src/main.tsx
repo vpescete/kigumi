@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { ThemeProvider } from './theme'
 import { AuthProvider } from './auth'
+import { ToastProvider } from './ui'
 import { getAllThemes, loadDropInThemes } from './theme/registry'
 import { injectThemes } from './theme/css'
 import { App } from './App'
@@ -21,9 +22,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        <ToastProvider>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </ToastProvider>
       </AuthProvider>
     </ThemeProvider>
   </React.StrictMode>,

@@ -1,17 +1,17 @@
 import type { ReactNode } from 'react'
 import { STATE_LABEL, type OrderState } from './data'
-import { cx } from './ui/cx'
+import { cx, focusRing } from './ui/cx'
 
 // Re-export the overlay/feedback primitives so `import { ... } from './ui'` reaches everything.
-export { cx }
+export { cx, focusRing }
 export { Portal, useFocusTrap, useDismiss, useReducedMotion } from './ui/overlay'
 export { Skeleton, SkeletonText, SkeletonTable, SkeletonStat } from './ui/Skeleton'
 export { Tooltip } from './ui/Tooltip'
 export { Sparkline } from './ui/Sparkline'
-
-/** Shared focus-visible ring — apply to any interactive element the design system styles. */
-export const focusRing =
-  'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-bg'
+export { Dialog, confirm } from './ui/Dialog'
+export { ToastProvider, useToast } from './ui/Toast'
+export { Combobox, type ComboOption } from './ui/Combobox'
+export { CommandPalette, type CommandSection, type CommandItem } from './ui/CommandPalette'
 
 /* ── Button ─────────────────────────────────────────────────────────────────── */
 type BtnVariant = 'primary' | 'secondary' | 'ghost'
