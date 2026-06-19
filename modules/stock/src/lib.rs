@@ -159,6 +159,91 @@ pub static RECORD_RULES: &[RecordRule] = &[
 meshble::register_acls!(ACLS);
 meshble::register_rules!(RECORD_RULES);
 
+// Form views: how each model is laid out on a form. The header carries identity + status; the moves
+// of a transfer live in a notebook page (the One2many the frontend renders inline).
+meshble::register_view!(
+    "stock.picking",
+    &[
+        FieldGroup {
+            title: None,
+            fields: &[
+                FieldSlot { name: "name", full: true },
+                FieldSlot { name: "picking_type", full: false },
+                FieldSlot { name: "state", full: false },
+                FieldSlot { name: "partner_id", full: false },
+                FieldSlot { name: "company_id", full: false },
+            ],
+        },
+        FieldGroup {
+            title: Some("Locations"),
+            fields: &[
+                FieldSlot { name: "location_id", full: false },
+                FieldSlot { name: "location_dest_id", full: false },
+            ],
+        },
+    ],
+    &[NotebookPage { title: "Moves", fields: &["move_ids"] }]
+);
+
+meshble::register_view!(
+    "stock.move",
+    &[FieldGroup {
+        title: None,
+        fields: &[
+            FieldSlot { name: "picking_id", full: false },
+            FieldSlot { name: "product_id", full: false },
+            FieldSlot { name: "product_uom_qty", full: false },
+            FieldSlot { name: "state", full: false },
+            FieldSlot { name: "location_id", full: false },
+            FieldSlot { name: "location_dest_id", full: false },
+        ],
+    }],
+    &[]
+);
+
+meshble::register_view!(
+    "stock.location",
+    &[FieldGroup {
+        title: None,
+        fields: &[
+            FieldSlot { name: "name", full: true },
+            FieldSlot { name: "usage", full: false },
+            FieldSlot { name: "parent_id", full: false },
+            FieldSlot { name: "company_id", full: false },
+            FieldSlot { name: "active", full: false },
+        ],
+    }],
+    &[]
+);
+
+meshble::register_view!(
+    "stock.warehouse",
+    &[FieldGroup {
+        title: None,
+        fields: &[
+            FieldSlot { name: "name", full: true },
+            FieldSlot { name: "code", full: false },
+            FieldSlot { name: "location_id", full: false },
+            FieldSlot { name: "company_id", full: false },
+            FieldSlot { name: "active", full: false },
+        ],
+    }],
+    &[]
+);
+
+meshble::register_view!(
+    "stock.quant",
+    &[FieldGroup {
+        title: None,
+        fields: &[
+            FieldSlot { name: "product_id", full: false },
+            FieldSlot { name: "location_id", full: false },
+            FieldSlot { name: "quantity", full: false },
+        ],
+    }],
+    &[]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +259,24 @@ mod tests {
         assert_eq!(StockLocation::descriptor().fields.len(), 5);
         assert_eq!(StockWarehouse::descriptor().name, "stock.warehouse");
         assert_eq!(StockQuant::descriptor().fields.len(), 3);
+    }
+
+    #[test]
+    fn stock_views_reference_real_fields() {
+        for model in ["stock.picking", "stock.move", "stock.location", "stock.warehouse", "stock.quant"] {
+            let m = resolve_registered(model).unwrap();
+            let names: Vec<&str> = m.fields.iter().map(|f| f.name).collect();
+            let v = view_for(model).unwrap_or_else(|| panic!("{model} has no form view"));
+            for g in v.groups {
+                for s in g.fields {
+                    assert!(names.contains(&s.name), "{model} view slot '{}' is not a real field", s.name);
+                }
+            }
+            for p in v.pages {
+                for f in p.fields {
+                    assert!(names.contains(f), "{model} view page field '{f}' is not a real field");
+                }
+            }
+        }
     }
 }

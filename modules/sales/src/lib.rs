@@ -827,6 +827,7 @@ meshble::register_view!(
                 FieldSlot { name: "categ_id", full: false },
                 FieldSlot { name: "uom_id", full: false },
                 FieldSlot { name: "product_type", full: false },
+                FieldSlot { name: "qty_available", full: false },
                 FieldSlot { name: "tag_ids", full: true },
             ],
         },
@@ -860,6 +861,31 @@ meshble::register_view!(
                 FieldSlot { name: "amount_tax", full: false },
                 FieldSlot { name: "amount_total", full: false },
                 FieldSlot { name: "margin", full: false },
+            ],
+        },
+    ],
+    &[NotebookPage { title: "Order lines", fields: &["line_ids"] }]
+);
+
+meshble::register_view!(
+    "purchase.order",
+    &[
+        FieldGroup {
+            title: None,
+            fields: &[
+                FieldSlot { name: "name", full: true },
+                FieldSlot { name: "partner_id", full: false },
+                FieldSlot { name: "currency_id", full: false },
+                FieldSlot { name: "company_id", full: false },
+                FieldSlot { name: "state", full: false },
+            ],
+        },
+        FieldGroup {
+            title: Some("Amounts"),
+            fields: &[
+                FieldSlot { name: "amount_untaxed", full: false },
+                FieldSlot { name: "amount_tax", full: false },
+                FieldSlot { name: "amount_total", full: false },
             ],
         },
     ],
