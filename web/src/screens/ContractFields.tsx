@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as api from '../api'
 import { Combobox } from '../ui'
 import { evalDomain } from '../domain'
-import { buildResolver, displayValue, modelTitle, relLabel } from '../format'
+import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
 
 export type RelOption = { id: number; label: string }
 
@@ -47,8 +47,96 @@ export function useRelOptions(contract: api.Contract | null): Record<string, Rel
   return opts
 }
 
-/** The scalar-field grid: a labelled input per editable field, the read-only display otherwise.
- * Applies invisible_when/readonly_when live and resolves Many2one ids to names in the read-only view. */
+/** Wide widgets span both columns so they never sit lopsided next to a small input. */
+const isWide = (f: api.FieldMeta): boolean => f.widget === 'many2many' || f.widget === 'html' || f.widget === 'image'
+
+/** Builds the id→label resolver from the fetched relation options (null contract → resolves nothing). */
+export function useResolver(contract: api.Contract | null, relOptions: Record<string, RelOption[]>): Resolver {
+  return useMemo(() => {
+    const byModel: Record<string, RelOption[]> = {}
+    for (const f of contract?.fields ?? []) {
+      if ((f.widget === 'many2one' || f.widget === 'many2many') && f.relation) byModel[f.relation] = relOptions[f.name] ?? []
+    }
+    return buildResolver(byModel)
+  }, [contract, relOptions])
+}
+
+type Slot = { field: api.FieldMeta; full: boolean }
+type SheetGroup = { title: string | null; slots: Slot[] }
+
+/** The scalar-field groups for the sheet: the model's declared view, or a smart default (name first,
+ * wide widgets full-width) when none. Required scalar fields the view forgot are appended to "Other". */
+function sheetGroups(contract: api.Contract): SheetGroup[] {
+  const byName = new Map(contract.fields.map((f) => [f.name, f]))
+  const view = contract.view
+  if (view && view.groups.length) {
+    const placed = new Set<string>()
+    view.groups.forEach((g) => g.fields.forEach((s) => placed.add(s.name)))
+    view.pages.forEach((p) => p.fields.forEach((n) => placed.add(n)))
+    const groups: SheetGroup[] = view.groups
+      .map((g) => ({
+        title: g.title,
+        slots: g.fields
+          .map((s) => {
+            const f = byName.get(s.name)
+            return f && f.widget !== 'one2many' ? { field: f, full: s.full } : null
+          })
+          .filter((s): s is Slot => s !== null),
+      }))
+      .filter((g) => g.slots.length > 0)
+    const orphans = contract.fields.filter((f) => f.widget !== 'one2many' && f.required && !f.readonly && !placed.has(f.name))
+    if (orphans.length) groups.push({ title: 'Other', slots: orphans.map((f) => ({ field: f, full: isWide(f) })) })
+    return groups
+  }
+  // Fallback: one group, the primary name first, wide widgets full-width.
+  const scalar = contract.fields.filter((f) => f.widget !== 'one2many')
+  scalar.sort((a, b) => (a.name === 'name' ? -1 : 0) - (b.name === 'name' ? -1 : 0))
+  return [{ title: null, slots: scalar.map((f) => ({ field: f, full: isWide(f) })) }]
+}
+
+/** The notebook pages (tabs): the model's declared pages, or a single "Details" tab of its One2many. */
+export function notebookPages(contract: api.Contract): api.ViewPage[] {
+  const view = contract.view
+  if (view && view.pages.length) return view.pages
+  const o2m = contract.fields.filter((f) => f.widget === 'one2many' && f.relation).map((f) => f.name)
+  return o2m.length ? [{ title: 'Details', fields: o2m }] : []
+}
+
+/** A single labelled field: read-only display (resolving Many2one to a name) or an editable input,
+ * honoring invisible_when / readonly_when. Returns null when the field is dynamically invisible. */
+export function FieldCell({
+  field,
+  values,
+  relOptions,
+  resolve,
+  onChange,
+  full,
+}: {
+  field: api.FieldMeta
+  values: Record<string, unknown>
+  relOptions: Record<string, RelOption[]>
+  resolve: Resolver
+  onChange: (name: string, value: unknown) => void
+  full?: boolean
+}) {
+  if (evalDomain(field.invisible_when, values)) return null
+  const readonly = field.readonly || evalDomain(field.readonly_when, values)
+  return (
+    <div className={full ? 'md:col-span-2' : ''}>
+      <div className="t-label text-muted mb-1.5">
+        {field.label}
+        {field.required && <span className="text-danger"> *</span>}
+      </div>
+      {readonly ? (
+        <div className="t-body text-text py-1.5">{displayValue(values[field.name], field.widget, field, resolve)}</div>
+      ) : (
+        <FieldInput field={field} value={values[field.name]} options={relOptions[field.name]} onChange={(v) => onChange(field.name, v)} />
+      )}
+    </div>
+  )
+}
+
+/** The form sheet: scalar-field groups laid out from the model's view (or a smart default). */
 export function ContractFields({
   contract,
   values,
@@ -60,34 +148,25 @@ export function ContractFields({
   relOptions: Record<string, RelOption[]>
   onChange: (name: string, value: unknown) => void
 }) {
-  const resolve = useMemo(() => {
-    const byModel: Record<string, RelOption[]> = {}
-    for (const f of contract.fields) {
-      if ((f.widget === 'many2one' || f.widget === 'many2many') && f.relation) byModel[f.relation] = relOptions[f.name] ?? []
-    }
-    return buildResolver(byModel)
-  }, [contract, relOptions])
-
-  const scalarFields = contract.fields.filter((f) => f.widget !== 'one2many')
+  const resolve = useResolver(contract, relOptions)
+  const groups = useMemo(() => sheetGroups(contract), [contract])
   return (
-    <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-      {scalarFields.map((f) => {
-        if (evalDomain(f.invisible_when, values)) return null
-        const readonly = f.readonly || evalDomain(f.readonly_when, values)
-        return (
-          <div key={f.name}>
-            <div className="t-label text-muted mb-1.5">
-              {f.label}
-              {f.required && <span className="text-danger"> *</span>}
+    <div className="space-y-7">
+      {groups.map((g, gi) => (
+        <section key={gi}>
+          {g.title && (
+            <div className="mb-3 flex items-center gap-2">
+              <span className="h-3 w-0.5 rounded-full bg-accent" aria-hidden="true" />
+              <h3 className="t-label text-text">{g.title}</h3>
             </div>
-            {readonly ? (
-              <div className="t-body text-text py-1.5">{displayValue(values[f.name], f.widget, f, resolve)}</div>
-            ) : (
-              <FieldInput field={f} value={values[f.name]} options={relOptions[f.name]} onChange={(v) => onChange(f.name, v)} />
-            )}
+          )}
+          <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
+            {g.slots.map((s) => (
+              <FieldCell key={s.field.name} field={s.field} values={values} relOptions={relOptions} resolve={resolve} onChange={onChange} full={s.full} />
+            ))}
           </div>
-        )
-      })}
+        </section>
+      ))}
     </div>
   )
 }

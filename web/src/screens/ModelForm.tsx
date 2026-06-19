@@ -5,10 +5,10 @@ import * as api from '../api'
 import { canRun } from '../api'
 import { useAuth } from '../auth'
 import type { Column } from '../ui'
-import { Button, Card, confirm, cx, DataTable, ErrorState, focusRing, PageHeader, Skeleton, useToast } from '../ui'
-import { displayValue, modelTitle } from '../format'
+import { Button, Card, confirm, cx, DataTable, ErrorState, focusRing, PageHeader, Skeleton, Tabs, useToast } from '../ui'
+import { displayValue, modelTitle, type Resolver } from '../format'
 import { SERVICE_ACTIONS, type ServiceAction } from '../registries/serviceActions'
-import { ContractFields, isWritable, useRelOptions } from './ContractFields'
+import { ContractFields, FieldCell, isWritable, notebookPages, useRelOptions, useResolver } from './ContractFields'
 import { ReportViewer } from './ReportViewer'
 import { WizardModal } from './WizardModal'
 import { WIZARDS, type WizardSpec } from '../registries/wizards'
@@ -49,6 +49,7 @@ export function ModelForm() {
   const [values, setValues] = useState<FormValues>({})
   const [childContracts, setChildContracts] = useState<Record<string, api.Contract>>({})
   const relOptions = useRelOptions(contract)
+  const resolve = useResolver(contract, relOptions)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [report, setReport] = useState<api.ReportMeta | null>(null)
@@ -163,7 +164,7 @@ export function ModelForm() {
   const services = isNew ? [] : SERVICE_ACTIONS[model] ?? []
   const wizards = isNew ? [] : WIZARDS[model] ?? []
   const reports = isNew ? [] : contract.reports ?? []
-  const relationFields = contract.fields.filter((f) => f.widget === 'one2many' && f.relation)
+  const pages = isNew ? [] : notebookPages(contract)
 
   return (
     <div>
@@ -206,10 +207,28 @@ export function ModelForm() {
         <ContractFields contract={contract} values={values} relOptions={relOptions} onChange={setField} />
       </Card>
 
-      {!isNew &&
-        relationFields.map((f) => (
-          <InlineRelation key={f.name} field={f} rows={(record?.[f.name] as api.Row[]) ?? []} child={childContracts[f.name]} />
-        ))}
+      {!isNew && pages.length > 0 && (
+        <Card className="mb-5 p-5">
+          <Tabs
+            tabs={pages.map((p) => ({
+              id: p.title,
+              label: p.title,
+              content: (
+                <PageContent
+                  page={p}
+                  contract={contract}
+                  record={record}
+                  childContracts={childContracts}
+                  values={values}
+                  relOptions={relOptions}
+                  resolve={resolve}
+                  onChange={setField}
+                />
+              ),
+            }))}
+          />
+        </Card>
+      )}
 
       {!isNew && contract.mailed && <Chatter model={model} id={Number(id)} />}
 
@@ -250,14 +269,55 @@ function PrintMenu({ reports, onPick }: { reports: api.ReportMeta[]; onPick: (r:
   )
 }
 
+/** A notebook page: renders each of its fields — One2many as an inline table, anything else as a
+ * full-width field cell (e.g. a Many2many of attribute values). */
+function PageContent({
+  page,
+  contract,
+  record,
+  childContracts,
+  values,
+  relOptions,
+  resolve,
+  onChange,
+}: {
+  page: api.ViewPage
+  contract: api.Contract
+  record: api.Row | null
+  childContracts: Record<string, api.Contract>
+  values: FormValues
+  relOptions: Record<string, import('./ContractFields').RelOption[]>
+  resolve: Resolver
+  onChange: (name: string, value: unknown) => void
+}) {
+  return (
+    <div className="space-y-6">
+      {page.fields.map((name) => {
+        const f = contract.fields.find((ff) => ff.name === name)
+        if (!f) return null
+        if (f.widget === 'one2many') {
+          return <InlineRelation key={name} field={f} rows={(record?.[name] as api.Row[]) ?? []} child={childContracts[name]} resolve={resolve} />
+        }
+        return (
+          <div key={name} className="grid grid-cols-1 md:grid-cols-2">
+            <FieldCell field={f} values={values} relOptions={relOptions} resolve={resolve} onChange={onChange} full />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function InlineRelation({
   field,
   rows,
   child,
+  resolve,
 }: {
   field: api.FieldMeta
   rows: api.Row[]
   child?: api.Contract
+  resolve?: Resolver
 }) {
   const columns: Column<api.Row>[] = (child?.list.columns ?? [])
     .filter((c) => c.name !== field.inverse) // the back-reference to this parent is implied
@@ -268,18 +328,13 @@ function InlineRelation({
         header: c.label,
         align: numeric ? ('right' as const) : ('left' as const),
         mono: numeric,
-        render: (row: api.Row) => displayValue(row[c.name], c.widget, f),
+        render: (row: api.Row) => displayValue(row[c.name], c.widget, f, resolve),
       }
     })
 
-  return (
-    <div className="mb-5">
-      <h2 className="t-h2 text-text mb-3">{field.label}</h2>
-      {rows.length === 0 || columns.length === 0 ? (
-        <div className="t-body text-muted">No lines.</div>
-      ) : (
-        <DataTable columns={columns} rows={rows} rowKey={(r) => r.id} />
-      )}
-    </div>
+  return rows.length === 0 || columns.length === 0 ? (
+    <div className="t-body rounded-md border border-dashed border-border px-4 py-8 text-center text-muted">No {field.label.toLowerCase()} yet.</div>
+  ) : (
+    <DataTable columns={columns} rows={rows} rowKey={(r) => r.id} />
   )
 }

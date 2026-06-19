@@ -51,6 +51,13 @@ export type ColumnMeta = { name: string; label: string; widget: string }
 export type ActionMeta = { name: string; groups: string[] }
 export type ReportMeta = { name: string; title: string }
 
+// Form layout (server-declared): grouped scalar fields in the sheet + notebook pages (tabs) for
+// One2many relations / secondary details. `view` is null when the model declares no layout.
+export type ViewSlot = { name: string; full: boolean }
+export type ViewGroup = { title: string | null; fields: ViewSlot[] }
+export type ViewPage = { title: string; fields: string[] }
+export type FormViewMeta = { groups: ViewGroup[]; pages: ViewPage[] }
+
 export type Contract = {
   model: string
   type: string
@@ -59,6 +66,7 @@ export type Contract = {
   list: { columns: ColumnMeta[] }
   actions: ActionMeta[]
   reports?: ReportMeta[] // printable documents (GET .../report/<name>); read as `contract.reports ?? []`
+  view?: FormViewMeta | null // declared form layout, or null -> the frontend applies a smart default
 }
 
 // ---- Chatter (mail subsystem) ----

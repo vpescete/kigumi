@@ -12,6 +12,7 @@ export { Dialog, confirm } from './ui/Dialog'
 export { ToastProvider, useToast } from './ui/Toast'
 export { Combobox, type ComboOption } from './ui/Combobox'
 export { CommandPalette, type CommandSection, type CommandItem } from './ui/CommandPalette'
+export { Tabs, type Tab } from './ui/Tabs'
 
 /* ── Button ─────────────────────────────────────────────────────────────────── */
 type BtnVariant = 'primary' | 'secondary' | 'ghost'
