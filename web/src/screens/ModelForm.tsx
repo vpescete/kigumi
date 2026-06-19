@@ -6,13 +6,11 @@ import { canRun } from '../api'
 import { useAuth } from '../auth'
 import type { Column } from '../ui'
 import { Button, Card, DataTable, ErrorState, Loading, PageHeader } from '../ui'
-import { displayValue, modelTitle, relLabel } from '../format'
+import { displayValue, modelTitle } from '../format'
+import { ContractFields, editableScalar, useRelOptions } from './ContractFields'
 import { Chatter } from './Chatter'
 
 type FormValues = Record<string, unknown>
-type RelOption = { id: number; label: string }
-
-const editableScalar = (f: api.FieldMeta): boolean => !f.readonly && f.widget !== 'one2many'
 
 function initialValues(contract: api.Contract, record: api.Row | null): FormValues {
   if (record) return { ...record }
@@ -35,7 +33,7 @@ export function ModelForm() {
   const [record, setRecord] = useState<api.Row | null>(null)
   const [values, setValues] = useState<FormValues>({})
   const [childContracts, setChildContracts] = useState<Record<string, api.Contract>>({})
-  const [relOptions, setRelOptions] = useState<Record<string, RelOption[]>>({})
+  const relOptions = useRelOptions(contract)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -58,21 +56,7 @@ export function ModelForm() {
         o2m.map(async (f) => [f.name, await api.contract(f.relation as string)] as const),
       )
       setChildContracts(Object.fromEntries(children))
-      // Fetch selectable records for each Many2one/Many2many, so the field is a name picker.
-      const m2o = c.fields.filter(
-        (f) => (f.widget === 'many2one' || f.widget === 'many2many') && f.relation,
-      )
-      const opts = await Promise.all(
-        m2o.map(async (f) => {
-          try {
-            const page = await api.list(f.relation as string, { limit: 200 })
-            return [f.name, page.data.map((r) => ({ id: r.id, label: relLabel(r) }))] as const
-          } catch {
-            return [f.name, [] as RelOption[]] as const
-          }
-        }),
-      )
-      setRelOptions(Object.fromEntries(opts))
+      // Many2one/Many2many pickers are loaded by useRelOptions, keyed off the contract.
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load')
     }
@@ -130,7 +114,6 @@ export function ModelForm() {
   if (!contract) return <Loading />
 
   const actions = isNew ? [] : contract.actions.filter((a) => canRun(a, identity))
-  const scalarFields = contract.fields.filter((f) => f.widget !== 'one2many')
   const relationFields = contract.fields.filter((f) => f.widget === 'one2many' && f.relation)
 
   return (
@@ -163,26 +146,7 @@ export function ModelForm() {
       {notice && <div className="t-body text-success bg-success-bg rounded-md px-3 py-2 mb-4">{notice}</div>}
 
       <Card className="p-5 mb-5">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {scalarFields.map((f) => (
-            <div key={f.name}>
-              <div className="t-label text-muted mb-1.5">
-                {f.label}
-                {f.required && <span className="text-danger"> *</span>}
-              </div>
-              {f.readonly ? (
-                <div className="t-body text-text py-1.5">{displayValue(values[f.name], f.widget, f)}</div>
-              ) : (
-                <FieldInput
-                  field={f}
-                  value={values[f.name]}
-                  options={relOptions[f.name]}
-                  onChange={(v) => setField(f.name, v)}
-                />
-              )}
-            </div>
-          ))}
-        </div>
+        <ContractFields contract={contract} values={values} relOptions={relOptions} onChange={setField} />
       </Card>
 
       {!isNew &&
@@ -193,136 +157,6 @@ export function ModelForm() {
       {!isNew && contract.mailed && <Chatter model={model} id={Number(id)} />}
     </div>
   )
-}
-
-function FieldInput({
-  field,
-  value,
-  options,
-  onChange,
-}: {
-  field: api.FieldMeta
-  value: unknown
-  options?: RelOption[]
-  onChange: (value: unknown) => void
-}) {
-  const cls =
-    'w-full px-3 rounded-md bg-surface2 border border-border text-text focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]'
-  const style = { height: 'var(--control-h)' }
-
-  switch (field.widget) {
-    case 'boolean':
-      return (
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          onChange={(e) => onChange(e.target.checked)}
-          className="h-4 w-4 mt-1.5 accent-[var(--color-accent)]"
-        />
-      )
-    case 'selection':
-      return (
-        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)} className={cls} style={style}>
-          <option value="">—</option>
-          {field.options?.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      )
-    case 'integer':
-    case 'monetary':
-    case 'float':
-      return (
-        <input
-          type="number"
-          step={field.widget === 'integer' ? '1' : 'any'}
-          value={value == null ? '' : String(value)}
-          onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-          className={cls}
-          style={style}
-        />
-      )
-    case 'date':
-      return (
-        <input
-          type="date"
-          value={value == null ? '' : String(value)}
-          onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
-          className={cls}
-          style={style}
-        />
-      )
-    case 'datetime':
-      // The server returns "YYYY-MM-DD HH:MM:SS+TZ"; datetime-local wants "YYYY-MM-DDTHH:MM".
-      return (
-        <input
-          type="datetime-local"
-          value={value == null ? '' : String(value).replace(' ', 'T').slice(0, 16)}
-          onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
-          className={cls}
-          style={style}
-        />
-      )
-    case 'many2many': {
-      // SET semantics: the value is the full array of selected target ids.
-      const selected = Array.isArray(value) ? (value as number[]).map(String) : []
-      return (
-        <select
-          multiple
-          value={selected}
-          onChange={(e) => onChange(Array.from(e.target.selectedOptions).map((o) => Number(o.value)))}
-          className={`${cls} min-h-[5rem] py-1.5`}
-        >
-          {(options ?? []).map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      )
-    }
-    case 'many2one':
-      // A name picker when we have the related records; raw id input only as a fallback.
-      if (options) {
-        return (
-          <select
-            value={value == null ? '' : String(value)}
-            onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-            className={cls}
-            style={style}
-          >
-            <option value="">—</option>
-            {options.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        )
-      }
-      return (
-        <input
-          type="number"
-          placeholder={field.relation ? `${field.relation} id` : 'id'}
-          value={value == null ? '' : String(value)}
-          onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-          className={cls}
-          style={style}
-        />
-      )
-    default:
-      return (
-        <input
-          type="text"
-          value={value == null ? '' : String(value)}
-          onChange={(e) => onChange(e.target.value)}
-          className={cls}
-          style={style}
-        />
-      )
-  }
 }
 
 function InlineRelation({

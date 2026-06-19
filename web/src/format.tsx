@@ -14,9 +14,22 @@ export function relLabel(row: Row): string {
   return `#${row.id}`
 }
 
+/** Resolves a Many2one id to a display label (built from fetched relation records); undefined = unknown. */
+export type Resolver = (model: string, id: number) => string | undefined
+
+/** Builds an id→label resolver from related records grouped by target model. */
+export function buildResolver(byModel: Record<string, { id: number; label: string }[]>): Resolver {
+  const maps = new Map<string, Map<number, string>>()
+  for (const [model, rows] of Object.entries(byModel)) {
+    maps.set(model, new Map(rows.map((r) => [r.id, r.label])))
+  }
+  return (model, id) => maps.get(model)?.get(id)
+}
+
 // Renders a stored value for display, driven only by the contract's widget hint — no per-model code.
 // Decimals arrive as exact JSON strings (monetary), Many2one as the related id, Selection as its key.
-export function displayValue(value: unknown, widget: string, field?: FieldMeta): ReactNode {
+// A `resolve` is the optional id→name map for Many2one fields (else they fall back to a #id reference).
+export function displayValue(value: unknown, widget: string, field?: FieldMeta, resolve?: Resolver): ReactNode {
   if (value === null || value === undefined || value === '') return <span className="text-muted">—</span>
 
   switch (widget) {
@@ -28,9 +41,12 @@ export function displayValue(value: unknown, widget: string, field?: FieldMeta):
       return value ? 'Yes' : 'No'
     case 'selection':
       return <SelectionBadge value={String(value)} field={field} />
-    case 'many2one':
-      // Without name resolution the server returns the FK id; show it as a reference for now.
+    case 'many2one': {
+      const label = field?.relation && resolve ? resolve(field.relation, Number(value)) : undefined
+      if (label) return <span className="text-text">{label}</span>
+      // No name resolution available → show the FK id as a reference.
       return <span className="text-muted">#{String(value)}</span>
+    }
     case 'many2many': {
       const n = Array.isArray(value) ? value.length : 0
       return <span className="text-muted">{n === 0 ? '—' : `${n} selected`}</span>

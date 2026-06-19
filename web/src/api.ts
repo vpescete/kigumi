@@ -49,6 +49,7 @@ export type FieldMeta = {
 
 export type ColumnMeta = { name: string; label: string; widget: string }
 export type ActionMeta = { name: string; groups: string[] }
+export type ReportMeta = { name: string; title: string }
 
 export type Contract = {
   model: string
@@ -57,6 +58,7 @@ export type Contract = {
   fields: FieldMeta[]
   list: { columns: ColumnMeta[] }
   actions: ActionMeta[]
+  reports?: ReportMeta[] // printable documents (GET .../report/<name>); read as `contract.reports ?? []`
 }
 
 // ---- Chatter (mail subsystem) ----
@@ -241,6 +243,48 @@ export function canRun(action: ActionMeta, identity: Identity | null): boolean {
   if (action.groups.length === 0) return true
   if (!identity) return false
   return action.groups.some((g) => identity.groups.includes(g))
+}
+
+// ---- Reports ----
+
+/** The HTML body of a record's report (text/html), fetched with the bearer (a bare <a> cannot). */
+export async function reportHtml(model: string, id: number, report: string): Promise<string> {
+  const res = await request(`/api/${model}/${id}/report/${report}`)
+  if (!res.ok) throw new ApiError(res.status, (await res.text()) || 'report failed')
+  return res.text()
+}
+
+/** The PDF blob of a record's report. A 501 means no rasterizer is configured (HTML stays available). */
+export async function reportPdf(model: string, id: number, report: string): Promise<Blob> {
+  const res = await request(`/api/${model}/${id}/report/${report}?format=pdf`)
+  if (res.status === 501) throw new ApiError(501, 'PDF rendering is not configured')
+  if (!res.ok) throw new ApiError(res.status, (await res.text()) || 'pdf failed')
+  return res.blob()
+}
+
+// ---- Wizards (transient models) + record-scoped service methods ----
+
+export type WizardOpenCtx = { active_model?: string; active_id?: number; active_ids?: number[] }
+
+/** Opens a transient wizard seeded from the host record's context; returns the new transient row. */
+export async function openWizard(model: string, ctx: WizardOpenCtx): Promise<Row> {
+  return asJson<Row>(
+    await request(`/api/${model}/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(ctx),
+    }),
+  )
+}
+
+/** Calls a record-scoped service endpoint (POST /api/:model/:id/:path) and returns its JSON body —
+ * covers create_invoice, apply_pricelist, post, generate_variants, apply_discount, … */
+export async function callEndpoint<T = Record<string, unknown>>(
+  model: string,
+  id: number,
+  path: string,
+): Promise<T> {
+  return asJson<T>(await request(`/api/${model}/${id}/${path}`, { method: 'POST' }))
 }
 
 // ---- Chatter endpoints (gated on read access to the host record) ----
