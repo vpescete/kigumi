@@ -295,6 +295,25 @@ export async function callEndpoint<T = Record<string, unknown>>(
   return asJson<T>(await request(`/api/${model}/${id}/${path}`, { method: 'POST' }))
 }
 
+// ---- Attachments (image / file fields) ----
+
+/** Uploads a file as an attachment on a record; returns the new attachment id (used as an Image FK). */
+export async function uploadAttachment(model: string, id: number, file: File): Promise<number> {
+  const res = await request(`/api/${model}/${id}/attachments`, {
+    method: 'POST',
+    headers: { 'content-type': file.type || 'application/octet-stream', 'x-filename': file.name },
+    body: file,
+  })
+  return (await asJson<{ id: number }>(res)).id
+}
+
+/** Fetches an attachment's bytes with the bearer (a bare <img src> cannot carry it). */
+export async function attachmentBlob(attachmentId: number): Promise<Blob> {
+  const res = await request(`/api/attachment/${attachmentId}/content`)
+  if (!res.ok) throw new ApiError(res.status, 'could not load the attachment')
+  return res.blob()
+}
+
 // ---- Chatter endpoints (gated on read access to the host record) ----
 
 export async function messages(model: string, id: number): Promise<Message[]> {

@@ -3,13 +3,16 @@
 // Kept presentation-only so both the form and a wizard render fields identically.
 
 import { useEffect, useMemo, useState } from 'react'
-import { X } from 'lucide-react'
+import { Image as ImageIcon, X } from 'lucide-react'
 import * as api from '../api'
 import { Combobox, cx, focusRing } from '../ui'
 import { evalDomain } from '../domain'
 import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
 
 export type RelOption = { id: number; label: string }
+
+/** The record an image/file widget uploads against (an attachment is record-scoped). */
+export type FieldContext = { model: string; recordId: number | null }
 
 /** A field that can be edited and submitted (not readonly, not a One2many relation). */
 export const editableScalar = (f: api.FieldMeta): boolean => !f.readonly && f.widget !== 'one2many'
@@ -112,6 +115,7 @@ export function FieldCell({
   resolve,
   onChange,
   full,
+  context,
 }: {
   field: api.FieldMeta
   values: Record<string, unknown>
@@ -119,6 +123,7 @@ export function FieldCell({
   resolve: Resolver
   onChange: (name: string, value: unknown) => void
   full?: boolean
+  context?: FieldContext
 }) {
   if (evalDomain(field.invisible_when, values)) return null
   const readonly = field.readonly || evalDomain(field.readonly_when, values)
@@ -131,7 +136,13 @@ export function FieldCell({
       {readonly ? (
         <div className="t-body text-text py-1.5">{displayValue(values[field.name], field.widget, field, resolve)}</div>
       ) : (
-        <FieldInput field={field} value={values[field.name]} options={relOptions[field.name]} onChange={(v) => onChange(field.name, v)} />
+        <FieldInput
+          field={field}
+          value={values[field.name]}
+          options={relOptions[field.name]}
+          onChange={(v) => onChange(field.name, v)}
+          context={context}
+        />
       )}
     </div>
   )
@@ -143,11 +154,13 @@ export function ContractFields({
   values,
   relOptions,
   onChange,
+  context,
 }: {
   contract: api.Contract
   values: Record<string, unknown>
   relOptions: Record<string, RelOption[]>
   onChange: (name: string, value: unknown) => void
+  context?: FieldContext
 }) {
   const resolve = useResolver(contract, relOptions)
   const groups = useMemo(() => sheetGroups(contract), [contract])
@@ -163,7 +176,16 @@ export function ContractFields({
           )}
           <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
             {g.slots.map((s) => (
-              <FieldCell key={s.field.name} field={s.field} values={values} relOptions={relOptions} resolve={resolve} onChange={onChange} full={s.full} />
+              <FieldCell
+                key={s.field.name}
+                field={s.field}
+                values={values}
+                relOptions={relOptions}
+                resolve={resolve}
+                onChange={onChange}
+                full={s.full}
+                context={context}
+              />
             ))}
           </div>
         </section>
@@ -177,17 +199,21 @@ export function FieldInput({
   value,
   options,
   onChange,
+  context,
 }: {
   field: api.FieldMeta
   value: unknown
   options?: RelOption[]
   onChange: (value: unknown) => void
+  context?: FieldContext
 }) {
   const cls =
     'w-full px-3 rounded-md bg-surface2 border border-border text-text focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]'
   const style = { height: 'var(--control-h)' }
 
   switch (field.widget) {
+    case 'image':
+      return <ImageField value={typeof value === 'number' ? value : value == null ? null : Number(value)} onChange={onChange} context={context} />
     case 'boolean': {
       const on = Boolean(value)
       return (
@@ -289,6 +315,85 @@ export function FieldInput({
         />
       )
   }
+}
+
+/** An image field: a preview (fetched with the bearer) + upload/replace/remove. An attachment is
+ * record-scoped, so upload needs a saved record; on a new record it asks the user to save first. */
+function ImageField({
+  value,
+  onChange,
+  context,
+}: {
+  value: number | null
+  onChange: (value: unknown) => void
+  context?: FieldContext
+}) {
+  const [preview, setPreview] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let url: string | null = null
+    let cancelled = false
+    if (value != null) {
+      void api
+        .attachmentBlob(value)
+        .then((b) => {
+          if (cancelled) return
+          url = URL.createObjectURL(b)
+          setPreview(url)
+        })
+        .catch(() => setPreview(null))
+    } else {
+      setPreview(null)
+    }
+    return () => {
+      cancelled = true
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [value])
+
+  const canUpload = context?.recordId != null
+  async function onFile(file: File): Promise<void> {
+    if (!context?.recordId) return
+    setBusy(true)
+    try {
+      const aid = await api.uploadAttachment(context.model, context.recordId, file)
+      onChange(aid)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-surface2">
+        {preview ? <img src={preview} alt="" className="h-full w-full object-cover" /> : <ImageIcon size={20} className="text-muted" />}
+      </div>
+      {canUpload ? (
+        <div className="flex items-center gap-3">
+          <label className={cx('inline-flex cursor-pointer items-center gap-2 rounded-md border border-border bg-surface2 px-3 text-text hover:bg-surface', focusRing)} style={{ height: 'var(--control-h)' }}>
+            {busy ? 'Uploading…' : value != null ? 'Replace' : 'Upload image'}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) void onFile(f)
+              }}
+            />
+          </label>
+          {value != null && (
+            <button type="button" onClick={() => onChange(null)} className={cx('t-caption text-muted hover:text-danger', focusRing)}>
+              Remove
+            </button>
+          )}
+        </div>
+      ) : (
+        <span className="t-caption text-muted">Save the record first to add an image.</span>
+      )}
+    </div>
+  )
 }
 
 /** A Many2many editor: selected targets as removable chips + a searchable picker to add more.

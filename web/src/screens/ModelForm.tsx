@@ -204,7 +204,13 @@ export function ModelForm() {
       />
 
       <Card className="p-5 mb-5">
-        <ContractFields contract={contract} values={values} relOptions={relOptions} onChange={setField} />
+        <ContractFields
+          contract={contract}
+          values={values}
+          relOptions={relOptions}
+          onChange={setField}
+          context={{ model, recordId: isNew ? null : Number(id) }}
+        />
       </Card>
 
       {!isNew && pages.length > 0 && (
@@ -223,6 +229,7 @@ export function ModelForm() {
                   relOptions={relOptions}
                   resolve={resolve}
                   onChange={setField}
+                  context={{ model, recordId: isNew ? null : Number(id) }}
                 />
               ),
             }))}
@@ -280,6 +287,7 @@ function PageContent({
   relOptions,
   resolve,
   onChange,
+  context,
 }: {
   page: api.ViewPage
   contract: api.Contract
@@ -289,6 +297,7 @@ function PageContent({
   relOptions: Record<string, import('./ContractFields').RelOption[]>
   resolve: Resolver
   onChange: (name: string, value: unknown) => void
+  context: import('./ContractFields').FieldContext
 }) {
   return (
     <div className="space-y-6">
@@ -300,7 +309,7 @@ function PageContent({
         }
         return (
           <div key={name} className="grid grid-cols-1 md:grid-cols-2">
-            <FieldCell field={f} values={values} relOptions={relOptions} resolve={resolve} onChange={onChange} full />
+            <FieldCell field={f} values={values} relOptions={relOptions} resolve={resolve} onChange={onChange} full context={context} />
           </div>
         )
       })}
