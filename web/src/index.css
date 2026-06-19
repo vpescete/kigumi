@@ -113,6 +113,21 @@ body * {
     box-shadow var(--dur-base) var(--ease-in-out);
 }
 
+/* Loading skeleton shimmer (reduced-motion kills the animation → a static surface2 block). */
+.msh-skeleton {
+  background: linear-gradient(90deg, var(--color-surface2), var(--color-border), var(--color-surface2));
+  background-size: 200% 100%;
+  animation: msh-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes msh-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 /* Honor the OS "reduce motion" preference — no transitions, no animation, anywhere. */
 @media (prefers-reduced-motion: reduce) {
   *,
