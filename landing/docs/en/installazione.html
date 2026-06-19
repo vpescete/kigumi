@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <title>Meshble · Installation · EN</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: {
+      bg: '#0D1014', surface: '#14181D', surface2: '#1B2026', border: '#272D34',
+      text: '#E5E9ED', muted: '#8B949E', accent: '#22B8CF', accentfg: '#06181C',
+      accenthover: '#46C8DB', success: '#3DD68C', violet: '#7B8CFF',
+    }, fontFamily: {
+      display: ['Space Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      body: ['Hanken Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+    } } } }
+  </script>
+  <style>
+    :root { color-scheme: dark; }
+    body { background:#0d1014; color:#e5e9ed; font-family:'Hanken Grotesk',ui-sans-serif,system-ui,sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+    .scanline { position:relative; }
+    .scanline::before { content:''; position:absolute; left:0; top:.15em; bottom:.15em; width:2px; border-radius:999px; background:#22b8cf; }
+    .pulse { animation:pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    @media (prefers-reduced-motion: reduce){ .pulse{animation:none} }
+    .markdown { font-size:15.5px; line-height:1.7; color:#c8cfd6; }
+    .markdown > :first-child { margin-top:0; }
+    .markdown h1,.markdown h2,.markdown h3,.markdown h4 { font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif; color:#e5e9ed; font-weight:600; letter-spacing:-.01em; line-height:1.25; }
+    .markdown h1 { font-size:2rem; margin:0 0 .75rem; letter-spacing:-.02em; }
+    .markdown h2 { font-size:1.5rem; margin:2.6rem 0 1rem; padding-top:1.4rem; border-top:1px solid #272d34; }
+    .markdown h3 { font-size:1.18rem; margin:2rem 0 .7rem; }
+    .markdown h4 { font-size:1rem; margin:1.6rem 0 .5rem; color:#cdd4db; }
+    .markdown p { margin:0 0 1.05rem; }
+    .markdown a { color:#46c8db; text-decoration:none; border-bottom:1px solid rgba(70,200,219,.3); }
+    .markdown a:hover { color:#22b8cf; border-bottom-color:#22b8cf; }
+    .markdown strong { color:#e5e9ed; font-weight:600; }
+    .markdown ul,.markdown ol { margin:0 0 1.05rem; padding-left:1.35rem; }
+    .markdown li { margin:.3rem 0; }
+    .markdown li::marker { color:#5b636c; }
+    .markdown code { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:.86em; background:#1b2026; border:1px solid #272d34; border-radius:5px; padding:.1em .38em; color:#cdd4db; }
+    .markdown pre { background:#0f1216; border:1px solid #272d34; border-radius:8px; padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.2rem; }
+    .markdown pre code { font-size:12.8px; line-height:1.65; background:none; border:0; padding:0; color:#d7dde3; }
+    .markdown blockquote { margin:0 0 1.2rem; padding:.2rem 0 .2rem 1rem; border-left:2px solid #22b8cf; color:#9aa3ac; }
+    .markdown hr { border:0; border-top:1px solid #272d34; margin:2rem 0; }
+    .markdown table { width:100%; border-collapse:collapse; margin:0 0 1.3rem; font-size:14px; display:block; overflow-x:auto; }
+    .markdown th,.markdown td { border:1px solid #272d34; padding:.5rem .7rem; text-align:left; }
+    .markdown th { background:#1b2026; color:#e5e9ed; font-weight:600; }
+    .markdown td code { white-space:nowrap; }
+    a,button { transition:color .16s ease,background-color .16s ease,border-color .16s ease; }
+    .docnav::-webkit-scrollbar { height:6px; width:6px; }
+    .docnav::-webkit-scrollbar-thumb { background:#272d34; border-radius:999px; }
+  </style>
+</head>
+<body class="font-body antialiased">
+  <header class="sticky top-0 z-40 border-b border-border/80 bg-bg/85 backdrop-blur">
+    <div class="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-6 px-5 sm:px-8">
+      <a href="../../index.html" class="flex items-center gap-2">
+        <span class="pulse h-2 w-2 rounded-full bg-accent"></span>
+        <span class="font-display text-[17px] font-semibold text-text">meshble</span>
+        <span class="font-mono text-[12px] text-muted">/ docs</span>
+      </a>
+      <div class="flex items-center gap-5 text-[14px] text-muted">
+        <a class="hover:text-text" href="../../index.html">← Landing</a>
+        <div class="flex items-center gap-1 font-mono text-[12px]">
+          <span class="rounded bg-surface px-1.5 py-0.5 text-text">EN</span>
+          <a class="rounded px-1.5 py-0.5 hover:text-text" href="../it/installazione.html">IT</a>
+        </div>
+        <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </header>
+  <div class="mx-auto max-w-[1180px] px-5 sm:px-8 lg:grid lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10">
+    <aside class="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:overflow-y-auto py-6 lg:py-9">
+      <div class="mb-3 hidden font-mono text-[11px] uppercase tracking-[0.16em] text-muted lg:block">Documentation</div>
+      <nav class="docnav flex gap-2 overflow-x-auto pb-2 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:pb-0">
+        <a href="README.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Overview</a>
+        <a href="architettura.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Architecture</a>
+        <a href="installazione.html" class="scanline shrink-0 whitespace-nowrap rounded-md bg-surface px-3 py-1.5 text-[14px] text-text lg:whitespace-normal">Installation</a>
+        <a href="configurazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Configuration</a>
+        <a href="moduli.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Modules</a>
+        <a href="moduli-custom.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Custom modules</a>
+        <a href="api.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">API & UI contract</a>
+        <a href="sicurezza.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Security</a>
+      </nav>
+    </aside>
+    <main class="min-w-0 py-8 lg:py-9">
+      <article class="markdown max-w-[760px]">
+<h1 id="environment-installation">Environment installation</h1>
+<p>This guide describes the installation and deployment of a Meshble instance, from source code all the way to a production server. Meshble is a headless, schema-driven application framework written in Rust: it compiles into a single binary (<code>meshble</code>) that migrates the catalog, applies security, and serves the API. The path is always the same: you compile the binary, provision a PostgreSQL database, supply the secrets through the environment, write the non-secret configuration file, and finally bring the instance up with the sequence <code>migrate</code> → <code>module install</code> → <code>serve</code>. For a product overview see <a href="README.html">README.md</a>; for the architecture <a href="architettura.html">architettura.md</a>; for the details of every configuration key <a href="configurazione.html">configurazione.md</a>.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Requirement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rust toolchain</td>
+<td>A recent stable toolchain. The workspace pins <code>edition = "2021"</code>. Install via <a href="https://rustup.rs">rustup</a>.</td>
+</tr>
+<tr>
+<td>PostgreSQL</td>
+<td>A reachable, already-running PostgreSQL server; <code>DATABASE_URL</code> is the only connection identity. The <code>createdb</code>/<code>psql</code> client commands come in handy for creating the database.</td>
+</tr>
+<tr>
+<td>Node.js + npm</td>
+<td>Only for the optional web frontend in <code>web/</code> (Vite 5, React 18).</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>The workspace declares <code>edition = "2021"</code> but does not pin an explicit <code>rust-version</code> (MSRV); use a recent stable toolchain. See the <strong>Uncertainties</strong> at the end.</p>
+</blockquote>
+<h2 id="getting-the-source-and-building">Getting the source and building</h2>
+<p>Clone the repository and build the workspace in release mode:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/vpescete/msh_framework</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> msh_framework</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> build <span class="at">--release</span></span></code></pre></div>
+<p>The operational binary is named <code>meshble</code> and is produced by the <code>meshble-cli</code> crate, which explicitly declares the bin name in its own <code>Cargo.toml</code>:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode toml"><code class="sourceCode toml"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">[[bin]]</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="dt">name</span> <span class="op">=</span> <span class="st">&quot;meshble&quot;</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="dt">path</span> <span class="op">=</span> <span class="st">&quot;src/main.rs&quot;</span></span></code></pre></div>
+<p><code>cargo build --release</code> builds the entire workspace. To build only the CLI you can narrow the target to the package:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> build <span class="at">--release</span> <span class="at">-p</span> meshble-cli</span></code></pre></div>
+<p>In both cases, once finished the binary is located at:</p>
+<pre><code>target/release/meshble</code></pre>
+<p>All the commands below use this binary. In the examples it is abbreviated as <code>meshble</code>; in a real environment invoke it with the full path <code>target/release/meshble</code>, or copy it to a directory on the <code>PATH</code>. During development you can also use <code>cargo run -p meshble-cli -- &lt;command&gt;</code>.</p>
+<p>The application modules (<code>base</code>, <code>mail</code>, <code>sales</code>, <code>account</code>, <code>stock</code>) are statically linked into the binary through their respective crates: their models, ACLs, and record rules self-register in the registry at compile time (via <code>inventory</code>). Only the modules whose crate is linked into the binary are available for installation at runtime — see <a href="moduli.html">moduli.md</a>.</p>
+<p>Check the framework version and the linked modules:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> version</span></code></pre></div>
+<p>The command prints the framework version and, line by line, the linked modules with their version (e.g. <code>module base 1.0.0</code>).</p>
+<h2 id="preparing-the-database">Preparing the database</h2>
+<p><code>meshble</code> connects to an <strong>already existing</strong> database — it does not create one. Create it separately:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">createdb</span> meshble</span></code></pre></div>
+<p>There is no need to run DDL by hand: <code>meshble migrate</code> (and <code>meshble serve</code>) create and version all the schemas. It is enough for the database to exist and for the user in <code>DATABASE_URL</code> to be able to create tables in it.</p>
+<h3 id="format-of-the-database_url-dsn">Format of the <code>DATABASE_URL</code> DSN</h3>
+<p><code>DATABASE_URL</code> is a complete PostgreSQL DSN and is the <strong>only</strong> source of the connection identity (host, port, database, user, password, sslmode). The value is validated at startup: it must be a URL with the <code>postgres://</code> or <code>postgresql://</code> scheme, otherwise the instance refuses to start with <code>"DATABASE_URL is not a valid postgres:// URL"</code>.</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co"># general form</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="va">DATABASE_URL</span><span class="op">=</span>postgres://UTENTE:PASSWORD@HOST:PORTA/NOME_DB</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="co"># example</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="va">DATABASE_URL</span><span class="op">=</span>postgres://meshble:CHANGE_ME@127.0.0.1:5432/meshble</span></code></pre></div>
+<p>The <code>[database]</code> section of the configuration file contains <strong>only</strong> tuning parameters (<code>pool_max</code>, <code>connect_timeout</code>): there is no <code>host</code>/<code>name</code> field there, precisely to avoid an ambiguous overlap with the DSN. Putting a <code>host</code> in <code>[database]</code> is an unknown key and triggers a fail-fast.</p>
+<h2 id="required-secrets-and-environment-variables">Required secrets and environment variables</h2>
+<p>Secrets must <strong>never</strong> go into the <code>meshble.toml</code> file: they are supplied exclusively from the environment (or from a secret manager), and their presence is verified at startup. The instance fails fast if a required secret is missing.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Required</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DATABASE_URL</code></td>
+<td><strong>Required</strong></td>
+<td>Complete PostgreSQL DSN: connection identity.</td>
+</tr>
+<tr>
+<td><code>MESHBLE_JWT_SECRET</code></td>
+<td><strong>Required</strong></td>
+<td>HS256 signing secret for access/refresh tokens.</td>
+</tr>
+<tr>
+<td><code>MESHBLE_ADMIN_PASSWORD</code></td>
+<td>For bootstrap</td>
+<td>Password of the <code>admin</code> user created on the first <code>serve</code> (see below).</td>
+</tr>
+<tr>
+<td><code>MESHBLE_SMTP_PASSWORD</code></td>
+<td>Conditional</td>
+<td>Required <strong>only</strong> if <code>[mail].smtp_host</code> is configured; otherwise loading the <code>Settings</code> fails.</td>
+</tr>
+<tr>
+<td><code>MESHBLE_JWT_SECRET_OLD</code></td>
+<td>Optional</td>
+<td>Previous JWT secret, <strong>reserved</strong> for rotation: in v1 it is loaded into the configuration but not yet passed to the verifier (the <code>Authenticator</code> receives only <code>MESHBLE_JWT_SECRET</code>).</td>
+</tr>
+<tr>
+<td><code>MESHBLE_ADMIN_TOKEN</code></td>
+<td>Optional</td>
+<td>Secret <strong>reserved</strong> for the future protection of destructive database operations (dump/restore/gc): in v1 it is loaded but the enforcement is not yet wired up (the endpoints do not exist yet).</td>
+</tr>
+<tr>
+<td><code>MESHBLE_NEW_PASSWORD</code></td>
+<td>Optional</td>
+<td>Password for <code>meshble user create</code> / <code>set-password</code> when <code>--password</code> is not provided.</td>
+</tr>
+</tbody>
+</table>
+<p><code>DATABASE_URL</code> and <code>MESHBLE_JWT_SECRET</code> are the two absolutely <strong>required</strong> variables: reading the environment fails if either of them is missing or empty. The SMTP cross-check is explicit: if <code>mail.smtp_host</code> is present in the configuration but <code>MESHBLE_SMTP_PASSWORD</code> is missing, loading the <code>Settings</code> returns the error <code>"mail.smtp_host is set but MESHBLE_SMTP_PASSWORD is not"</code>.</p>
+<p>The <code>.env.example</code> file in the repository lists the secrets as a template. A minimal example to get started:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">DATABASE_URL</span><span class="op">=</span>postgres://meshble:CHANGE_ME@127.0.0.1:5432/meshble</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MESHBLE_JWT_SECRET</span><span class="op">=</span><span class="st">&quot;</span><span class="va">$(</span><span class="ex">openssl</span> rand <span class="at">-hex</span> 32<span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MESHBLE_ADMIN_PASSWORD</span><span class="op">=</span><span class="st">&quot;</span><span class="va">$(</span><span class="ex">openssl</span> rand <span class="at">-base64</span> 24<span class="va">)</span><span class="st">&quot;</span></span></code></pre></div>
+<p>To inspect the effective configuration with the secrets redacted (the DSN password is masked, while host/db/user remain visible; the other secrets appear as <code>set (****)</code> / <code>unset</code>):</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> config check    <span class="co"># validates the effective configuration</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> config print    <span class="co"># prints the redacted config + the runtime settings from the db</span></span></code></pre></div>
+<h2 id="the-configuration-file">The configuration file</h2>
+<p>The non-secret (boot-time) settings live in a TOML file. Copy the provided template and adapt it:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> meshble.toml.example meshble.toml</span></code></pre></div>
+<h3 id="file-path-resolution">File path resolution</h3>
+<p>The binary resolves the file path in this order:</p>
+<ol type="1">
+<li>the global flag <code>--config &lt;path&gt;</code> (available on every subcommand);</li>
+<li>the environment variable <code>MESHBLE_CONFIG</code>;</li>
+<li>the default <code>./meshble.toml</code> in the current directory.</li>
+</ol>
+<div class="sourceCode" id="cb11"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> <span class="at">--config</span> /etc/meshble/meshble.toml serve</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="co"># or</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MESHBLE_CONFIG</span><span class="op">=</span>/etc/meshble/meshble.toml</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> serve</span></code></pre></div>
+<h3 id="layering-and-environment-overrides">Layering and environment overrides</h3>
+<p>The configuration is composed in layers, from the least to the most prioritized:</p>
+<pre><code>defaults &lt; meshble.toml &lt; MESHBLE_CONF_* environment variables</code></pre>
+<p>The <code>MESHBLE_CONF_*</code> variables map onto the file's sections using the <strong>double underscore</strong> <code>__</code> as the nesting separator. The <code>MESHBLE_CONF_</code> prefix is deliberately kept distinct from the secret variables (<code>DATABASE_URL</code>, <code>MESHBLE_JWT_SECRET</code>, …), so that secrets are never captured by the configuration layer.</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="co"># equivalent to [server] bind = &quot;0.0.0.0:9000&quot;</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MESHBLE_CONF_SERVER__BIND</span><span class="op">=</span>0.0.0.0:9000</span></code></pre></div>
+<p>Validation is fail-fast: an unknown section or an unknown key in a core section makes startup refuse (instead of silently ignoring typos). The <code>[modules.&lt;name&gt;]</code> subtrees, on the other hand, are <strong>open</strong>: they are captured verbatim and validated by the owning module.</p>
+<h3 id="main-keys-of-the-template">Main keys of the template</h3>
+<div class="sourceCode" id="cb14"><pre class="sourceCode toml"><code class="sourceCode toml"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="kw">[instance]</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="dt">name</span> <span class="op">=</span> <span class="st">&quot;acme-prod&quot;</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a><span class="kw">[server]</span></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a><span class="dt">bind</span> <span class="op">=</span> <span class="st">&quot;0.0.0.0:8099&quot;</span>          <span class="co"># host:port the server listens on (validated as a SocketAddr)</span></span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a><span class="dt">workers</span> <span class="op">=</span> <span class="dv">8</span></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a><span class="dt">proxy_mode</span> <span class="op">=</span> <span class="cn">true</span>              <span class="co"># see production notes</span></span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a><span class="kw">[database]</span>                     <span class="co"># tuning ONLY — the identity is the DATABASE_URL DSN</span></span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a><span class="dt">pool_max</span> <span class="op">=</span> <span class="dv">10</span></span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a><span class="dt">connect_timeout</span> <span class="op">=</span> <span class="st">&quot;5s&quot;</span></span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a><span class="kw">[storage]</span></span>
+<span id="cb14-14"><a href="#cb14-14" aria-hidden="true" tabindex="-1"></a><span class="dt">backend</span> <span class="op">=</span> <span class="st">&quot;fs&quot;</span>                 <span class="co"># fs | s3</span></span>
+<span id="cb14-15"><a href="#cb14-15" aria-hidden="true" tabindex="-1"></a><span class="dt">path</span> <span class="op">=</span> <span class="st">&quot;/var/lib/meshble/blobs&quot;</span></span>
+<span id="cb14-16"><a href="#cb14-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-17"><a href="#cb14-17" aria-hidden="true" tabindex="-1"></a><span class="kw">[auth]</span></span>
+<span id="cb14-18"><a href="#cb14-18" aria-hidden="true" tabindex="-1"></a><span class="dt">access_ttl</span> <span class="op">=</span> <span class="dv">900</span>               <span class="co"># 15 min (JWT secret via env MESHBLE_JWT_SECRET)</span></span>
+<span id="cb14-19"><a href="#cb14-19" aria-hidden="true" tabindex="-1"></a><span class="dt">refresh_ttl</span> <span class="op">=</span> <span class="dv">2592000</span>          <span class="co"># 30 days</span></span>
+<span id="cb14-20"><a href="#cb14-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-21"><a href="#cb14-21" aria-hidden="true" tabindex="-1"></a><span class="kw">[mail]</span></span>
+<span id="cb14-22"><a href="#cb14-22" aria-hidden="true" tabindex="-1"></a><span class="dt">smtp_host</span> <span class="op">=</span> <span class="st">&quot;smtp.acme.com&quot;</span>    <span class="co"># SMTP password via env MESHBLE_SMTP_PASSWORD</span></span>
+<span id="cb14-23"><a href="#cb14-23" aria-hidden="true" tabindex="-1"></a><span class="dt">smtp_port</span> <span class="op">=</span> <span class="dv">587</span></span>
+<span id="cb14-24"><a href="#cb14-24" aria-hidden="true" tabindex="-1"></a><span class="dt">from</span> <span class="op">=</span> <span class="st">&quot;erp@acme.com&quot;</span></span></code></pre></div>
+<p>Two keys are load-bearing for bringing the instance into operation:</p>
+<ul>
+<li><strong><code>server.bind</code></strong> — the <code>host:port</code> address the server listens on. It must be a valid <code>host:port</code> (default <code>127.0.0.1:8099</code>); a value that cannot be parsed as a socket makes validation fail with <code>"server.bind is not a host:port"</code>.</li>
+<li><strong><code>storage.path</code></strong> — the root of the filesystem blob store. With <code>backend = "fs"</code> (the default), <code>storage.path</code> is <strong>required</strong>: validation rejects <code>backend = fs</code> without <code>path</code> (<code>"storage.backend = fs requires storage.path"</code>), and <code>serve</code> returns <code>"storage.path is required for the fs blob store"</code> if it is missing. With <code>backend = "s3"</code>, it is instead <code>storage.bucket</code> that is required by validation (<code>"storage.backend = s3 requires storage.bucket"</code>).</li>
+</ul>
+<p>For the complete details of every key see <a href="configurazione.html">configurazione.md</a>.</p>
+<h2 id="bring-up-sequence">Bring-up sequence</h2>
+<p>Bringing up a fresh instance follows three steps. Each one is idempotent and can be re-run.</p>
+<h3 id="1-meshble-migrate">1. <code>meshble migrate</code></h3>
+<div class="sourceCode" id="cb15"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> migrate</span></code></pre></div>
+<p>Ensures the framework schemas (auth, sequences, settings, accesses, modules) and then migrates the models of the <strong>installed</strong> modules. On a truly fresh database there is no module installed yet: in that case <code>migrate</code> automatically installs only <code>base</code> and its dependency closure (the other modules are opt-in). It migrates their tables in FK dependency order, creates the Many2many relation tables in a second pass, and — if <code>base</code> is installed — seeds the minimal reference data (an <code>EUR</code> currency and a default <code>Main Company</code>, plus the read-only list of the groups referenced by ACLs/record rules). It also seeds the default runtime settings (<code>base_url</code>, <code>mode = production</code>) without ever overwriting an operator's change.</p>
+<blockquote>
+<p>Upgrade note: if the database was migrated <strong>before</strong> module selection existed (its per-model registry already has rows), <code>migrate</code> keeps <strong>all</strong> the modules it had, so the upgrade does not silently hide models that were previously available.</p>
+</blockquote>
+<h3 id="2-meshble-module-install-name">2. <code>meshble module install &lt;NAME&gt;</code></h3>
+<div class="sourceCode" id="cb16"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> module install sales</span></code></pre></div>
+<p>Installs a module <strong>and its dependency closure</strong> (the dependencies first), then migrates their tables (idempotent). Modules that are already installed are skipped. Installing <code>sales</code>, for example, also pulls in <code>mail</code> (in addition to the already-present <code>base</code>). Related commands:</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> module list               <span class="co"># lists the linked modules with version, status, and summary</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> module install account    <span class="co"># installs account + dependencies, then migrates</span></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> module uninstall sales    <span class="co"># stops migrating/serving the module; tables and data remain</span></span></code></pre></div>
+<p><code>base</code> cannot be uninstalled. Uninstalling a module is rejected if another installed module still depends on it. For the module model see <a href="moduli.html">moduli.md</a>, and for custom modules <a href="moduli-custom.html">moduli-custom.md</a>.</p>
+<h3 id="3-meshble-serve">3. <code>meshble serve</code></h3>
+<div class="sourceCode" id="cb18"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> serve</span></code></pre></div>
+<p><code>serve</code> performs three things in sequence and then keeps listening:</p>
+<ol type="1">
+<li><strong>re-migrates</strong> the installed modules (it internally invokes the same <code>migrate</code>), so starting the server always aligns the schema;</li>
+<li><strong>bootstraps the admin</strong> from <code>MESHBLE_ADMIN_PASSWORD</code> (see below);</li>
+<li><strong>serves</strong> the secured API on <code>server.bind</code>, exposing only the models of the installed modules.</li>
+</ol>
+<p>At startup the server merges the ACL/record-rule baseline compiled into the binary with any runtime overrides present in the database, starts a background scheduler for the registered cron jobs, and initializes the filesystem blob store from the <code>storage.path</code> root. It prints the URL it is serving on and the number of exposed models:</p>
+<pre><code>meshble serving on http://127.0.0.1:8099  (N models)</code></pre>
+<p>The main exposed routes include <code>/openapi.json</code>, <code>/api/models</code>, <code>/api/:name/view</code>, the CRUD <code>/api/:name</code> and <code>/api/:name/:id</code>, authentication <code>/auth/login</code> · <code>/auth/refresh</code> · <code>/auth/logout</code> · <code>/auth/me</code>, and the health checks <code>/health</code> · <code>/ready</code>. For the API and security see <a href="api.html">api.md</a> and <a href="sicurezza.html">sicurezza.md</a>.</p>
+<h3 id="complete-example-sequence">Complete example sequence</h3>
+<div class="sourceCode" id="cb20"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">DATABASE_URL</span><span class="op">=</span>postgres://meshble:CHANGE_ME@127.0.0.1:5432/meshble</span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MESHBLE_JWT_SECRET</span><span class="op">=</span><span class="st">&quot;</span><span class="va">$(</span><span class="ex">openssl</span> rand <span class="at">-hex</span> 32<span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MESHBLE_ADMIN_PASSWORD</span><span class="op">=</span><span class="st">&quot;</span><span class="va">$(</span><span class="ex">openssl</span> rand <span class="at">-base64</span> 24<span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MESHBLE_CONFIG</span><span class="op">=</span>/etc/meshble/meshble.toml</span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a><span class="ex">createdb</span> meshble</span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> migrate                 <span class="co"># framework schemas + base + its closure</span></span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> module install sales    <span class="co"># desired application modules (+ dependencies)</span></span>
+<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> serve                   <span class="co"># re-migrate, bootstrap admin, serve</span></span></code></pre></div>
+<h2 id="admin-bootstrap">Admin bootstrap</h2>
+<p>On the first <code>serve</code>, if an <code>admin</code> user does not already exist, the binary creates one from <code>MESHBLE_ADMIN_PASSWORD</code> (the password is never hardcoded). If <code>MESHBLE_ADMIN_PASSWORD</code> is not set, the bootstrap is skipped with the warning <code>"warning: no admin user; set MESHBLE_ADMIN_PASSWORD to bootstrap one"</code> and no admin is created.</p>
+<p>The bootstrapped admin receives <strong>all</strong> the groups declared by the linked modules (via ACL/record rule) plus the base groups <code>user</code> and <code>admin</code>, and is assigned to all existing companies as its multi-company scope (with the first one as the active company), so that a freshly created instance can operate every module. The password is stored as a hash (argon2). Companies created later must be granted to the admin explicitly.</p>
+<p>Alternatively, you can manage users via the CLI without going through the automatic bootstrap:</p>
+<div class="sourceCode" id="cb21"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> user create alice <span class="at">--password</span> <span class="st">&#39;s3cret&#39;</span> <span class="at">--groups</span> user,sales</span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> user set-password alice <span class="at">--password</span> <span class="st">&#39;nuova&#39;</span></span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> user grant alice admin</span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> user company alice <span class="at">--active</span> 1 <span class="at">--allowed</span> 1,2</span></code></pre></div>
+<p>The password can also come from <code>MESHBLE_NEW_PASSWORD</code> instead of <code>--password</code>.</p>
+<h2 id="web-frontend">Web frontend</h2>
+<p>The administration frontend is an optional React/Vite SPA in <code>web/</code>. In development it is a process separate from the Rust server and routes API calls to a live <code>meshble serve</code> instance.</p>
+<div class="sourceCode" id="cb22"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> web</span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> install</span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> run dev        <span class="co"># development server on http://localhost:5180</span></span></code></pre></div>
+<p>The Vite dev server listens on port <strong>5180</strong> and proxies to the running <code>meshble serve</code> (default <code>127.0.0.1:8099</code>), so the browser stays same-origin and CORS is not needed. The forwarded paths are:</p>
+<div class="sourceCode" id="cb23"><pre class="sourceCode ts"><code class="sourceCode typescript"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>proxy<span class="op">:</span> {</span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a>  <span class="st">&#39;/api&#39;</span><span class="op">:</span> <span class="st">&#39;http://127.0.0.1:8099&#39;</span><span class="op">,</span></span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">&#39;/auth&#39;</span><span class="op">:</span> <span class="st">&#39;http://127.0.0.1:8099&#39;</span><span class="op">,</span></span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a>  <span class="st">&#39;/openapi.json&#39;</span><span class="op">:</span> <span class="st">&#39;http://127.0.0.1:8099&#39;</span><span class="op">,</span></span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<p>So in development, start the backend (<code>meshble serve</code>) and the frontend (<code>npm run dev</code>) in parallel.</p>
+<p>For the production build:</p>
+<div class="sourceCode" id="cb24"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> web</span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> run build      <span class="co"># produces the static assets in web/dist/</span></span></code></pre></div>
+<p>The static assets produced in <code>web/dist/</code> are to be served by a web server / reverse proxy, routing <code>/api</code>, <code>/auth</code>, and <code>/openapi.json</code> to the Meshble backend. The Rust server is headless and does <strong>not</strong> serve static assets.</p>
+<blockquote>
+<p>Note: the SPA in <code>web/</code> runs by default on in-memory mock data (navigable design-system mockups) and does not require the backend to be browsed; the proxy to <code>meshble serve</code> is needed when connecting it to the real API. Other available commands: <code>npm run preview</code> (preview of the build) and <code>npm run typecheck</code> (<code>tsc --noEmit</code>).</p>
+</blockquote>
+<h2 id="production-notes">Production notes</h2>
+<h3 id="reverse-proxy-and-serverproxy_mode">Reverse proxy and <code>server.proxy_mode</code></h3>
+<p>In production, put the instance behind a reverse proxy (TLS, forwarding headers). The <code>[server] proxy_mode = true</code> key is intended to trust the <code>X-Forwarded-*</code> headers when behind a reverse proxy. Set <code>server.bind</code> accordingly (e.g. <code>0.0.0.0:8099</code> to listen on all interfaces behind the proxy, or an internal address).</p>
+<h3 id="workers">Workers</h3>
+<p><code>[server] workers</code> expresses the desired number of workers. The async runtime uses Tokio's multi-thread scheduler.</p>
+<h3 id="storage-backend-fs-vs-s3">Storage backend: <code>fs</code> vs <code>s3</code></h3>
+<p><code>[storage] backend</code> accepts <code>fs</code> or <code>s3</code>:</p>
+<ul>
+<li><strong><code>fs</code></strong> (default): a content-addressed blob store on the filesystem, with the root <code>storage.path</code> (required). Identical bytes deduplicate into a single immutable file. This is the backend currently implemented and the one that <code>serve</code> instantiates (<code>FsBlobStore</code>).</li>
+<li><strong><code>s3</code></strong>: configuration validation requires <code>storage.bucket</code> (and you can specify <code>region</code>, with the credentials via the environment). Note, however, that at the storage level, in v1, only the filesystem backend is available: the <code>meshble-storage</code> crate documents <code>S3BlobStore</code> as out of v1. See the <strong>Uncertainties</strong>.</li>
+</ul>
+<h3 id="jwt-secret-rotation">JWT secret rotation</h3>
+<p>The design provides <code>MESHBLE_JWT_SECRET_OLD</code> to rotate the JWT signing secret without invalidating already-issued tokens: you set <code>MESHBLE_JWT_SECRET</code> to the new value and <code>MESHBLE_JWT_SECRET_OLD</code> to the previous one, to be kept accepted in verification during the rotation window. <strong>Status in v1</strong>: the segment is loaded into the configuration but not yet wired up at runtime — the <code>Authenticator</code> receives a single secret (<code>MESHBLE_JWT_SECRET</code>), so verification with the previous secret is not yet active. See also <a href="sicurezza.html">sicurezza.md</a>.</p>
+<h3 id="destructive-operations">Destructive operations</h3>
+<p><code>MESHBLE_ADMIN_TOKEN</code> is a secret <strong>reserved</strong> for the future protection of destructive database operations (dump/restore/gc): in v1 it is loaded into the configuration but the enforcement is not yet wired up, and those commands/endpoints do not exist yet. Consistent with <a href="configurazione.html">configurazione.md</a>.</p>
+
+      </article>
+      <footer class="mt-16 border-t border-border pt-6 text-[13px] text-muted">
+        <span class="font-mono">meshble · documentation</span>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

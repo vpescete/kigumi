@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="it" class="scroll-smooth">
+<head>
+  <title>Meshble · Sicurezza · IT</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: {
+      bg: '#0D1014', surface: '#14181D', surface2: '#1B2026', border: '#272D34',
+      text: '#E5E9ED', muted: '#8B949E', accent: '#22B8CF', accentfg: '#06181C',
+      accenthover: '#46C8DB', success: '#3DD68C', violet: '#7B8CFF',
+    }, fontFamily: {
+      display: ['Space Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      body: ['Hanken Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+    } } } }
+  </script>
+  <style>
+    :root { color-scheme: dark; }
+    body { background:#0d1014; color:#e5e9ed; font-family:'Hanken Grotesk',ui-sans-serif,system-ui,sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+    .scanline { position:relative; }
+    .scanline::before { content:''; position:absolute; left:0; top:.15em; bottom:.15em; width:2px; border-radius:999px; background:#22b8cf; }
+    .pulse { animation:pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    @media (prefers-reduced-motion: reduce){ .pulse{animation:none} }
+    .markdown { font-size:15.5px; line-height:1.7; color:#c8cfd6; }
+    .markdown > :first-child { margin-top:0; }
+    .markdown h1,.markdown h2,.markdown h3,.markdown h4 { font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif; color:#e5e9ed; font-weight:600; letter-spacing:-.01em; line-height:1.25; }
+    .markdown h1 { font-size:2rem; margin:0 0 .75rem; letter-spacing:-.02em; }
+    .markdown h2 { font-size:1.5rem; margin:2.6rem 0 1rem; padding-top:1.4rem; border-top:1px solid #272d34; }
+    .markdown h3 { font-size:1.18rem; margin:2rem 0 .7rem; }
+    .markdown h4 { font-size:1rem; margin:1.6rem 0 .5rem; color:#cdd4db; }
+    .markdown p { margin:0 0 1.05rem; }
+    .markdown a { color:#46c8db; text-decoration:none; border-bottom:1px solid rgba(70,200,219,.3); }
+    .markdown a:hover { color:#22b8cf; border-bottom-color:#22b8cf; }
+    .markdown strong { color:#e5e9ed; font-weight:600; }
+    .markdown ul,.markdown ol { margin:0 0 1.05rem; padding-left:1.35rem; }
+    .markdown li { margin:.3rem 0; }
+    .markdown li::marker { color:#5b636c; }
+    .markdown code { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:.86em; background:#1b2026; border:1px solid #272d34; border-radius:5px; padding:.1em .38em; color:#cdd4db; }
+    .markdown pre { background:#0f1216; border:1px solid #272d34; border-radius:8px; padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.2rem; }
+    .markdown pre code { font-size:12.8px; line-height:1.65; background:none; border:0; padding:0; color:#d7dde3; }
+    .markdown blockquote { margin:0 0 1.2rem; padding:.2rem 0 .2rem 1rem; border-left:2px solid #22b8cf; color:#9aa3ac; }
+    .markdown hr { border:0; border-top:1px solid #272d34; margin:2rem 0; }
+    .markdown table { width:100%; border-collapse:collapse; margin:0 0 1.3rem; font-size:14px; display:block; overflow-x:auto; }
+    .markdown th,.markdown td { border:1px solid #272d34; padding:.5rem .7rem; text-align:left; }
+    .markdown th { background:#1b2026; color:#e5e9ed; font-weight:600; }
+    .markdown td code { white-space:nowrap; }
+    a,button { transition:color .16s ease,background-color .16s ease,border-color .16s ease; }
+    .docnav::-webkit-scrollbar { height:6px; width:6px; }
+    .docnav::-webkit-scrollbar-thumb { background:#272d34; border-radius:999px; }
+  </style>
+</head>
+<body class="font-body antialiased">
+  <header class="sticky top-0 z-40 border-b border-border/80 bg-bg/85 backdrop-blur">
+    <div class="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-6 px-5 sm:px-8">
+      <a href="../../it/index.html" class="flex items-center gap-2">
+        <span class="pulse h-2 w-2 rounded-full bg-accent"></span>
+        <span class="font-display text-[17px] font-semibold text-text">meshble</span>
+        <span class="font-mono text-[12px] text-muted">/ docs</span>
+      </a>
+      <div class="flex items-center gap-5 text-[14px] text-muted">
+        <a class="hover:text-text" href="../../it/index.html">← Landing</a>
+        <div class="flex items-center gap-1 font-mono text-[12px]">
+          <span class="rounded bg-surface px-1.5 py-0.5 text-text">IT</span>
+          <a class="rounded px-1.5 py-0.5 hover:text-text" href="../en/sicurezza.html">EN</a>
+        </div>
+        <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </header>
+  <div class="mx-auto max-w-[1180px] px-5 sm:px-8 lg:grid lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10">
+    <aside class="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:overflow-y-auto py-6 lg:py-9">
+      <div class="mb-3 hidden font-mono text-[11px] uppercase tracking-[0.16em] text-muted lg:block">Documentazione</div>
+      <nav class="docnav flex gap-2 overflow-x-auto pb-2 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:pb-0">
+        <a href="README.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Panoramica</a>
+        <a href="architettura.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Architettura</a>
+        <a href="installazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Installazione</a>
+        <a href="configurazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Configurazione</a>
+        <a href="moduli.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Moduli</a>
+        <a href="moduli-custom.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Moduli custom</a>
+        <a href="api.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">API e contratto-UI</a>
+        <a href="sicurezza.html" class="scanline shrink-0 whitespace-nowrap rounded-md bg-surface px-3 py-1.5 text-[14px] text-text lg:whitespace-normal">Sicurezza</a>
+      </nav>
+    </aside>
+    <main class="min-w-0 py-8 lg:py-9">
+      <article class="markdown max-w-[760px]">
+<h1 id="modello-di-sicurezza">Modello di sicurezza</h1>
+<p>Meshble è headless e schema-driven: ogni accesso ai dati passa per un solo confine — i metodi <code>*_secured</code> del crate <a href="architettura.html"><code>meshble-db</code></a> — dove l'autenticazione produce un'identità fidata (<code>Ctx</code>) e l'autorizzazione viene applicata in un unico punto, su ogni lettura e scrittura. Questa pagina descrive l'autenticazione (token JWT HS256, revoca, rotazione del segreto), i livelli di autorizzazione (ACL, record rule, scope multi-azienda, gruppi a livello di campo, sudo / effetti elevati), l'AST dei domini e la validazione dell'input al confine di scrittura, con linee guida pratiche per chi scrive un modulo. Per la panoramica vedi <a href="README.html">README.md</a>, per l'architettura <a href="architettura.html">architettura.md</a>, per le route REST <a href="api.html">api.md</a>, per la configurazione <a href="configurazione.html">configurazione.md</a>.</p>
+<h2 id="autenticazione">Autenticazione</h2>
+<p>L'autenticazione vive nel crate <code>meshble-auth</code> (<code>crates/meshble-auth/src/lib.rs</code>). I token sono <strong>JWT firmati HS256</strong> con un segreto condiviso; la crittografia è delegata al crate <code>jsonwebtoken</code>, le password usano <code>argon2</code>.</p>
+<h3 id="token-tipizzati-access-e-refresh">Token tipizzati: access e refresh</h3>
+<p>Esistono due tipi di token, distinti dalla claim <code>kind</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Token</th>
+<th><code>kind</code></th>
+<th>TTL effettivo</th>
+<th>Contenuto (claim)</th>
+<th>A cosa serve</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>access</strong></td>
+<td><code>"access"</code></td>
+<td><code>ACCESS_TTL</code> = <code>900</code> s (15 min)</td>
+<td><code>sub</code> (uid), <code>kind</code>, <code>groups</code>, <code>company</code>, <code>companies</code>, <code>exp</code></td>
+<td>Bearer per ogni richiesta dati: verifica in un <code>Ctx</code> fidato</td>
+</tr>
+<tr>
+<td><strong>refresh</strong></td>
+<td><code>"refresh"</code></td>
+<td><code>REFRESH_TTL</code> = <code>2_592_000</code> s (30 giorni)</td>
+<td><code>sub</code> (uid), <code>kind</code>, <code>jti</code>, <code>exp</code></td>
+<td>Prova l'identità per emettere un nuovo access token; mai usato come bearer</td>
+</tr>
+</tbody>
+</table>
+<p>I TTL effettivi sono costanti del server (<code>crates/meshble-server/src/lib.rs</code>):</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> ACCESS_TTL<span class="op">:</span> <span class="dt">u64</span> <span class="op">=</span> <span class="dv">900</span><span class="op">;</span> <span class="co">// 15 minutes</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> REFRESH_TTL<span class="op">:</span> <span class="dt">u64</span> <span class="op">=</span> <span class="dv">2_592_000</span><span class="op">;</span> <span class="co">// 30 days</span></span></code></pre></div>
+<p>Il file <code>meshble.toml</code> espone una sezione <code>[auth]</code> con gli stessi valori di default (<code>access_ttl = 900</code>, <code>refresh_ttl = 2592000</code>), e <code>meshble-config</code> ne definisce i default uguali; in v1 l'emissione dei token usa direttamente le costanti del server (<code>issue_token_pair</code>), quindi questi sono i valori effettivi a runtime.</p>
+<p>La separazione tra i due tipi è una garanzia esplicita: la claim <code>kind</code> viene verificata su ogni decodifica (<code>decode_kind</code>), quindi <strong>un refresh token non può mai essere usato come bearer per accedere ai dati</strong> e viceversa. Questo impedisce a un refresh token a lunga vita di agire da bearer onnipotente.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> decode_kind(<span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span> token<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span><span class="op">,</span> kind<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>Claims<span class="op">,</span> AuthError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Pin HS256 (rejects alg=none/confusion) and validate exp with no grace window.</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="kw">mut</span> validation <span class="op">=</span> <span class="pp">Validation::</span>new(<span class="pp">Algorithm::</span>HS256)<span class="op">;</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    validation<span class="op">.</span>leeway <span class="op">=</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> data <span class="op">=</span> <span class="pp">decode::</span><span class="op">&lt;</span>Claims<span class="op">&gt;</span>(</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>        token<span class="op">,</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">DecodingKey::</span>from_secret(<span class="kw">self</span><span class="op">.</span>secret<span class="op">.</span>as_bytes())<span class="op">,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>validation<span class="op">,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">.</span>map_err(<span class="op">|</span>_<span class="op">|</span> <span class="pp">AuthError::</span>Invalid)<span class="op">?;</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> data<span class="op">.</span>claims<span class="op">.</span>kind <span class="op">!=</span> kind <span class="op">{</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="cn">Err</span>(<span class="pp">AuthError::</span>Invalid)<span class="op">;</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Ok</span>(data<span class="op">.</span>claims)</span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>L'algoritmo è fissato a <code>HS256</code> in fase di verifica: questo rifiuta i token con <code>alg=none</code> e gli attacchi di confusione di algoritmo. La scadenza è validata senza finestra di tolleranza (<code>leeway = 0</code>).</p>
+<h3 id="il-ctx-fidato-derivato-dal-bearer">Il <code>Ctx</code> fidato derivato dal Bearer</h3>
+<p>Una richiesta dati presenta un header <code>Authorization: Bearer &lt;token&gt;</code>. Il server lo verifica in un <code>Ctx</code> — l'identità fidata che attraversa tutto il motore di sicurezza (<code>authenticate</code> in <code>crates/meshble-server/src/lib.rs</code>):</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co">/// Verifies the request&#39;s bearer token into a trusted `Ctx`, or a 401 response. This is real</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="co">/// authentication: a client cannot claim a group without a token signed by the server secret.</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> authenticate(backend<span class="op">:</span> <span class="op">&amp;</span>DataBackend<span class="op">,</span> headers<span class="op">:</span> <span class="op">&amp;</span>HeaderMap) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>Ctx<span class="op">,</span> Response<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> header <span class="op">=</span> headers<span class="op">.</span>get(<span class="st">&quot;authorization&quot;</span>)<span class="op">.</span>and_then(<span class="op">|</span>v<span class="op">|</span> v<span class="op">.</span>to_str()<span class="op">.</span>ok())<span class="op">;</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    backend</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>auth</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>verify_bearer(header)</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>map_err(<span class="op">|</span>_<span class="op">|</span> (<span class="pp">StatusCode::</span>UNAUTHORIZED<span class="op">,</span> <span class="st">&quot;unauthorized&quot;</span>)<span class="op">.</span>into_response())</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p><code>verify_bearer</code> estrae il prefisso <code>Bearer </code>, verifica il token come <strong>access</strong> (<code>verify_access</code>) e costruisce il <code>Ctx</code>. Poiché i <code>groups</code> e lo scope aziendale viaggiano firmati dentro il token, <strong>un client non può rivendicare un gruppo senza un token firmato dal segreto del server</strong>: non c'è round-trip aggiuntivo al database per ogni richiesta.</p>
+<p>Il <code>Ctx</code> (definito in <code>crates/meshble-core/src/security.rs</code>) trasporta:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> Ctx <span class="op">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> uid<span class="op">:</span> <span class="dt">i64</span><span class="op">,</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> groups<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span><span class="dt">String</span><span class="op">&gt;,</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    su<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span>                              <span class="co">// privato: nessuno può forgiare un contesto elevato</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> company_id<span class="op">:</span> <span class="dt">Option</span><span class="op">&lt;</span><span class="dt">i64</span><span class="op">&gt;,</span>           <span class="co">// azienda attiva</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> allowed_company_ids<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span><span class="dt">i64</span><span class="op">&gt;,</span>     <span class="co">// aziende accessibili (lo scope multi-azienda)</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Il flag <code>su</code> è <strong>privato</strong>: codice esterno non può costruire un <code>Ctx { su: true, .. }</code> con un literal di struct. L'unico modo per elevare un contesto è il metodo greppabile <code>Ctx::sudo()</code>.</p>
+<p>L'endpoint <code>GET /auth/me</code> restituisce esattamente i campi del <code>Ctx</code> ricavato dal token (<code>uid</code>, <code>groups</code>, <code>company_id</code>, <code>allowed_company_ids</code>).</p>
+<h3 id="ciclo-di-vita-del-token-login-refresh-logout">Ciclo di vita del token: login, refresh, logout</h3>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Corpo</th>
+<th>Effetto</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /auth/login</code></td>
+<td><code>{ "login", "password" }</code></td>
+<td>Verifica le credenziali (argon2) ed emette la coppia access+refresh</td>
+</tr>
+<tr>
+<td><code>POST /auth/refresh</code></td>
+<td><code>{ "refresh_token" }</code></td>
+<td>Reclama (revoca) il refresh presentato ed emette una coppia nuova (rotazione)</td>
+</tr>
+<tr>
+<td><code>POST /auth/logout</code></td>
+<td><code>{ "refresh_token" }</code></td>
+<td>Revoca il refresh token presentato (risponde sempre <code>204</code>)</td>
+</tr>
+<tr>
+<td><code>GET /auth/me</code></td>
+<td>—</td>
+<td>Restituisce l'identità (<code>Ctx</code>) del bearer presentato</td>
+</tr>
+</tbody>
+</table>
+<p>Il login esegue <strong>sempre</strong> argon2 — contro un hash fittizio (<code>dummy_hash</code>) se l'utente è sconosciuto — così che tempi di risposta e corpo del 401 siano identici per utente inesistente e password errata (nessuna user enumeration via timing). Su refresh, <code>groups</code> e scope aziendale vengono <strong>riletti dal database</strong> (<code>user_groups</code> e <code>user_scope</code>), così che riassegnazioni di gruppo o azienda abbiano effetto senza re-login.</p>
+<h3 id="revoca-del-token-jti">Revoca del token (jti)</h3>
+<p>I refresh token sono <strong>stateful</strong>: ognuno è registrato per <code>jti</code> nella tabella <code>meshble_refresh</code> (<code>crates/meshble-db/src/auth_store.rs</code>), quindi può essere revocato (logout) e ruotato (ogni refresh invalida il precedente). Un refresh token rubato ma revocato viene rifiutato.</p>
+<p>La rotazione su refresh è atomica e a prova di replay: <code>claim_refresh</code> controlla e revoca in <strong>un solo statement</strong> SQL, così due reclami concorrenti dello stesso token non possono entrambi avere successo (chi perde aggiorna zero righe → rifiutato), prevenendo il double-spend.</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co">/// Atomically claims (revokes) an active refresh token, returning its user id. The check and</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="co">/// the revoke happen in ONE statement, so two concurrent claims of the same token cannot both</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="co">/// succeed: the loser&#39;s UPDATE affects zero rows → `None`. This prevents refresh double-spend.</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> claim_refresh(<span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span> jti<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span><span class="dt">Option</span><span class="op">&lt;</span><span class="dt">i64</span><span class="op">&gt;,</span> DbError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> row <span class="op">=</span> <span class="pp">sqlx::</span>query(</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;UPDATE meshble_refresh SET revoked = true </span><span class="sc">\</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="st">         WHERE jti = $1 AND NOT revoked AND expires_at &gt; now() RETURNING user_id&quot;</span><span class="op">,</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="op">.</span>bind(jti)</span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">.</span>fetch_optional(<span class="op">&amp;</span><span class="kw">self</span><span class="op">.</span>pool)</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>    <span class="op">.</span><span class="kw">await</span><span class="op">?;</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Ok</span>(row<span class="op">.</span>map(<span class="op">|</span>r<span class="op">|</span> r<span class="op">.</span>get(<span class="st">&quot;user_id&quot;</span>)))</span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Gli access token, al contrario, sono <strong>stateless e a breve vita</strong>: non vengono tracciati. La revoca immediata vale per il refresh; un access token resta valido fino alla sua scadenza (15 minuti). È esattamente questa coppia access-breve / refresh-lungo-revocabile a rendere utile la separazione.</p>
+<h3 id="rotazione-del-segreto-meshble_jwt_secret-e-meshble_jwt_secret_old">Rotazione del segreto: <code>MESHBLE_JWT_SECRET</code> e <code>MESHBLE_JWT_SECRET_OLD</code></h3>
+<p>I segreti sono letti <strong>solo dall'ambiente</strong>, mai da <code>meshble.toml</code>, e la presenza di quelli obbligatori è verificata al boot (fail-fast). Estratto da <code>.env.example</code>:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># REQUIRED — HS256 signing secret for access/refresh tokens.</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="va">MESHBLE_JWT_SECRET</span><span class="op">=</span>CHANGE_ME_long_random_value</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="co"># OPTIONAL — previous JWT secret, still accepted on verify during a rotation window.</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co"># MESHBLE_JWT_SECRET_OLD=</span></span></code></pre></div>
+<p><code>Secrets::from_env</code> (<code>crates/meshble-config/src/secrets.rs</code>) carica <code>MESHBLE_JWT_SECRET</code> come obbligatorio e <code>MESHBLE_JWT_SECRET_OLD</code> come opzionale:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>jwt_secret<span class="op">:</span> req(<span class="st">&quot;MESHBLE_JWT_SECRET&quot;</span>)<span class="op">?,</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>jwt_secret_old<span class="op">:</span> opt(<span class="st">&quot;MESHBLE_JWT_SECRET_OLD&quot;</span>)<span class="op">,</span></span></code></pre></div>
+<p>Il modello di rotazione previsto è: si imposta <code>MESHBLE_JWT_SECRET_OLD</code> al segreto precedente quando si introduce un nuovo <code>MESHBLE_JWT_SECRET</code>; durante la finestra di rotazione i token firmati con il segreto vecchio restano accettati in verifica, mentre i nuovi token vengono firmati con quello nuovo. Entrambi i segreti compaiono (mascherati) nel riepilogo di configurazione del server.</p>
+<blockquote>
+<p><strong>Nota di implementazione (v1)</strong>: <code>MESHBLE_JWT_SECRET_OLD</code> è già letto e propagato in <code>Secrets.jwt_secret_old</code> (e mostrato mascherato nel riepilogo di configurazione), ma <code>Authenticator::new(...)</code> accetta <strong>un solo segreto</strong> (<code>pub struct Authenticator { secret: String }</code>) e il comando <code>meshble serve</code> cabla solo <code>s.secrets.jwt_secret</code>. La verifica con il segreto vecchio non è quindi ancora attiva nel percorso runtime: il cablaggio del secondo segreto in <code>Authenticator</code> è il passo che completa la rotazione senza invalidare i token in volo. Vedi <a href="#incertezze-e-note">Incertezze</a> e l'<code>Authenticator</code> in <code>crates/meshble-auth/src/lib.rs</code>.</p>
+</blockquote>
+<h2 id="autorizzazione-un-solo-punto-di-applicazione">Autorizzazione: un solo punto di applicazione</h2>
+<p>L'autorizzazione non è sparsa nei controller: vive nei metodi <code>*_secured</code> di <code>meshble-db</code> (<code>crates/meshble-db/src/lib.rs</code>), attraversati da <strong>ogni</strong> lettura e scrittura protetta. I controlli che entrano in gioco sono, in tutti i casi:</p>
+<ul>
+<li><strong>ACL</strong> del modello per l'operazione (<code>check_access</code>) — default-deny;</li>
+<li><strong>gruppi a livello di campo</strong> sui campi toccati (<code>field_accessible</code>, via <code>strip_unreadable</code> / <code>check_writable_fields</code> / vincoli su filter e order-by);</li>
+<li><strong>record rule</strong> del modello per l'operazione, compilate nel <code>WHERE</code> (<code>record_rule_domain</code>);</li>
+<li><strong>scope multi-azienda</strong> (<code>apply_company_scope</code> in scrittura, <code>company_filter</code> / <code>company_clause</code> in lettura) — default-deny sulle righe condivise;</li>
+<li>in scrittura, <strong>validazione dell'input</strong> (<code>validate_write_values</code>: required, tipi, rifiuto dei campi computed).</li>
+</ul>
+<p>L'ordine esatto dipende dal verso dell'operazione:</p>
+<ul>
+<li><strong>In lettura</strong> (<code>read_secured</code> / la costruzione del dominio di ricerca): prima l'ACL <code>Read</code>, poi il dominio di record rule e quello multi-azienda vengono <strong>AND-ati</strong> dentro il <code>WHERE</code>; un filtro o un order-by del client che referenzia un campo non leggibile è rifiutato; dopo il fetch, <code>strip_unreadable</code> rimuove dalle righe i campi non leggibili.</li>
+<li><strong>In scrittura</strong> (<code>insert_secured</code> / <code>update_secured</code> / <code>delete_secured</code>): prima l'ACL (<code>Create</code>/<code>Write</code>/<code>Delete</code>), poi <code>check_writable_fields</code> (gruppi di campo), poi <code>apply_company_scope</code>, poi <code>validate_write_values</code>; la record rule dell'operazione è infine compilata nel <code>WHERE</code> dell'<code>INSERT … WHERE</code>/<code>UPDATE … WHERE</code>/<code>DELETE … WHERE</code> eseguito, così la riga è toccata solo se la regola la ammette.</li>
+</ul>
+<p>Il superuser (<code>Ctx::sudo()</code>) bypassa ACL, record rule e scope aziendale; resta soggetto solo alla coerenza del dato (constraint, validazione dei tipi).</p>
+<h3 id="acl-concessione-modello--gruppo">ACL: concessione modello + gruppo</h3>
+<p>Un'<code>Acl</code> concede a un <strong>gruppo</strong> i quattro permessi su un <strong>modello</strong> (<code>crates/meshble-core/src/security.rs</code>):</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> Acl <span class="op">{</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> model<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> group<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> read<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> write<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> create<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> delete<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>La verifica è a <strong>default-deny</strong> con semantica di <strong>unione</strong>: l'accesso è concesso se <em>almeno uno</em> dei gruppi dell'utente concede l'operazione; il superuser è sempre ammesso.</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> check_access(op<span class="op">:</span> Operation<span class="op">,</span> model<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span><span class="op">,</span> ctx<span class="op">:</span> <span class="op">&amp;</span>Ctx<span class="op">,</span> acls<span class="op">:</span> <span class="op">&amp;</span>[Acl]) <span class="op">-&gt;</span> <span class="dt">bool</span> <span class="op">{</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> ctx<span class="op">.</span>su <span class="op">{</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="cn">true</span><span class="op">;</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>    acls<span class="op">.</span>iter()</span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>any(<span class="op">|</span>a<span class="op">|</span> a<span class="op">.</span>model <span class="op">==</span> model <span class="op">&amp;&amp;</span> ctx<span class="op">.</span>is_member(a<span class="op">.</span>group) <span class="op">&amp;&amp;</span> a<span class="op">.</span>grants(op))</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Le <code>Operation</code> sono <code>Read</code>, <code>Write</code>, <code>Create</code>, <code>Delete</code>. Un modulo dichiara le sue ACL come slice statica e le registra; il server raccoglie l'unione di tutte le ACL registrate nei moduli linkati via <code>registered_acls()</code> (<code>crates/meshble-core/src/registry.rs</code>). I gruppi distinti referenziati da ACL e record rule sono ricavabili con <code>registered_group_names()</code> (la fonte per il seeding della lista read-only <code>res.groups</code>).</p>
+<p>Esempio reale (modulo <code>account</code>): <code>account.user</code> gestisce i movimenti (<code>account.move</code>) ma non li cancella; la configurazione (creare conti, mantenere i giornali, cancellare i movimenti) è riservata a <code>account.manager</code>:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> ACLS<span class="op">:</span> <span class="op">&amp;</span>[Acl] <span class="op">=</span> <span class="op">&amp;</span>[</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;account.account&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;account.user&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">false</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;account.account&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;account.manager&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">true</span> <span class="op">},</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;account.journal&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;account.user&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">false</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">false</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;account.journal&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;account.manager&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">true</span> <span class="op">},</span></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;account.move&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;account.user&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;account.move&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;account.manager&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">true</span> <span class="op">},</span></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ...</span></span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>]<span class="op">;</span></span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_acls!</span>(ACLS)<span class="op">;</span></span></code></pre></div>
+<h3 id="record-rule-filtri-di-dominio-per-riga">Record rule: filtri di dominio per riga</h3>
+<p>Una <code>RecordRule</code> restringe a livello di <strong>riga</strong>: applica un <code>Domain</code> tipato alle operazioni indicate, per i gruppi indicati (<code>crates/meshble-core/src/security.rs</code>):</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> RecordRule <span class="op">{</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> model<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> groups<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> [<span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span>]<span class="op">,</span>   <span class="co">// vuoto = globale (vale per tutti)</span></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> ops<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> [Operation]<span class="op">,</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> domain<span class="op">:</span> RuleDomain<span class="op">,</span></span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Il dominio di una regola può essere <strong>statico</strong> o <strong>già materializzato</strong>, distinti da <code>RuleDomain</code>:</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">enum</span> RuleDomain <span class="op">{</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>    Static(<span class="kw">fn</span>() <span class="op">-&gt;</span> Domain)<span class="op">,</span>   <span class="co">// regola di modulo a compile time (thunk: un Domain non è const)</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>    Owned(Domain)<span class="op">,</span>            <span class="co">// regola caricata a runtime (es. dal database), dominio già materializzato</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Il motore tratta i due casi in modo identico — cambia solo da dove proviene il dominio — quindi regole statiche e regole DB confluiscono in un'unica lista senza casi speciali (<code>RuleDomain::resolve</code> chiama il thunk o clona il valore).</p>
+<p>La combinazione delle regole applicabili a <code>(op, model, ctx)</code> segue una semantica precisa (<code>record_rule_domain</code>): le regole <strong>globali</strong> (senza gruppo) sono <em>tutte</em> richieste → in <strong>AND</strong>; le regole dei gruppi a cui l'utente appartiene sono alternative → in <strong>OR</strong>; i due blocchi vengono poi messi in <strong>AND</strong>. Il superuser non è ristretto da alcuna regola (<code>record_rule_domain</code> restituisce <code>None</code>).</p>
+<p>Esempio reale: il <strong>freeze dei movimenti contabili registrati</strong> (modulo <code>account</code>). Le righe di un movimento <code>posted</code> sono congelate — niente write, create o delete — così da garantire l'invariante "posted ⇒ balanced". È una regola <strong>globale</strong> (<code>groups: &amp;[]</code>) che attraversa la relazione <code>move_id.state</code>:</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> line_move_not_posted() <span class="op">-&gt;</span> Domain <span class="op">{</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>    <span class="pp">Domain::</span>field(<span class="st">&quot;move_id.state&quot;</span>)<span class="op">.</span>ne(<span class="st">&quot;posted&quot;</span>)</span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> RECORD_RULES<span class="op">:</span> <span class="op">&amp;</span>[RecordRule] <span class="op">=</span> <span class="op">&amp;</span>[</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;account.move.line&quot;</span><span class="op">,</span> groups<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span> ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span><span class="bu">Write</span>]<span class="op">,</span>  domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(line_move_not_posted) <span class="op">},</span></span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;account.move.line&quot;</span><span class="op">,</span> groups<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span> ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span>Create]<span class="op">,</span> domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(line_move_not_posted) <span class="op">},</span></span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;account.move.line&quot;</span><span class="op">,</span> groups<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span> ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span>Delete]<span class="op">,</span> domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(line_move_not_posted) <span class="op">},</span></span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a>]<span class="op">;</span></span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_rules!</span>(RECORD_RULES)<span class="op">;</span></span></code></pre></div>
+<p>L'analogo per lo stock (modulo <code>stock</code>) è il <strong>freeze del trasferimento validato</strong>: le righe di un trasferimento <code>done</code> sono congelate (solo sudo o l'annullamento possono toccarle), via <code>picking_id.state</code>:</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> move_picking_not_done() <span class="op">-&gt;</span> Domain <span class="op">{</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>    <span class="pp">Domain::</span>field(<span class="st">&quot;picking_id.state&quot;</span>)<span class="op">.</span>ne(<span class="st">&quot;done&quot;</span>)</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> RECORD_RULES<span class="op">:</span> <span class="op">&amp;</span>[RecordRule] <span class="op">=</span> <span class="op">&amp;</span>[</span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;stock.move&quot;</span><span class="op">,</span> groups<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span> ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span><span class="bu">Write</span>]<span class="op">,</span>  domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(move_picking_not_done) <span class="op">},</span></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;stock.move&quot;</span><span class="op">,</span> groups<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span> ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span>Create]<span class="op">,</span> domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(move_picking_not_done) <span class="op">},</span></span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;stock.move&quot;</span><span class="op">,</span> groups<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span> ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span>Delete]<span class="op">,</span> domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(move_picking_not_done) <span class="op">},</span></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>]<span class="op">;</span></span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_rules!</span>(RECORD_RULES)<span class="op">;</span></span></code></pre></div>
+<p>La regola raggiunge <code>move_id.state</code> / <code>picking_id.state</code> tramite un dominio dotato: questo copre sia il path diretto della riga sia il path annidato <code>line_ids</code> (le scritture sui figli ri-verificano le record rule del figlio).</p>
+<h3 id="scoping-multi-azienda">Scoping multi-azienda</h3>
+<p>Un modello è <strong>scoped per azienda</strong> quando dichiara un <code>Many2one</code> chiamato <code>company_id</code>. Lo scope deriva dal <code>Ctx</code>: <code>company_id</code> è l'azienda attiva, <code>allowed_company_ids</code> l'insieme accessibile.</p>
+<p>In <strong>lettura</strong>, <code>company_filter</code> produce il vincolo (<code>crates/meshble-db/src/lib.rs</code>), con <strong>default-deny sulle righe condivise</strong>:</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> company_filter(model<span class="op">:</span> <span class="op">&amp;</span>ResolvedModel<span class="op">,</span> ctx<span class="op">:</span> <span class="op">&amp;</span>Ctx) <span class="op">-&gt;</span> <span class="dt">Option</span><span class="op">&lt;</span>Domain<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">!</span>ctx<span class="op">.</span>company_scoped() <span class="op">{</span></span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="cn">None</span><span class="op">;</span>                    <span class="co">// solo sudo è non vincolato</span></span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ... il modello deve avere un Many2one company_id ...</span></span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> shared <span class="op">=</span> <span class="pp">Domain::</span>field(<span class="st">&quot;company_id&quot;</span>)<span class="op">.</span>is_null()<span class="op">;</span></span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Some</span>(<span class="cf">if</span> ctx<span class="op">.</span>allowed_company_ids<span class="op">.</span>is_empty() <span class="op">{</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>        shared <span class="co">// default-deny: nessuna assegnazione → solo righe condivise (company NULL)</span></span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a>        <span class="pp">Domain::</span>field(<span class="st">&quot;company_id&quot;</span>)<span class="op">.</span>in_(ctx<span class="op">.</span>allowed_company_ids<span class="op">.</span>clone())<span class="op">.</span>or(shared)</span>
+<span id="cb15-11"><a href="#cb15-11" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span>)</span>
+<span id="cb15-12"><a href="#cb15-12" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Un <code>company_id</code> NULL è una riga <strong>condivisa</strong>, visibile a ogni azienda. Qualsiasi chiamante non-superuser è <strong>sempre</strong> vincolato: con un insieme accessibile vede quelle aziende più le righe condivise; con un insieme <strong>vuoto</strong> vede solo le righe condivise (mai "tutto"). Solo <code>sudo</code> è non ristretto.</p>
+<p>In <strong>scrittura</strong>, <code>apply_company_scope</code> è il punto di applicazione unico (riusato da create del padre, create del figlio annidato e update):</p>
+<ul>
+<li>un <code>company_id</code> esplicito deve essere un id <strong>dentro</strong> l'insieme accessibile (non si scrive una riga in un'azienda estranea);</li>
+<li>un <code>company_id</code> esplicito <strong>NULL</strong> è privilegiato (pubblicare una riga come condivisa): un chiamante ristretto non può;</li>
+<li>in <strong>create</strong> un <code>company_id</code> non impostato è defaultato all'azienda attiva del chiamante (o all'unica azienda accessibile); un chiamante ristretto senza azienda attiva non può creare una riga scoped.</li>
+</ul>
+<h4 id="come-sudo-bypassa-lo-scope">Come sudo bypassa lo scope</h4>
+<p>Lo scope multi-azienda è governato da <code>Ctx::company_scoped()</code>, che è vero per <em>qualunque</em> chiamante non-superuser:</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> company_scoped(<span class="op">&amp;</span><span class="kw">self</span>) <span class="op">-&gt;</span> <span class="dt">bool</span> <span class="op">{</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>    <span class="op">!</span><span class="kw">self</span><span class="op">.</span>su</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Quindi <code>company_filter</code> restituisce <code>None</code> (nessun vincolo di lettura) e <code>apply_company_scope</code> salta i controlli restrittivi <strong>solo</strong> per un <code>Ctx</code> elevato. È esattamente questo che permette agli effetti di sistema (vedi sotto) di leggere/scrivere righe di qualunque azienda quando girano elevati.</p>
+<h3 id="gruppi-a-livello-di-campo-groups">Gruppi a livello di campo (<code>groups=</code>)</h3>
+<p>L'attributo <code>groups=</code> su un campo <strong>nasconde il campo</strong> agli utenti che non appartengono ad almeno uno dei gruppi indicati. È una restrizione fuori banda: non aggiunge colonne al metamodello, è emessa da <code>#[field(groups = "...")]</code> come <code>FieldGroupRegistration</code> (<code>crates/meshble-core/src/security.rs</code>). Read <strong>e</strong> write sono gateati dallo stesso insieme, al confine del database.</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> field_accessible(model<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span><span class="op">,</span> field<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span><span class="op">,</span> ctx<span class="op">:</span> <span class="op">&amp;</span>Ctx) <span class="op">-&gt;</span> <span class="dt">bool</span> <span class="op">{</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> ctx<span class="op">.</span>is_su() <span class="op">{</span></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="cn">true</span><span class="op">;</span></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">match</span> field_required_groups(model<span class="op">,</span> field) <span class="op">{</span></span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>        <span class="cn">None</span> <span class="op">=&gt;</span> <span class="cn">true</span><span class="op">,</span>                                        <span class="co">// default-allow se senza restrizione</span></span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Some</span>(groups) <span class="op">=&gt;</span> groups<span class="op">.</span>iter()<span class="op">.</span>any(<span class="op">|</span>g<span class="op">|</span> ctx<span class="op">.</span>is_member(g))<span class="op">,</span></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>L'applicazione è completa e simmetrica:</p>
+<ul>
+<li>in <strong>lettura</strong> i campi non leggibili vengono rimossi dalla riga (<code>strip_unreadable</code>); inoltre un chiamante non può <strong>ordinare</strong> per un campo che non può leggere (perdita d'informazione via ordinamento, <code>operation: "order by (restricted field)"</code>) né <strong>filtrare</strong> su di esso — un filtro fornito dal client che referenzia un campo ristretto (anche attraverso una relazione, es. <code>partner_id.secret</code>) viene rifiutato con <code>AccessDenied</code> (<code>filter_path_accessible</code>);</li>
+<li>in <strong>scrittura</strong> <code>check_writable_fields</code> rifiuta ogni campo del payload non scrivibile dal chiamante:</li>
+</ul>
+<div class="sourceCode" id="cb18"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> check_writable_fields(</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>    model<span class="op">:</span> <span class="op">&amp;</span>ResolvedModel<span class="op">,</span></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>    ctx<span class="op">:</span> <span class="op">&amp;</span>Ctx<span class="op">,</span></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>    payload<span class="op">:</span> <span class="op">&amp;</span>Map<span class="op">&lt;</span><span class="dt">String</span><span class="op">,</span> Json<span class="op">&gt;,</span></span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">,</span> DbError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> ctx<span class="op">.</span>is_su() <span class="op">{</span></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="cn">Ok</span>(())<span class="op">;</span></span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> k <span class="kw">in</span> payload<span class="op">.</span>keys() <span class="op">{</span></span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> <span class="op">!</span>field_accessible(model<span class="op">.</span>name<span class="op">,</span> k<span class="op">,</span> ctx) <span class="op">{</span></span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> <span class="cn">Err</span>(<span class="pp">DbError::</span>AccessDenied <span class="op">{</span></span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>                model<span class="op">:</span> model<span class="op">.</span>name<span class="op">.</span>to_string()<span class="op">,</span></span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a>                operation<span class="op">:</span> <span class="st">&quot;write (restricted field)&quot;</span><span class="op">,</span></span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span>)<span class="op">;</span></span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Ok</span>(())</span>
+<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>La restrizione è consapevole della delega <code>_inherits</code> (una restrizione su un campo delegato vive sul modello padre) e degli shadow (un campo che il figlio dichiara come propria colonna non eredita la restrizione del padre).</p>
+<p>Esempio reale (modulo <code>sales</code>): i campi strutturali "engine-LOCKED" sono protetti con <code>groups = "base.system"</code>, un gruppo che nessun utente possiede, così solo il motore di generazione (che gira <code>sudo</code>) può scriverli:</p>
+<div class="sourceCode" id="cb19"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Variant Extra Price&quot;</span><span class="op">,</span> <span class="kw">default</span> <span class="op">=</span> <span class="st">&quot;0&quot;</span><span class="op">,</span> groups <span class="op">=</span> <span class="st">&quot;base.system&quot;</span><span class="at">)]</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>price_extra<span class="op">:</span> Decimal<span class="op">,</span></span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;On Hand&quot;</span><span class="op">,</span> <span class="kw">default</span> <span class="op">=</span> <span class="st">&quot;0&quot;</span><span class="op">,</span> groups <span class="op">=</span> <span class="st">&quot;base.system&quot;</span><span class="at">)]</span></span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>qty_available<span class="op">:</span> Decimal<span class="op">,</span></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Attribute Values&quot;</span><span class="op">,</span> target <span class="op">=</span> <span class="st">&quot;product.template.attribute.value&quot;</span><span class="op">,</span></span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a>        relation <span class="op">=</span> <span class="st">&quot;variant_ptav_rel&quot;</span><span class="op">,</span> column <span class="op">=</span> <span class="st">&quot;product_id&quot;</span><span class="op">,</span> target_column <span class="op">=</span> <span class="st">&quot;ptav_id&quot;</span><span class="op">,</span></span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a>        groups <span class="op">=</span> <span class="st">&quot;base.system&quot;</span><span class="at">)]</span></span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a>product_template_attribute_value_ids<span class="op">:</span> Many2many<span class="op">,</span></span></code></pre></div>
+<p>Si può anche dichiarare a mano con <code>meshble::register_field_groups!("res.users", "login", &amp;["admin"]);</code>.</p>
+<h3 id="sudo--effetti-elevati">sudo / effetti elevati</h3>
+<p><code>sudo</code> è un'escalation <strong>esplicita e tipata</strong>, non un metodo che bypassa silenziosamente i controlli:</p>
+<div class="sourceCode" id="cb20"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="co">/// Returns an elevated copy that bypasses access control. Explicit and greppable.</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> sudo(<span class="op">&amp;</span><span class="kw">self</span>) <span class="op">-&gt;</span> Ctx <span class="op">{</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>    Ctx <span class="op">{</span> su<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> <span class="op">..</span><span class="kw">self</span><span class="op">.</span>clone() <span class="op">}</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Il pattern operativo è: <strong>un effetto di sistema autorizzato da un gate di livello superiore</strong>. Il chiamante deve essere autorizzato sull'operazione di alto livello; superato quel gate, gli effetti collaterali del motore girano elevati, così l'utente non deve detenere anche i permessi di basso livello.</p>
+<p>Due esempi reali in <code>crates/meshble-db/src/lib.rs</code>:</p>
+<ul>
+<li><strong>Fatturazione</strong> (<code>create_sale_invoice</code>): genera una fattura cliente (<code>account.move</code>) registrata da un ordine confermato. È gateata sul <code>Write</code> dell'ordine da parte del chiamante (<code>check_access(Operation::Write, "sale.order", ...)</code>), e l'ordine viene <strong>reclamato</strong> prima (il flip <code>invoice_status</code> da <code>to_invoice</code> a <code>invoiced</code> sotto il chiamante, che applica ACL <strong>e</strong> record rule + azienda dell'ordine, richiedendo esattamente una riga). Solo dopo, la registrazione contabile (GL) gira elevata (<code>ctx.sudo()</code>), così un commerciale non deve possedere anche i gruppi <code>account</code>. L'effetto elevato non parte mai se il chiamante non è davvero autorizzato a scrivere l'ordine.</li>
+<li><strong>Validazione di un trasferimento</strong> (<code>validate_picking</code>): porta un <code>stock.picking</code> da <code>draft</code> a <code>done</code> in una transazione, muovendo le quantità tra i quant. È gateata sul <code>Write</code> del trasferimento; le mutazioni dei quant sono un effetto di sistema eseguito nella transazione (con <code>FOR UPDATE</code> sul picking per un vero compare-and-set).</li>
+</ul>
+<p>Analogamente, le azioni di transizione di stato hanno un gate di gruppo proprio oltre al <code>Write</code>: in <code>run_action_secured</code>, se l'azione dichiara dei gruppi, un chiamante non-superuser deve appartenervi (<code>operation: "action (group)"</code> → <code>AccessDenied</code>).</p>
+<h2 id="last-dei-domini-e-i-suoi-operatori">L'AST dei domini e i suoi operatori</h2>
+<p>Un <code>Domain</code> è un AST di filtro <strong>tipato</strong>, validato contro il modello e compilato in <strong>SQL parametrizzato</strong> (<code>crates/meshble-core/src/domain.rs</code>). I valori non sono mai interpolati nel testo SQL — vengono legati come parametri (<code>$1, $2, …</code>) — il che chiude la superficie di SQL injection e fa fallire i filtri malformati alla validazione, non in produzione.</p>
+<div class="sourceCode" id="cb21"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">enum</span> Domain <span class="op">{</span></span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a>    True<span class="op">,</span></span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a>    False<span class="op">,</span></span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a>    Cond(Condition)<span class="op">,</span>                  <span class="co">// foglia: field &lt;op&gt; value</span></span>
+<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a>    And(<span class="dt">Box</span><span class="op">&lt;</span>Domain<span class="op">&gt;,</span> <span class="dt">Box</span><span class="op">&lt;</span>Domain<span class="op">&gt;</span>)<span class="op">,</span></span>
+<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a>    Or(<span class="dt">Box</span><span class="op">&lt;</span>Domain<span class="op">&gt;,</span> <span class="dt">Box</span><span class="op">&lt;</span>Domain<span class="op">&gt;</span>)<span class="op">,</span></span>
+<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a>    <span class="bu">Not</span>(<span class="dt">Box</span><span class="op">&lt;</span>Domain<span class="op">&gt;</span>)<span class="op">,</span></span>
+<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Gli operatori (<code>enum Operator</code>) e i loro costruttori fluenti:</p>
+<table>
+<thead>
+<tr>
+<th>Operatore</th>
+<th>Builder</th>
+<th>SQL</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Eq</code></td>
+<td><code>.eq(v)</code></td>
+<td><code>=</code></td>
+<td><code>eq(Null)</code> diventa <code>IS NULL</code></td>
+</tr>
+<tr>
+<td><code>Ne</code></td>
+<td><code>.ne(v)</code></td>
+<td><code>&lt;&gt;</code></td>
+<td><code>ne(Null)</code> diventa <code>IS NOT NULL</code></td>
+</tr>
+<tr>
+<td><code>Lt</code> / <code>Le</code> / <code>Gt</code> / <code>Ge</code></td>
+<td><code>.lt</code> / <code>.le</code> / <code>.gt</code> / <code>.ge</code></td>
+<td><code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td>
+<td>non applicabili ai campi <code>Bool</code></td>
+</tr>
+<tr>
+<td><code>In</code> / <code>NotIn</code></td>
+<td><code>.in_(vs)</code> / <code>.not_in(vs)</code></td>
+<td><code>IN</code> / <code>NOT IN</code></td>
+<td>lista vuota → <code>FALSE</code> / <code>TRUE</code>; <code>NULL</code> nella lista è rifiutato</td>
+</tr>
+<tr>
+<td><code>Like</code> / <code>ILike</code></td>
+<td><code>.like(v)</code> / <code>.ilike(v)</code></td>
+<td><code>LIKE</code> / <code>ILIKE</code></td>
+<td>solo su campi <code>Text</code></td>
+</tr>
+<tr>
+<td><code>IsNull</code> / <code>IsNotNull</code></td>
+<td><code>.is_null()</code> / <code>.is_not_null()</code></td>
+<td><code>IS NULL</code> / <code>IS NOT NULL</code></td>
+<td>senza parametro legato</td>
+</tr>
+</tbody>
+</table>
+<p>Si combinano con <code>.and(...)</code>, <code>.or(...)</code>, <code>.not(...)</code>. Un esempio: <code>Domain::field("state").ne("done").and(Domain::field("amount_total").lt(10000_i64))</code> compila in <code>(state &lt;&gt; $1 AND amount_total &lt; $2)</code> con i valori legati come parametri.</p>
+<p>Punti chiave della compilazione:</p>
+<ul>
+<li><strong>identificatori dal modello, mai dall'input</strong>: la colonna usata in SQL è il <code>field.name</code> del modello, non la stringa del path in ingresso;</li>
+<li><strong>path dotati attraverso relazioni</strong>: un segmento <code>Many2one</code> diventa un subquery <code>fk IN (SELECT id FROM target WHERE …)</code>, un <code>One2many</code> <code>id IN (SELECT inverse FROM target WHERE …)</code>. Funziona uniformemente in SELECT/UPDATE/DELETE, così le record rule possono attraversare relazioni;</li>
+<li><strong>NULL gestiti correttamente</strong>: confronti scalari con <code>NULL</code> sono normalizzati (<code>= NULL → IS NULL</code>, <code>!= NULL → IS NOT NULL</code>) o rifiutati, e i subquery sono resi NULL-safe perché un <code>Not(...)</code> attorno a una traversata si comporti correttamente;</li>
+<li><strong>validazione</strong>: campo sconosciuto (<code>UnknownField</code>), campo non-colonna come un <code>One2many</code> (<code>NotAColumn</code>), tipo incompatibile (<code>TypeMismatch</code>, inclusi NaN/Infinity su <code>Decimal</code>/<code>Float</code>), operatore inadatto al tipo (<code>BadOperatorValue</code>), path non traversabile (<code>UnsupportedPath</code>) e relazione su un modello non registrato (<code>UnknownRelation</code>) sono tutti errori a compile/load time.</li>
+</ul>
+<p>Il dominio ha un AST JSON portabile (<code>to_json</code> / <code>from_json</code>): lo stesso AST che il server compila in SQL, mai una stringa valutata. È usato per l'escape <code>?domain=&lt;json&gt;</code> e per le record rule autorate come dato; il risultato di <code>from_json</code> resta <strong>non fidato</strong> e va validato/compilato contro un modello prima dell'uso.</p>
+<h2 id="validazione-dellinput-al-confine-di-scrittura">Validazione dell'input al confine di scrittura</h2>
+<p>Ogni create/update protetto valida il payload in <code>validate_write_values</code> (<code>crates/meshble-db/src/lib.rs</code>):</p>
+<div class="sourceCode" id="cb22"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="op">!</span>field<span class="op">.</span>has_column() <span class="op">{</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="cn">Err</span>(<span class="pp">DbError::</span>BadInput(<span class="pp">format!</span>(<span class="st">&quot;field &#39;{key}&#39; is not a stored column&quot;</span>)))<span class="op">;</span></span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> field<span class="op">.</span>is_computed() <span class="op">{</span></span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="cn">Err</span>(<span class="pp">DbError::</span>BadInput(<span class="pp">format!</span>(<span class="st">&quot;field &#39;{key}&#39; is computed and not writable&quot;</span>)))<span class="op">;</span></span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> jv<span class="op">.</span>is_null() <span class="op">&amp;&amp;</span> field<span class="op">.</span>required <span class="op">{</span></span>
+<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="cn">Err</span>(<span class="pp">DbError::</span>BadInput(<span class="pp">format!</span>(<span class="st">&quot;field &#39;{key}&#39; is required and cannot be null&quot;</span>)))<span class="op">;</span></span>
+<span id="cb22-9"><a href="#cb22-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb22-10"><a href="#cb22-10" aria-hidden="true" tabindex="-1"></a>out<span class="op">.</span>push((field<span class="op">.</span>name<span class="op">,</span> json_to_value(field<span class="op">,</span> jv)<span class="op">?</span>))<span class="op">;</span> <span class="co">// type checking</span></span></code></pre></div>
+<p>Le garanzie al confine di scrittura sono quindi:</p>
+<ul>
+<li><strong>required</strong>: in create tutti i campi <code>required</code> (con colonna, non computed) devono essere presenti; un valore esplicito <code>null</code> su un campo required è rifiutato;</li>
+<li><strong>type checking</strong>: ogni valore è convertito secondo il tipo del campo (<code>json_to_value</code>); un tipo incompatibile è <code>BadInput</code>;</li>
+<li><strong>i campi computed non sono scrivibili</strong>: un campo computato è ricalcolato dal motore, e tentare di scriverlo è rifiutato esplicitamente (<code>'&lt;campo&gt;' is computed and not writable</code>);</li>
+<li><strong>solo colonne stored</strong>: scrivere un campo che non è una colonna stored (relazioni gestite a parte, related) è rifiutato (<code>'&lt;campo&gt;' is not a stored column</code>).</li>
+</ul>
+<p>Questi errori sono mappati su HTTP <code>400 Bad Request</code>; un <code>AccessDenied</code> diventa <code>403</code>, un conflitto <code>409</code>, e gli errori interni un <code>500</code> opaco che non espone schema o SQL (<code>write_error</code> / <code>internal_error</code> in <code>crates/meshble-server/src/lib.rs</code>).</p>
+<h2 id="linee-guida-per-chi-scrive-un-modulo">Linee guida per chi scrive un modulo</h2>
+<p>Dichiarare la sicurezza di un modulo è dato statico, raccolto a compile time tramite il registro a compile time.</p>
+<ol type="1">
+<li><p><strong>ACL</strong> — dichiara uno slice <code>&amp;'static [Acl]</code> e registralo. Concedi il minimo per gruppo; ricorda che l'ACL è additiva (unione): aggiungere un'ACL può solo <strong>ampliare</strong> l'accesso, mai revocare una concessione esistente. Default-deny: ciò che non è concesso è negato.</p>
+<div class="sourceCode" id="cb23"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> ACLS<span class="op">:</span> <span class="op">&amp;</span>[Acl] <span class="op">=</span> <span class="op">&amp;</span>[</span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;sale.order&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;sales.user&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;sale.order.line&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;sales.user&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">true</span> <span class="op">},</span></span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a>]<span class="op">;</span></span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_acls!</span>(ACLS)<span class="op">;</span></span></code></pre></div></li>
+<li><p><strong>Record rule</strong> — per restringere a livello di riga, dichiara <code>&amp;'static [RecordRule]</code> con <code>RuleDomain::Static(thunk)</code> e registralo. Usa <code>groups: &amp;[]</code> per una regola <strong>globale</strong> (vale per tutti, in AND), o elenca i gruppi per una regola alternativa (in OR). Indica con <code>ops</code> le operazioni a cui si applica. Sfrutta i path dotati (<code>move_id.state</code>) per coprire sia il path diretto sia quello annidato.</p>
+<div class="sourceCode" id="cb24"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> line_move_not_posted() <span class="op">-&gt;</span> Domain <span class="op">{</span> <span class="pp">Domain::</span>field(<span class="st">&quot;move_id.state&quot;</span>)<span class="op">.</span>ne(<span class="st">&quot;posted&quot;</span>) <span class="op">}</span></span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> RECORD_RULES<span class="op">:</span> <span class="op">&amp;</span>[RecordRule] <span class="op">=</span> <span class="op">&amp;</span>[</span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;account.move.line&quot;</span><span class="op">,</span> groups<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span> ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span><span class="bu">Write</span>]<span class="op">,</span> domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(line_move_not_posted) <span class="op">},</span></span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a>]<span class="op">;</span></span>
+<span id="cb24-5"><a href="#cb24-5" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_rules!</span>(RECORD_RULES)<span class="op">;</span></span></code></pre></div></li>
+<li><p><strong>Gruppi a livello di campo</strong> — per nascondere un campo a chi non è del gruppo, aggiungi <code>groups = "…"</code> all'attributo <code>#[field(...)]</code>. Per bloccare un campo a ogni utente (scrivibile solo dal motore via <code>sudo</code>) usa un gruppo che nessuno possiede, come <code>base.system</code>.</p></li>
+<li><p><strong>Multi-azienda</strong> — per rendere un modello scoped per azienda, dichiara un <code>Many2one company_id</code>. Lo scoping (lettura, scrittura, default in create, default-deny sulle righe condivise) si applica automaticamente, senza codice aggiuntivo.</p></li>
+<li><p><strong>Effetti elevati</strong> — quando un'operazione deve produrre un effetto di sistema (registrare in contabilità, validare un trasferimento), gatela prima sul permesso di alto livello del chiamante e poi esegui l'effetto su un <code>ctx.sudo()</code>. Mantieni il gate <strong>prima</strong> dell'effetto, così l'escalation non parte mai senza autorizzazione.</p></li>
+</ol>
+<p>I gruppi referenziati dalle ACL e dalle record rule registrate sono raccolti da <code>registered_group_names()</code> e seminati nella lista read-only <code>res.groups</code> per i picker dell'interfaccia.</p>
+<h2 id="incertezze-e-note">Incertezze e note</h2>
+<ul>
+<li><strong>Rotazione del segreto JWT (verify con il vecchio segreto)</strong>: <code>MESHBLE_JWT_SECRET_OLD</code> è letto da <code>Secrets::from_env</code> e propagato in <code>Secrets.jwt_secret_old</code> (e mostrato mascherato nel riepilogo di configurazione), ma <code>Authenticator::new</code> accetta un solo segreto e il comando <code>meshble serve</code> cabla solo <code>s.secrets.jwt_secret</code>. Nel codice attuale la verifica con il segreto precedente non è ancora attiva nel percorso runtime; il commento del codice e i file di esempio descrivono il comportamento previsto ("still accepted on verify during a rotation window"). Verificare la versione del runtime prima di affidarsi alla rotazione senza invalidare i token in volo.</li>
+<li><strong>TTL dei token vs <code>meshble.toml</code></strong>: i valori effettivi sono le costanti <code>ACCESS_TTL</code> / <code>REFRESH_TTL</code> di <code>meshble-server</code>; la sezione <code>[auth]</code> di <code>meshble.toml</code> (<code>access_ttl</code> / <code>refresh_ttl</code>) porta gli stessi default ma in v1 non è cablata nell'emissione dei token. Verificare la versione prima di affidarsi al file di configurazione per cambiare i TTL.</li>
+<li><strong><code>jti</code> sugli access token</strong>: la revoca per <code>jti</code> riguarda solo i refresh token (tabella <code>meshble_refresh</code>); gli access token sono stateless e non revocabili prima della scadenza (15 min). La claim <code>jti</code> è popolata solo sui refresh token.</li>
+</ul>
+
+      </article>
+      <footer class="mt-16 border-t border-border pt-6 text-[13px] text-muted">
+        <span class="font-mono">meshble · documentazione</span>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

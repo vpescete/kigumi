@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="it" class="scroll-smooth">
+<head>
+  <title>Meshble · Panoramica · IT</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: {
+      bg: '#0D1014', surface: '#14181D', surface2: '#1B2026', border: '#272D34',
+      text: '#E5E9ED', muted: '#8B949E', accent: '#22B8CF', accentfg: '#06181C',
+      accenthover: '#46C8DB', success: '#3DD68C', violet: '#7B8CFF',
+    }, fontFamily: {
+      display: ['Space Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      body: ['Hanken Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+    } } } }
+  </script>
+  <style>
+    :root { color-scheme: dark; }
+    body { background:#0d1014; color:#e5e9ed; font-family:'Hanken Grotesk',ui-sans-serif,system-ui,sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+    .scanline { position:relative; }
+    .scanline::before { content:''; position:absolute; left:0; top:.15em; bottom:.15em; width:2px; border-radius:999px; background:#22b8cf; }
+    .pulse { animation:pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    @media (prefers-reduced-motion: reduce){ .pulse{animation:none} }
+    .markdown { font-size:15.5px; line-height:1.7; color:#c8cfd6; }
+    .markdown > :first-child { margin-top:0; }
+    .markdown h1,.markdown h2,.markdown h3,.markdown h4 { font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif; color:#e5e9ed; font-weight:600; letter-spacing:-.01em; line-height:1.25; }
+    .markdown h1 { font-size:2rem; margin:0 0 .75rem; letter-spacing:-.02em; }
+    .markdown h2 { font-size:1.5rem; margin:2.6rem 0 1rem; padding-top:1.4rem; border-top:1px solid #272d34; }
+    .markdown h3 { font-size:1.18rem; margin:2rem 0 .7rem; }
+    .markdown h4 { font-size:1rem; margin:1.6rem 0 .5rem; color:#cdd4db; }
+    .markdown p { margin:0 0 1.05rem; }
+    .markdown a { color:#46c8db; text-decoration:none; border-bottom:1px solid rgba(70,200,219,.3); }
+    .markdown a:hover { color:#22b8cf; border-bottom-color:#22b8cf; }
+    .markdown strong { color:#e5e9ed; font-weight:600; }
+    .markdown ul,.markdown ol { margin:0 0 1.05rem; padding-left:1.35rem; }
+    .markdown li { margin:.3rem 0; }
+    .markdown li::marker { color:#5b636c; }
+    .markdown code { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:.86em; background:#1b2026; border:1px solid #272d34; border-radius:5px; padding:.1em .38em; color:#cdd4db; }
+    .markdown pre { background:#0f1216; border:1px solid #272d34; border-radius:8px; padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.2rem; }
+    .markdown pre code { font-size:12.8px; line-height:1.65; background:none; border:0; padding:0; color:#d7dde3; }
+    .markdown blockquote { margin:0 0 1.2rem; padding:.2rem 0 .2rem 1rem; border-left:2px solid #22b8cf; color:#9aa3ac; }
+    .markdown hr { border:0; border-top:1px solid #272d34; margin:2rem 0; }
+    .markdown table { width:100%; border-collapse:collapse; margin:0 0 1.3rem; font-size:14px; display:block; overflow-x:auto; }
+    .markdown th,.markdown td { border:1px solid #272d34; padding:.5rem .7rem; text-align:left; }
+    .markdown th { background:#1b2026; color:#e5e9ed; font-weight:600; }
+    .markdown td code { white-space:nowrap; }
+    a,button { transition:color .16s ease,background-color .16s ease,border-color .16s ease; }
+    .docnav::-webkit-scrollbar { height:6px; width:6px; }
+    .docnav::-webkit-scrollbar-thumb { background:#272d34; border-radius:999px; }
+  </style>
+</head>
+<body class="font-body antialiased">
+  <header class="sticky top-0 z-40 border-b border-border/80 bg-bg/85 backdrop-blur">
+    <div class="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-6 px-5 sm:px-8">
+      <a href="../../it/index.html" class="flex items-center gap-2">
+        <span class="pulse h-2 w-2 rounded-full bg-accent"></span>
+        <span class="font-display text-[17px] font-semibold text-text">meshble</span>
+        <span class="font-mono text-[12px] text-muted">/ docs</span>
+      </a>
+      <div class="flex items-center gap-5 text-[14px] text-muted">
+        <a class="hover:text-text" href="../../it/index.html">← Landing</a>
+        <div class="flex items-center gap-1 font-mono text-[12px]">
+          <span class="rounded bg-surface px-1.5 py-0.5 text-text">IT</span>
+          <a class="rounded px-1.5 py-0.5 hover:text-text" href="../en/README.html">EN</a>
+        </div>
+        <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </header>
+  <div class="mx-auto max-w-[1180px] px-5 sm:px-8 lg:grid lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10">
+    <aside class="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:overflow-y-auto py-6 lg:py-9">
+      <div class="mb-3 hidden font-mono text-[11px] uppercase tracking-[0.16em] text-muted lg:block">Documentazione</div>
+      <nav class="docnav flex gap-2 overflow-x-auto pb-2 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:pb-0">
+        <a href="README.html" class="scanline shrink-0 whitespace-nowrap rounded-md bg-surface px-3 py-1.5 text-[14px] text-text lg:whitespace-normal">Panoramica</a>
+        <a href="architettura.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Architettura</a>
+        <a href="installazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Installazione</a>
+        <a href="configurazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Configurazione</a>
+        <a href="moduli.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Moduli</a>
+        <a href="moduli-custom.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Moduli custom</a>
+        <a href="api.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">API e contratto-UI</a>
+        <a href="sicurezza.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Sicurezza</a>
+      </nav>
+    </aside>
+    <main class="min-w-0 py-8 lg:py-9">
+      <article class="markdown max-w-[760px]">
+<h1 id="panoramica-e-quickstart">Panoramica e quickstart</h1>
+<p>Meshble è un framework applicativo <strong>headless</strong> e <strong>schema-driven</strong> scritto in Rust: una sola <strong>definizione di modello</strong> è l'unica sorgente di verità, e da essa il framework <strong>genera</strong> lo schema Postgres, l'API REST, la specifica OpenAPI, il <strong>contratto-UI</strong> agnostico in JSON e la policy di security (ACL e record rule). Il core non impone né un frontend né un protocollo applicativo: tutto è esposto tramite standard generati a partire dallo schema. La composizione dei moduli è <strong>risolta e verificata a compile time</strong> — i moduli disponibili in un binario sono quelli i cui crate sono linkati, e il loro grafo di dipendenze è validato prima ancora di toccare il database. Questa pagina spiega cos'è Meshble, ne descrive l'architettura e fornisce un quickstart completo per portare un'istanza dallo zero a un'API REST autenticata, con un'app web di riferimento.</p>
+<h2 id="cosa-è-meshble">Cosa è Meshble</h2>
+<p>Il principio centrale è <strong>un modello, una sorgente di verità</strong>. Si descrive un'entità una volta sola, in Rust, con la macro <code>#[model]</code>; da quella descrizione (<code>ModelDescriptor</code>) il framework proietta:</p>
+<table>
+<thead>
+<tr>
+<th>Artefatto generato</th>
+<th>Crate responsabile</th>
+<th>A che serve</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Schema Postgres (DDL + migrazioni versionate)</td>
+<td><code>meshble-schema</code> / <code>meshble-db</code></td>
+<td>tabelle, colonne, FK, vincoli</td>
+</tr>
+<tr>
+<td>API REST headless</td>
+<td><code>meshble-server</code></td>
+<td>CRUD sicuro e azioni dal catalogo</td>
+</tr>
+<tr>
+<td>Specifica OpenAPI 3.1</td>
+<td><code>meshble-schema</code></td>
+<td><code>GET /openapi.json</code></td>
+</tr>
+<tr>
+<td>Contratto-UI agnostico (JSON)</td>
+<td><code>meshble-schema</code></td>
+<td>un frontend generico disegna form e tabelle <em>dal contratto</em></td>
+</tr>
+<tr>
+<td>Policy di security (ACL + record rule)</td>
+<td><code>meshble-core</code></td>
+<td>accesso imposto dal percorso di codice, non solo dai dati</td>
+</tr>
+</tbody>
+</table>
+<p>Caratteristiche portanti:</p>
+<ul>
+<li><strong>Agnostico</strong>: il core non sa nulla del frontend né del trasporto; l'app web è solo un consumatore del contratto-UI e dell'API REST.</li>
+<li><strong>Composizione a compile time</strong>: un modulo è un crate Rust che auto-registra i propri modelli, ACL e record rule nel <strong>registro a compile time</strong> (tramite <code>inventory</code>). Solo i moduli linkati nel binario sono disponibili; il grafo delle dipendenze è validato da <code>resolve_modules</code>, con controllo di compatibilità SemVer verso la versione del framework (<code>check_compat</code> / <code>FRAMEWORK_VERSION</code>).</li>
+<li><strong>Multi-azienda</strong>: <code>res.company</code> è l'unità di isolamento dei dati; lo scoping per azienda è applicato dalla security layer (<code>Ctx</code> con la company attiva più una record rule).</li>
+<li><strong>Fail-fast sui segreti</strong>: l'istanza si rifiuta di partire se manca un segreto richiesto (<code>DATABASE_URL</code>, <code>MESHBLE_JWT_SECRET</code>).</li>
+</ul>
+<h2 id="mappa-dellarchitettura">Mappa dell'architettura</h2>
+<p>Il workspace Cargo (<code>Cargo.toml</code>, <code>members = ["crates/*", "modules/*", "apps/*"]</code>) è organizzato in tre livelli: i <strong>crate</strong> del framework, i <strong>moduli</strong> di business e le <strong>app</strong> eseguibili. Esiste inoltre un'app web di riferimento sotto <code>web/</code>.</p>
+<h3 id="crate-crates">Crate (<code>crates/</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>Crate</th>
+<th>Ruolo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>meshble-core</code></td>
+<td>metamodello ispezionabile, domini AST, security (ACL + record rule + sudo), registro a compile time, versioning</td>
+</tr>
+<tr>
+<td><code>meshble-macros</code></td>
+<td>proc-macro <code>#[model]</code> / <code>#[extend]</code></td>
+</tr>
+<tr>
+<td><code>meshble-schema</code></td>
+<td>proiezioni: DDL Postgres, contratto-UI JSON, OpenAPI 3.1</td>
+</tr>
+<tr>
+<td><code>meshble-db</code></td>
+<td>persistenza Postgres (sqlx): CRUD security-enforced + migrazioni versionate</td>
+</tr>
+<tr>
+<td><code>meshble-auth</code></td>
+<td>auth JWT HS256 (Bearer → <code>Ctx</code> fidato), hashing password</td>
+</tr>
+<tr>
+<td><code>meshble-config</code></td>
+<td>configurazione boot-time tipizzata e validata + lettura segreti dall'ambiente</td>
+</tr>
+<tr>
+<td><code>meshble-storage</code></td>
+<td>blob store content-addressed dietro un trait (<code>BlobStore</code>) per gli allegati</td>
+</tr>
+<tr>
+<td><code>meshble-server</code></td>
+<td>server axum headless: metadata + CRUD dal catalogo</td>
+</tr>
+<tr>
+<td><code>meshble</code></td>
+<td>facade (prelude): un modulo dipende solo da questo crate</td>
+</tr>
+</tbody>
+</table>
+<p>Il prelude pubblico è in <code>crates/meshble/src/lib.rs</code>: un modulo apre la propria definizione con</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">meshble::prelude::</span><span class="op">*;</span></span></code></pre></div>
+<p>e riceve tutto il necessario — <code>#[model]</code>, <code>#[extend]</code>, <code>Ctx</code>, <code>Domain</code>, <code>Model</code>, <code>ModelDescriptor</code>, <code>ModuleManifest</code>, <code>ModuleDep</code>, i tipi della security (<code>Acl</code>, <code>RecordRule</code>) e i registratori esposti come macro dal crate <code>meshble</code> (<code>register_module!</code>, <code>register_acls!</code>, <code>register_rules!</code>, <code>register_action!</code>, e simili).</p>
+<h3 id="moduli-modules">Moduli (<code>modules/</code>)</h3>
+<p>Ogni modulo dichiara un <code>MANIFEST</code> (<code>ModuleManifest</code>) con nome, versione, range di compatibilità con il framework (campo <code>framework</code>) e dipendenze (<code>depends</code>), e si auto-registra con <code>meshble::register_module!(MANIFEST)</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Modulo</th>
+<th>Versione</th>
+<th>Dipende da</th>
+<th>Summary (dal manifest)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base</code></td>
+<td><code>1.0.0</code></td>
+<td>—</td>
+<td>Foundational models: currency, partner, company</td>
+</tr>
+<tr>
+<td><code>mail</code></td>
+<td><code>1.0.0</code></td>
+<td><code>base</code></td>
+<td>Headless chatter: messages, tracking, followers, activities</td>
+</tr>
+<tr>
+<td><code>sales</code></td>
+<td><code>1.0.0</code></td>
+<td><code>base</code>, <code>mail</code></td>
+<td>Sales order management</td>
+</tr>
+<tr>
+<td><code>account</code></td>
+<td><code>1.0.0</code></td>
+<td><code>base</code>, <code>mail</code></td>
+<td>Double-entry general ledger</td>
+</tr>
+<tr>
+<td><code>stock</code></td>
+<td><code>1.0.0</code></td>
+<td><code>base</code>, <code>sales</code>, <code>mail</code></td>
+<td>Inventory — locations, quants, pickings and moves</td>
+</tr>
+</tbody>
+</table>
+<p><code>base</code> è la radice del grafo (nessuna dipendenza) e non può essere disinstallato. Tutti i moduli dichiarano <code>framework: "&gt;=0.1, &lt;0.2"</code>. Le dipendenze nella tabella sono quelle dichiarate nel <code>MANIFEST</code>; installare un modulo ne risolve la <strong>chiusura transitiva</strong> (ad esempio installare <code>stock</code> tira dentro <code>sales</code>, e quindi <code>base</code> e <code>mail</code>).</p>
+<h3 id="app-apps">App (<code>apps/</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>App</th>
+<th>Binario</th>
+<th>Ruolo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>meshble-cli</code></td>
+<td><code>meshble</code></td>
+<td>la CLI unica per operare un'istanza: <code>serve</code>, <code>migrate</code>, <code>config</code>, <code>user</code>, <code>acl</code>, <code>rule</code>, <code>module</code>, <code>version</code></td>
+</tr>
+<tr>
+<td><code>renderer-demo</code></td>
+<td><code>meshble-renderer-demo</code></td>
+<td>demo eseguibile: migra+seeda un modello e serve API + renderer di riferimento</td>
+</tr>
+</tbody>
+</table>
+<p>La CLI <code>meshble</code> linka i crate dei moduli (<code>meshble-mod-base</code>, <code>meshble-mod-mail</code>, <code>meshble-mod-sales</code>, <code>meshble-mod-account</code>, <code>meshble-mod-stock</code>); proprio perché linkati, le loro registrazioni <code>inventory</code> sono presenti nel binario e i moduli risultano <em>disponibili</em> all'installazione. Solo i moduli <strong>installati</strong> vengono però migrati e serviti.</p>
+<h3 id="web-web">Web (<code>web/</code>)</h3>
+<p><code>web/</code> è una SPA Vite/React: l'app web di riferimento per l'admin UI. In sviluppo gira come processo separato sulla porta <code>5180</code> e fa da proxy delle path <code>/api</code>, <code>/auth</code> e <code>/openapi.json</code> verso <code>meshble serve</code> (default <code>127.0.0.1:8099</code>), così il browser resta same-origin (nessun CORS). Il server Rust è headless e <strong>non</strong> serve asset statici: l'app web è un client separato del contratto-UI e dell'API REST.</p>
+<h2 id="quickstart">Quickstart</h2>
+<p>Questo percorso porta un'istanza dallo zero a un'API REST autenticata, con un modulo di business installato e l'app web di riferimento aperta.</p>
+<h3 id="prerequisiti">Prerequisiti</h3>
+<ul>
+<li><strong>Toolchain Rust</strong> (stable, edition 2021). Installa con <a href="https://rustup.rs">rustup</a>:
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">--proto</span> <span class="st">&#39;=https&#39;</span> <span class="at">--tlsv1.2</span> <span class="at">-sSf</span> https://sh.rustup.rs <span class="kw">|</span> <span class="fu">sh</span></span></code></pre></div></li>
+<li><strong>PostgreSQL</strong> in esecuzione e raggiungibile, con i comandi client <code>createdb</code>/<code>psql</code> disponibili.</li>
+<li><strong>Node.js</strong> + npm (solo se vuoi aprire l'app web di riferimento sotto <code>web/</code>).</li>
+</ul>
+<h3 id="1-compila-il-binario-meshble">1. Compila il binario <code>meshble</code></h3>
+<p>Dalla radice del workspace:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> build <span class="at">--release</span> <span class="at">-p</span> meshble-cli</span></code></pre></div>
+<p>Il binario prodotto è <code>target/release/meshble</code>. Negli esempi seguenti puoi usare <code>cargo run -p meshble-cli -- &lt;comando&gt;</code> durante lo sviluppo, oppure <code>meshble &lt;comando&gt;</code> se il binario è nel <code>PATH</code>.</p>
+<h3 id="2-crea-il-database">2. Crea il database</h3>
+<p><code>meshble</code> si connette a un database <strong>già esistente</strong> (non lo crea): crealo a parte.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">createdb</span> meshble</span></code></pre></div>
+<h3 id="3-configura-i-segreti-env">3. Configura i segreti (env)</h3>
+<p>I segreti si leggono <strong>solo</strong> dall'ambiente, mai dal file di configurazione; l'istanza fa fail-fast se ne manca uno richiesto. Sono richiesti <code>DATABASE_URL</code> (un DSN Postgres completo: l'unica sorgente dell'identità di connessione) e <code>MESHBLE_JWT_SECRET</code> (il segreto HS256 di firma dei token).</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">DATABASE_URL</span><span class="op">=</span><span class="st">&quot;postgres://meshble:CHANGE_ME@127.0.0.1:5432/meshble&quot;</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MESHBLE_JWT_SECRET</span><span class="op">=</span><span class="st">&quot;</span><span class="va">$(</span><span class="ex">openssl</span> rand <span class="at">-hex</span> 32<span class="va">)</span><span class="st">&quot;</span></span></code></pre></div>
+<p><code>DATABASE_URL</code> deve essere un URL <code>postgres://</code> valido, altrimenti la validazione dei segreti fallisce all'avvio.</p>
+<h3 id="4-prepara-meshbletoml">4. Prepara <code>meshble.toml</code></h3>
+<p>Le impostazioni boot-time NON segrete vivono in <code>meshble.toml</code> (default: <code>./meshble.toml</code>, oppure <code>$MESHBLE_CONFIG</code>, oppure <code>--config &lt;path&gt;</code>). La configurazione effettiva è data dalla stratificazione <code>defaults &lt; meshble.toml &lt; variabili d'ambiente con prefisso MESHBLE_CONF_</code> (nidificate con <code>__</code>, ad esempio <code>MESHBLE_CONF_SERVER__BIND=0.0.0.0:9000</code>). Il file è opzionale per i comandi che non avviano il blob store, ma <code>serve</code> richiede <code>storage.path</code> quando lo storage backend è <code>fs</code> (il default): senza, la validazione fallisce con fail-fast. Parti dall'esempio:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> meshble.toml.example meshble.toml</span></code></pre></div>
+<p>Un <code>meshble.toml</code> minimale per il quickstart:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode toml"><code class="sourceCode toml"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="kw">[server]</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="dt">bind</span> <span class="op">=</span> <span class="st">&quot;127.0.0.1:8099&quot;</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="kw">[storage]</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="dt">backend</span> <span class="op">=</span> <span class="st">&quot;fs&quot;</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="dt">path</span> <span class="op">=</span> <span class="st">&quot;/var/lib/meshble/blobs&quot;</span></span></code></pre></div>
+<blockquote>
+<p>In v1 è implementato il solo backend di storage <code>fs</code> (<code>FsBlobStore</code>, file content-addressed). Il valore <code>s3</code> è previsto dallo schema di configurazione ma non ancora realizzato.</p>
+</blockquote>
+<p>Verifica la configurazione effettiva (segreti redatti) con:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> config check</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> config print</span></code></pre></div>
+<p><code>config print</code> stampa la configurazione effettiva con i segreti mascherati e, in coda, le runtime settings lette dal database.</p>
+<h3 id="5-migra-il-catalogo">5. Migra il catalogo</h3>
+<div class="sourceCode" id="cb9"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> migrate</span></code></pre></div>
+<p><code>migrate</code> assicura gli schemi del framework (auth, sequenze, settings, accessi, moduli) e, su un database fresco, installa automaticamente solo <code>base</code> (più la sua chiusura di dipendenze). Gli altri moduli sono opt-in. La migrazione crea le tabelle dei modelli dei moduli installati in ordine di dipendenza delle FK e seeda i dati di riferimento di <code>base</code> (una valuta <code>EUR</code> e una company di default).</p>
+<h3 id="6-installa-un-modulo-di-business">6. Installa un modulo di business</h3>
+<p>I moduli disponibili sono solo quelli linkati nel binario; l'installazione risolve la <strong>chiusura di dipendenze</strong> (dipendenze prima dei dipendenti) e ne migra le tabelle, in modo idempotente. Elenca i moduli e installa <code>sales</code>:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> module list</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> module install sales</span></code></pre></div>
+<p>Installare <code>sales</code> tira dentro anche <code>mail</code> (sua dipendenza, oltre a <code>base</code> già presente). L'output di <code>module list</code> mostra per ciascun modulo nome, versione, stato (<code>installed</code>/<code>available</code>) e summary.</p>
+<h3 id="7-effettua-il-bootstrap-delladmin">7. Effettua il bootstrap dell'admin</h3>
+<p>Su un'istanza fresca, l'utente <code>admin</code> viene creato dalla variabile <code>MESHBLE_ADMIN_PASSWORD</code> (nessuna password è hardcoded). Il bootstrap avviene dentro <code>serve</code>: se non esiste già un utente <code>admin</code> e la variabile è impostata, viene creato con tutti i gruppi dichiarati dalle ACL/record rule dei moduli linkati più i gruppi base <code>user</code>/<code>admin</code>, e assegnato a ogni company esistente.</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">MESHBLE_ADMIN_PASSWORD</span><span class="op">=</span><span class="st">&quot;</span><span class="va">$(</span><span class="ex">openssl</span> rand <span class="at">-base64</span> 24<span class="va">)</span><span class="st">&quot;</span></span></code></pre></div>
+<blockquote>
+<p>Se <code>MESHBLE_ADMIN_PASSWORD</code> non è impostata, <code>serve</code> parte comunque ma stampa un avviso e nessun admin viene creato.</p>
+</blockquote>
+<h3 id="8-avvia-il-server">8. Avvia il server</h3>
+<div class="sourceCode" id="cb12"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> serve</span></code></pre></div>
+<p><code>serve</code> esegue in sequenza: <code>migrate</code> → bootstrap dell'admin → avvio del server axum. All'avvio stampa l'URL di ascolto e il numero di modelli registrati nel binario, ad esempio:</p>
+<pre><code>meshble serving on http://127.0.0.1:8099  (N models)</code></pre>
+<blockquote>
+<p>Il numero stampato è il totale dei modelli <strong>registrati</strong> (cioè di tutti i moduli linkati). L'API serve però soltanto i modelli dei moduli <strong>installati</strong>: un modello il cui modulo non è installato non compare nel catalogo esposto dal router. L'accesso effettivo è l'unione tra la baseline compilata e gli eventuali override runtime (ACL e record rule) presenti nel database.</p>
+</blockquote>
+<h3 id="9-chiama-lapi-rest-con-curl">9. Chiama l'API REST con curl</h3>
+<p>Prima ottieni un access token con login (<code>POST /auth/login</code>, body <code>{login, password}</code>); la risposta è <code>{ access_token, refresh_token, token_type, expires_in }</code> con <code>token_type</code> pari a <code>"Bearer"</code>. Poi usa il token come <code>Authorization: Bearer</code> sulle route dati.</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1) login → estrai l&#39;access token</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="va">TOKEN</span><span class="op">=</span><span class="va">$(</span><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-X</span> POST http://127.0.0.1:8099/auth/login <span class="dt">\</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="dt">\</span></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{&quot;login&quot;:&quot;admin&quot;,&quot;password&quot;:&quot;&#39;&quot;</span><span class="va">$MESHBLE_ADMIN_PASSWORD</span><span class="st">&quot;&#39;&quot;}&#39;</span> <span class="dt">\</span></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="ex">python3</span> <span class="at">-c</span> <span class="st">&#39;import sys,json; print(json.load(sys.stdin)[&quot;access_token&quot;])&#39;</span><span class="va">)</span></span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a><span class="co"># 2) lista record di un modello (envelope: data/total/limit/offset)</span></span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://127.0.0.1:8099/api/res.partner <span class="dt">\</span></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span></span></code></pre></div>
+<p>La lista risponde con un envelope <code>{ "data": [...], "total": N, "limit": ..., "offset": ... }</code>. Altre route utili, tutte montate dal catalogo:</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Metodo</th>
+<th>Cosa fa</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/openapi.json</code></td>
+<td>GET</td>
+<td>specifica OpenAPI 3.1 generata</td>
+</tr>
+<tr>
+<td><code>/api/models</code></td>
+<td>GET</td>
+<td>elenco dei modelli serviti</td>
+</tr>
+<tr>
+<td><code>/api/:name/view</code></td>
+<td>GET</td>
+<td>contratto-UI del modello (form + tabella)</td>
+</tr>
+<tr>
+<td><code>/api/:name</code></td>
+<td>GET / POST</td>
+<td>lista (paginata) / crea</td>
+</tr>
+<tr>
+<td><code>/api/:name/:id</code></td>
+<td>GET / PATCH / DELETE</td>
+<td>leggi / aggiorna / elimina un record</td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/action/:action</code></td>
+<td>POST</td>
+<td>esegue un'azione di transizione di stato registrata</td>
+</tr>
+<tr>
+<td><code>/auth/login</code>, <code>/auth/refresh</code>, <code>/auth/logout</code>, <code>/auth/me</code></td>
+<td>—</td>
+<td>flusso di autenticazione JWT</td>
+</tr>
+</tbody>
+</table>
+<h3 id="10-apri-lapp-web-di-riferimento">10. Apri l'app web di riferimento</h3>
+<p>L'app web sotto <code>web/</code> gira come processo separato e, in sviluppo, fa da proxy verso il server in esecuzione:</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> web</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> install</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> run dev      <span class="co"># http://localhost:5180</span></span></code></pre></div>
+<p>Con <code>meshble serve</code> attivo su <code>127.0.0.1:8099</code>, le path <code>/api</code>, <code>/auth</code> e <code>/openapi.json</code> vengono proxate verso il backend, quindi le chiamate dell'app web raggiungono l'API reale dallo stesso origin.</p>
+<h2 id="indice-della-guida">Indice della guida</h2>
+<table>
+<thead>
+<tr>
+<th>Pagina</th>
+<th>Contenuto</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="README.html">README.md</a></td>
+<td>Questa pagina: panoramica del framework e quickstart end-to-end.</td>
+</tr>
+<tr>
+<td><a href="architettura.html">architettura.md</a></td>
+<td>Architettura in dettaglio: crate, metamodello, generazione degli artefatti, flusso di composizione a compile time.</td>
+</tr>
+<tr>
+<td><a href="installazione.html">installazione.md</a></td>
+<td>Installazione completa: prerequisiti, build, creazione del database, prima esecuzione.</td>
+</tr>
+<tr>
+<td><a href="configurazione.html">configurazione.md</a></td>
+<td>Configurazione: <code>meshble.toml</code>, segreti via ambiente, override <code>MESHBLE_CONF_*</code>, settings runtime nel database.</td>
+</tr>
+<tr>
+<td><a href="moduli.html">moduli.md</a></td>
+<td>I moduli inclusi (<code>base</code>, <code>mail</code>, <code>sales</code>, <code>account</code>, <code>stock</code>): modelli esposti, dipendenze, install/uninstall.</td>
+</tr>
+<tr>
+<td><a href="moduli-custom.html">moduli-custom.md</a></td>
+<td>Come scrivere un modulo: <code>#[model]</code>, manifest, ACL, record rule, azioni, registrazione nel catalogo.</td>
+</tr>
+<tr>
+<td><a href="api.html">api.md</a></td>
+<td>L'API REST e OpenAPI: route, envelope di risposta, contratto-UI, autenticazione JWT.</td>
+</tr>
+<tr>
+<td><a href="sicurezza.html">sicurezza.md</a></td>
+<td>Modello di security: ACL, record rule, gruppi, sudo, multi-azienda, override runtime additivi.</td>
+</tr>
+</tbody>
+</table>
+
+      </article>
+      <footer class="mt-16 border-t border-border pt-6 text-[13px] text-muted">
+        <span class="font-mono">meshble · documentazione</span>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

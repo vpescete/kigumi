@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meshble: the ERP backend that speaks JSON</title>
+  <meta name="description"
+    content="Meshble is a headless, schema-driven ERP framework in Rust. Define a model, get a typed REST API and a UI for free. Contract-first, secure by default." />
+
+  <!-- Fonts: linked for this preview. For production, self-host with font-display: swap. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+
+  <!-- Tailwind via CDN for this preview. For production, compile with the CLI / Vite plugin. -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0D1014',
+            surface: '#14181D',
+            surface2: '#1B2026',
+            border: '#272D34',
+            text: '#E5E9ED',
+            muted: '#8B949E',
+            accent: '#22B8CF',
+            accentfg: '#06181C',
+            accenthover: '#46C8DB',
+            success: '#3DD68C',
+            violet: '#7B8CFF',
+          },
+          fontFamily: {
+            display: ['Space Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            body: ['Hanken Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+          },
+          maxWidth: { content: '1180px' },
+        },
+      },
+    }
+  </script>
+
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+
+    body {
+      background: #0d1014;
+      color: #e5e9ed;
+      font-family: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    .font-display {
+      letter-spacing: -0.02em;
+    }
+
+    .tnum {
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* The cyan scanline: a 2px accent ridge that marks a section's eyebrow + active context. */
+    .scanline {
+      position: relative;
+      padding-left: 0.85rem;
+    }
+
+    .scanline::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0.1em;
+      bottom: 0.1em;
+      width: 2px;
+      border-radius: 999px;
+      background: #22b8cf;
+    }
+
+    /* Ambient cyan glow behind the hero, kept subtle. */
+    .hero-aura {
+      background: radial-gradient(60% 60% at 78% 28%, rgba(34, 184, 207, 0.12), transparent 70%);
+    }
+
+    .code {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 12.5px;
+      line-height: 1.7;
+    }
+
+    .tok-key {
+      color: #7b8cff;
+    }
+
+    .tok-str {
+      color: #3dd68c;
+    }
+
+    .tok-num {
+      color: #46c8db;
+    }
+
+    .tok-com {
+      color: #5b636c;
+    }
+
+    .tok-fn {
+      color: #22b8cf;
+    }
+
+    .grid-lines {
+      background-image: linear-gradient(#272d34 1px, transparent 1px), linear-gradient(90deg, #272d34 1px, transparent 1px);
+      background-size: 56px 56px;
+      mask-image: radial-gradient(70% 70% at 50% 0%, #000 30%, transparent 75%);
+    }
+
+    .logo-img {
+      height: 22px;
+      opacity: 0.55;
+      transition: opacity 0.18s ease;
+    }
+
+    .logo-img:hover {
+      opacity: 1;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .reveal {
+        opacity: 0;
+        transform: translateY(16px);
+        transition:
+          opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+          transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .reveal.in {
+        opacity: 1;
+        transform: none;
+      }
+
+      .pulse {
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+
+        0%,
+        100% {
+          opacity: 1;
+        }
+
+        50% {
+          opacity: 0.35;
+        }
+      }
+    }
+
+    a,
+    button {
+      transition: color 0.16s ease, background-color 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+    }
+
+    .btn-primary:active {
+      transform: translateY(1px);
+    }
+  </style>
+</head>
+
+<body class="font-body antialiased">
+  <!-- ───────────── Nav (single line, <= 64px) ───────────── -->
+  <header class="sticky top-0 z-40 border-b border-border/80 bg-bg/80 backdrop-blur">
+    <nav class="mx-auto flex h-16 max-w-content items-center justify-between gap-6 px-5 sm:px-8">
+      <a href="#top" class="flex items-center gap-2">
+        <span class="pulse h-2 w-2 rounded-full bg-accent"></span>
+        <span class="font-display text-[17px] font-semibold text-text">meshble</span>
+      </a>
+      <div class="hidden items-center gap-7 text-[14px] text-muted md:flex">
+        <a class="hover:text-text" href="#thesis">Why</a>
+        <a class="hover:text-text" href="#features">Capabilities</a>
+        <a class="hover:text-text" href="#flow">How it works</a>
+        <a class="hover:text-text" href="./docs/en/README.html">Docs</a>
+        <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank"
+          rel="noopener">GitHub</a>
+        <span class="font-mono text-[12px]"><span class="text-text">EN</span> <span
+            class="text-border">·</span> <a class="text-muted hover:text-text" href="./it/">IT</a></span>
+      </div>
+      <a href="https://github.com/vpescete/msh_framework" target="_blank" rel="noopener"
+        class="btn-primary inline-flex h-9 items-center rounded-md bg-accent px-3.5 text-[14px] font-semibold text-accentfg hover:bg-accenthover">
+        Get started
+      </a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <!-- ───────────── Hero (asymmetric split) ───────────── -->
+    <section class="relative overflow-hidden">
+      <div class="pointer-events-none absolute inset-0 grid-lines opacity-40"></div>
+      <div class="pointer-events-none absolute inset-0 hero-aura"></div>
+      <div
+        class="relative mx-auto grid max-w-content items-center gap-12 px-5 pb-20 pt-16 sm:px-8 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:pt-24">
+        <div>
+          <div class="scanline mb-6 font-mono text-[11px] uppercase tracking-[0.16em] text-muted">Headless ERP framework
+            · Rust</div>
+          <h1 class="font-display text-4xl font-semibold leading-[1.05] text-text sm:text-5xl lg:text-6xl">
+            The ERP backend<br />that speaks JSON.
+          </h1>
+          <p class="mt-5 max-w-[34rem] text-[17px] leading-relaxed text-muted">
+            Meshble is a headless, schema-driven ERP framework in Rust. Define a model, get a typed REST API and a UI
+            for free.
+          </p>
+          <div class="mt-8 flex flex-wrap items-center gap-3">
+            <a href="https://github.com/vpescete/msh_framework" target="_blank" rel="noopener"
+              class="btn-primary inline-flex h-11 items-center gap-2 rounded-md bg-accent px-5 font-semibold text-accentfg hover:bg-accenthover">
+              Get started
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14" />
+                <path d="m13 6 6 6-6 6" />
+              </svg>
+            </a>
+            <a href="#flow"
+              class="inline-flex h-11 items-center rounded-md border border-border bg-surface px-5 font-medium text-text hover:border-accent/40">
+              How it works
+            </a>
+          </div>
+        </div>
+
+        <!-- Real request/response, not fake app chrome. -->
+        <div class="reveal rounded-lg border border-border bg-surface shadow-[0_24px_80px_-24px_rgba(3,6,9,0.9)]">
+          <div class="flex items-center justify-between border-b border-border px-4 py-2.5">
+            <span class="font-mono text-[11px] text-muted">create + confirm a sales order</span>
+            <span class="font-mono text-[11px] text-success">200 OK</span>
+          </div>
+          <pre
+            class="code overflow-x-auto px-4 py-4 text-text"><span class="tok-com"># one secured call: ACL, record rules, computes, sequence</span>
+<span class="tok-fn">curl</span> -X POST $MESHBLE/api/<span class="tok-str">sale.order</span> \
+  -H <span class="tok-str">"authorization: Bearer $TOKEN"</span> \
+  -d <span class="tok-str">'{ "partner_id": 42, "currency_id": 1,
+        "line_ids": [{ "product_id": 7,
+          "product_uom_qty": <span class="tok-num">2</span>, "price_unit": "100" }] }'</span>
+
+<span class="tok-com"># =></span> { <span class="tok-key">"id"</span>: <span class="tok-num">128</span> }
+
+<span class="tok-fn">curl</span> -X POST $MESHBLE/api/sale.order/<span class="tok-num">128</span>/action/<span class="tok-str">confirm</span>
+
+<span class="tok-com"># =></span> { <span class="tok-key">"state"</span>: <span class="tok-str">"sale"</span>, <span class="tok-key">"name"</span>: <span class="tok-str">"SO/00001"</span>,
+<span class="tok-com">#      </span> <span class="tok-key">"amount_total"</span>: <span class="tok-str">"244.00"</span> }</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────── Tech strip (logo-only, real marks) ───────────── -->
+    <section class="border-y border-border bg-surface/40">
+      <div
+        class="mx-auto flex max-w-content flex-col items-center gap-5 px-5 py-8 sm:px-8 md:flex-row md:justify-between">
+        <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-muted">Built on a boring, fast stack</span>
+        <div class="flex flex-wrap items-center justify-center gap-x-9 gap-y-4">
+          <img class="logo-img" src="https://cdn.simpleicons.org/rust/8B949E" alt="Rust" />
+          <img class="logo-img" src="https://cdn.simpleicons.org/postgresql/8B949E" alt="PostgreSQL" />
+          <img class="logo-img" src="https://cdn.simpleicons.org/react/8B949E" alt="React" />
+          <img class="logo-img" src="https://cdn.simpleicons.org/typescript/8B949E" alt="TypeScript" />
+          <img class="logo-img" src="https://cdn.simpleicons.org/tailwindcss/8B949E" alt="Tailwind CSS" />
+          <img class="logo-img" src="https://cdn.simpleicons.org/openapiinitiative/8B949E" alt="OpenAPI" />
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────── Thesis (statement + honest stats, not 3 equal cards) ───────────── -->
+    <section id="thesis" class="mx-auto max-w-content px-5 py-24 sm:px-8">
+      <div class="reveal max-w-3xl">
+        <h2 class="font-display text-3xl font-semibold leading-tight text-text sm:text-4xl">
+          The business chain, on a foundation you can inspect.
+        </h2>
+        <p class="mt-5 text-[17px] leading-relaxed text-muted">
+          One model definition is the single source of truth. From it Meshble generates the database schema, a typed
+          REST API, an OpenAPI spec and an agnostic UI contract — no hand-written endpoints, no drift, no frontend
+          welded to the backend. The whole chain (sales, purchase, inventory, accounting) sits on an inspectable
+          metamodel compiled at build time, with secure CRUD that runs in one place.
+        </p>
+      </div>
+
+      <dl class="reveal mt-14 grid grid-cols-2 gap-x-8 gap-y-10 border-t border-border pt-10 md:grid-cols-4">
+        <div>
+          <dt class="font-display text-3xl font-semibold tnum text-text">Compile-time</dt>
+          <dd class="mt-1.5 text-[14px] text-muted">metamodel resolved at build time, not synthesized at runtime</dd>
+        </div>
+        <div>
+          <dt class="font-display text-3xl font-semibold text-text">One path</dt>
+          <dd class="mt-1.5 text-[14px] text-muted">ACL, record rules, multi-company on every write</dd>
+        </div>
+        <div>
+          <dt class="font-display text-3xl font-semibold text-text">Double-entry</dt>
+          <dd class="mt-1.5 text-[14px] text-muted">balanced postings, enforced in-transaction</dd>
+        </div>
+        <div>
+          <dt class="font-display text-3xl font-semibold text-text">Headless</dt>
+          <dd class="mt-1.5 text-[14px] text-muted">REST + OpenAPI; bring any frontend</dd>
+        </div>
+      </dl>
+    </section>
+
+    <!-- ───────────── Capabilities (bento with real variation + rhythm) ───────────── -->
+    <section id="features" class="mx-auto max-w-content px-5 pb-24 sm:px-8">
+      <div class="reveal mb-10 max-w-2xl">
+        <h2 class="font-display text-3xl font-semibold text-text sm:text-4xl">Batteries, not scaffolding.</h2>
+        <p class="mt-3 text-[15px] leading-relaxed text-muted">The primitives an ERP actually needs, built once into the
+          framework and reused by every module.</p>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-3">
+        <!-- wide feature cell with code -->
+        <article class="reveal rounded-lg border border-border bg-surface p-6 lg:col-span-2">
+          <h3 class="font-display text-xl font-semibold text-text">Every model is a contract</h3>
+          <p class="mt-2 max-w-xl text-[15px] leading-relaxed text-muted">
+            Declare a struct; the macro emits an inspectable descriptor. Migration, a REST resource, an OpenAPI schema
+            and a UI contract
+            are derived from it. No hand-written endpoints, no drift between API and UI.
+          </p>
+          <pre class="code mt-5 overflow-x-auto rounded-md border border-border bg-bg px-4 py-3.5 text-text"><span class="tok-key">#[model(name = "sale.order")]</span>
+<span class="tok-key">struct</span> SaleOrder {
+  <span class="tok-key">#[field(required)]</span> partner_id: <span class="tok-fn">Many2one</span>,
+  <span class="tok-key">#[field(compute = "sum", store)]</span> amount_total: <span class="tok-fn">Decimal</span>,
+  line_ids: <span class="tok-fn">One2many</span>,
+}  <span class="tok-com">// => GET/POST /api/sale.order, /view, /action/*, /report/*</span></pre>
+        </article>
+
+        <!-- tall accent cell, gradient background variation -->
+        <article
+          class="reveal flex flex-col justify-between rounded-lg border border-accent/25 bg-[linear-gradient(160deg,rgba(34,184,207,0.10),rgba(20,24,29,0.4))] p-6">
+          <div>
+            <h3 class="font-display text-xl font-semibold text-text">Secure by default</h3>
+            <p class="mt-2 text-[15px] leading-relaxed text-muted">
+              Access control, record rules and multi-company isolation are enforced on every secured read and write. A
+              posted journal
+              entry freezes; a salesperson cannot touch another company's ledger.
+            </p>
+          </div>
+          <div class="mt-6 font-mono text-[12px] text-muted">
+            <div class="flex items-center justify-between border-t border-border/60 py-1.5"><span>ACL + record
+                rules</span><span class="text-success">on</span></div>
+            <div class="flex items-center justify-between border-t border-border/60 py-1.5">
+              <span>multi-company</span><span class="text-success">on</span></div>
+            <div class="flex items-center justify-between border-t border-border/60 py-1.5"><span>field-level
+                groups</span><span class="text-success">on</span></div>
+          </div>
+        </article>
+
+        <!-- three balanced text cells, but as a divided row, not floating cards -->
+        <article class="reveal rounded-lg border border-border bg-surface p-6">
+          <h3 class="font-display text-lg font-semibold text-text">Double-entry accounting</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted">account.move with a balanced-entry constraint,
+            per-journal numbering, and invoices posted straight from a sales order.</p>
+        </article>
+        <article class="reveal rounded-lg border border-border bg-surface p-6">
+          <h3 class="font-display text-lg font-semibold text-text">Wizards &amp; reports</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted">Transient models with a GC cron, and an HTML-first
+            report engine with a PDF rasterization seam behind a trait.</p>
+        </article>
+        <article class="reveal rounded-lg border border-border bg-surface p-6">
+          <h3 class="font-display text-lg font-semibold text-text">Mail, cron, attachments</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted">A chatter thread per record, scheduled jobs, and
+            content-addressed blob storage, all opt-in with one line.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ───────────── How it works (flow, verb-noun labels, not Stage 1/2/3) ───────────── -->
+    <section id="flow" class="border-y border-border bg-surface/30">
+      <div class="mx-auto max-w-content px-5 py-24 sm:px-8">
+        <h2 class="reveal font-display text-3xl font-semibold text-text sm:text-4xl">From struct to running ERP.</h2>
+        <div class="mt-12 grid gap-px overflow-hidden rounded-lg border border-border bg-border md:grid-cols-3">
+          <div class="reveal bg-surface p-6">
+            <div class="font-mono text-[12px] text-accent">define</div>
+            <h3 class="mt-2 font-display text-lg font-semibold text-text">Write the model</h3>
+            <p class="mt-2 text-[14px] leading-relaxed text-muted">A Rust struct with field attributes. Compile-time
+              registries pick it up; the metamodel is data you can inspect, not a class synthesized at runtime.</p>
+          </div>
+          <div class="reveal bg-surface p-6">
+            <div class="font-mono text-[12px] text-accent">serve</div>
+            <h3 class="mt-2 font-display text-lg font-semibold text-text">Migrate &amp; serve</h3>
+            <p class="mt-2 text-[14px] leading-relaxed text-muted">One CLI migrates in dependency order and serves the
+              secured REST API, the OpenAPI spec and the per-model UI contract.</p>
+          </div>
+          <div class="reveal bg-surface p-6">
+            <div class="font-mono text-[12px] text-accent">use</div>
+            <h3 class="mt-2 font-display text-lg font-semibold text-text">Build any UI</h3>
+            <p class="mt-2 text-[14px] leading-relaxed text-muted">The bundled React app renders lists, forms, wizards
+              and reports straight from the contract. Or wire your own client to the same API.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────── CTA band ───────────── -->
+    <section class="relative overflow-hidden">
+      <div class="pointer-events-none absolute inset-0 hero-aura"></div>
+      <div class="relative mx-auto max-w-content px-5 py-24 text-center sm:px-8">
+        <h2 class="reveal mx-auto max-w-2xl font-display text-3xl font-semibold leading-tight text-text sm:text-4xl">
+          An ERP you can actually integrate.
+        </h2>
+        <p class="reveal mx-auto mt-4 max-w-xl text-[16px] leading-relaxed text-muted">
+          Clone the repo, run <span class="font-mono text-text">meshble migrate &amp;&amp; meshble serve</span>, and
+          POST your first record.
+        </p>
+        <div class="reveal mt-8 flex flex-wrap items-center justify-center gap-3">
+          <a href="https://github.com/vpescete/msh_framework" target="_blank" rel="noopener"
+            class="btn-primary inline-flex h-11 items-center gap-2 rounded-md bg-accent px-6 font-semibold text-accentfg hover:bg-accenthover">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path
+                d="M12 .5a12 12 0 0 0-3.79 23.4c.6.11.82-.26.82-.58v-2.2c-3.34.73-4.04-1.6-4.04-1.6-.55-1.4-1.34-1.77-1.34-1.77-1.09-.74.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.3 3.5 1 .1-.78.42-1.3.76-1.6-2.67-.3-5.47-1.34-5.47-5.95 0-1.31.47-2.39 1.24-3.23-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.92 1.23 3.23 0 4.62-2.8 5.64-5.48 5.94.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z" />
+            </svg>
+            Get started
+          </a>
+          <a href="./docs/en/README.html"
+            class="inline-flex h-11 items-center rounded-md border border-border bg-surface px-6 font-medium text-text hover:border-accent/40">
+            Read the docs
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ───────────── Footer ───────────── -->
+  <footer class="border-t border-border">
+    <div
+      class="mx-auto flex max-w-content flex-col items-center justify-between gap-4 px-5 py-8 text-[13px] text-muted sm:flex-row sm:px-8">
+      <div class="flex items-center gap-2">
+        <span class="h-1.5 w-1.5 rounded-full bg-success"></span>
+        <span class="font-mono">meshble · headless ERP framework</span>
+      </div>
+      <div class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:justify-end">
+        <a class="hover:text-text" href="./docs/en/README.html">Docs</a>
+        <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank"
+          rel="noopener">GitHub</a>
+        <a class="hover:text-text" href="./it/">Italiano</a>
+        <a class="hover:text-text" href="#top">Back to top</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Quiet scroll-reveal. Honors reduced motion (elements are simply visible).
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const items = document.querySelectorAll('.reveal')
+    if (reduce || !('IntersectionObserver' in window)) {
+      items.forEach((el) => el.classList.add('in'))
+    } else {
+      const io = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => {
+            if (e.isIntersecting) {
+              e.target.classList.add('in')
+              io.unobserve(e.target)
+            }
+          })
+        },
+        { threshold: 0.18 },
+      )
+      items.forEach((el) => io.observe(el))
+    }
+  </script>
+</body>
+
+</html>

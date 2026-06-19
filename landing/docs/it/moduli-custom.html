@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="it" class="scroll-smooth">
+<head>
+  <title>Meshble · Moduli custom · IT</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: {
+      bg: '#0D1014', surface: '#14181D', surface2: '#1B2026', border: '#272D34',
+      text: '#E5E9ED', muted: '#8B949E', accent: '#22B8CF', accentfg: '#06181C',
+      accenthover: '#46C8DB', success: '#3DD68C', violet: '#7B8CFF',
+    }, fontFamily: {
+      display: ['Space Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      body: ['Hanken Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+    } } } }
+  </script>
+  <style>
+    :root { color-scheme: dark; }
+    body { background:#0d1014; color:#e5e9ed; font-family:'Hanken Grotesk',ui-sans-serif,system-ui,sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+    .scanline { position:relative; }
+    .scanline::before { content:''; position:absolute; left:0; top:.15em; bottom:.15em; width:2px; border-radius:999px; background:#22b8cf; }
+    .pulse { animation:pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    @media (prefers-reduced-motion: reduce){ .pulse{animation:none} }
+    .markdown { font-size:15.5px; line-height:1.7; color:#c8cfd6; }
+    .markdown > :first-child { margin-top:0; }
+    .markdown h1,.markdown h2,.markdown h3,.markdown h4 { font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif; color:#e5e9ed; font-weight:600; letter-spacing:-.01em; line-height:1.25; }
+    .markdown h1 { font-size:2rem; margin:0 0 .75rem; letter-spacing:-.02em; }
+    .markdown h2 { font-size:1.5rem; margin:2.6rem 0 1rem; padding-top:1.4rem; border-top:1px solid #272d34; }
+    .markdown h3 { font-size:1.18rem; margin:2rem 0 .7rem; }
+    .markdown h4 { font-size:1rem; margin:1.6rem 0 .5rem; color:#cdd4db; }
+    .markdown p { margin:0 0 1.05rem; }
+    .markdown a { color:#46c8db; text-decoration:none; border-bottom:1px solid rgba(70,200,219,.3); }
+    .markdown a:hover { color:#22b8cf; border-bottom-color:#22b8cf; }
+    .markdown strong { color:#e5e9ed; font-weight:600; }
+    .markdown ul,.markdown ol { margin:0 0 1.05rem; padding-left:1.35rem; }
+    .markdown li { margin:.3rem 0; }
+    .markdown li::marker { color:#5b636c; }
+    .markdown code { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:.86em; background:#1b2026; border:1px solid #272d34; border-radius:5px; padding:.1em .38em; color:#cdd4db; }
+    .markdown pre { background:#0f1216; border:1px solid #272d34; border-radius:8px; padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.2rem; }
+    .markdown pre code { font-size:12.8px; line-height:1.65; background:none; border:0; padding:0; color:#d7dde3; }
+    .markdown blockquote { margin:0 0 1.2rem; padding:.2rem 0 .2rem 1rem; border-left:2px solid #22b8cf; color:#9aa3ac; }
+    .markdown hr { border:0; border-top:1px solid #272d34; margin:2rem 0; }
+    .markdown table { width:100%; border-collapse:collapse; margin:0 0 1.3rem; font-size:14px; display:block; overflow-x:auto; }
+    .markdown th,.markdown td { border:1px solid #272d34; padding:.5rem .7rem; text-align:left; }
+    .markdown th { background:#1b2026; color:#e5e9ed; font-weight:600; }
+    .markdown td code { white-space:nowrap; }
+    a,button { transition:color .16s ease,background-color .16s ease,border-color .16s ease; }
+    .docnav::-webkit-scrollbar { height:6px; width:6px; }
+    .docnav::-webkit-scrollbar-thumb { background:#272d34; border-radius:999px; }
+  </style>
+</head>
+<body class="font-body antialiased">
+  <header class="sticky top-0 z-40 border-b border-border/80 bg-bg/85 backdrop-blur">
+    <div class="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-6 px-5 sm:px-8">
+      <a href="../../it/index.html" class="flex items-center gap-2">
+        <span class="pulse h-2 w-2 rounded-full bg-accent"></span>
+        <span class="font-display text-[17px] font-semibold text-text">meshble</span>
+        <span class="font-mono text-[12px] text-muted">/ docs</span>
+      </a>
+      <div class="flex items-center gap-5 text-[14px] text-muted">
+        <a class="hover:text-text" href="../../it/index.html">← Landing</a>
+        <div class="flex items-center gap-1 font-mono text-[12px]">
+          <span class="rounded bg-surface px-1.5 py-0.5 text-text">IT</span>
+          <a class="rounded px-1.5 py-0.5 hover:text-text" href="../en/moduli-custom.html">EN</a>
+        </div>
+        <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </header>
+  <div class="mx-auto max-w-[1180px] px-5 sm:px-8 lg:grid lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10">
+    <aside class="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:overflow-y-auto py-6 lg:py-9">
+      <div class="mb-3 hidden font-mono text-[11px] uppercase tracking-[0.16em] text-muted lg:block">Documentazione</div>
+      <nav class="docnav flex gap-2 overflow-x-auto pb-2 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:pb-0">
+        <a href="README.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Panoramica</a>
+        <a href="architettura.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Architettura</a>
+        <a href="installazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Installazione</a>
+        <a href="configurazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Configurazione</a>
+        <a href="moduli.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Moduli</a>
+        <a href="moduli-custom.html" class="scanline shrink-0 whitespace-nowrap rounded-md bg-surface px-3 py-1.5 text-[14px] text-text lg:whitespace-normal">Moduli custom</a>
+        <a href="api.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">API e contratto-UI</a>
+        <a href="sicurezza.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Sicurezza</a>
+      </nav>
+    </aside>
+    <main class="min-w-0 py-8 lg:py-9">
+      <article class="markdown max-w-[760px]">
+<h1 id="moduli-custom">Moduli custom</h1>
+<p>Questa pagina è la guida completa alla scrittura di un modulo custom per Meshble. Un modulo è un crate Rust che dichiara modelli, ACL, record rule, viste, compute, vincoli, azioni, report e wizard tramite macro e registri a compile time: tutto si auto-registra nel catalogo via <code>inventory</code>, e il binario che lo collega (<code>apps/meshble-cli</code>) lo raccoglie e lo serve senza cablaggi manuali. Si parte dal crate, si arriva a un'API REST generata e a un test di integrazione. Per il quadro generale vedi <a href="architettura.html">architettura.md</a> e <a href="moduli.html">moduli.md</a>; per installazione e configurazione <a href="installazione.html">installazione.md</a> e <a href="configurazione.html">configurazione.md</a>; per la sicurezza <a href="sicurezza.html">sicurezza.md</a>; per le rotte <a href="api.html">api.md</a>.</p>
+<hr />
+<h2 id="1-setup-del-crate">1. Setup del crate</h2>
+<p>Un modulo vive in <code>modules/NAME/</code> ed è un normale crate Rust. La sua unica dipendenza obbligatoria è la facade <code>meshble</code>, più ogni modulo da cui dipende (per riutilizzarne i modelli come target di relazione). Esempio reale, <code>modules/stock/Cargo.toml</code>:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode toml"><code class="sourceCode toml"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">[package]</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="dt">name</span> <span class="op">=</span> <span class="st">&quot;meshble-mod-stock&quot;</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="dt">description</span> <span class="op">=</span> <span class="st">&quot;Meshble stock module: inventory — locations, quants, pickings and moves&quot;</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="co"># MODULE version, independent of the framework (see docs/VERSIONING.md).</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="dt">version</span> <span class="op">=</span> <span class="st">&quot;1.0.0&quot;</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="dt">edition.workspace</span> <span class="op">=</span> <span class="cn">true</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="dt">license.workspace</span> <span class="op">=</span> <span class="cn">true</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="dt">repository.workspace</span> <span class="op">=</span> <span class="cn">true</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="kw">[dependencies]</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">workspace</span><span class="op"> =</span> <span class="cn">true</span><span class="op"> }</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Exact-quantity arithmetic in the quant/move math.</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="dt">rust_decimal</span> <span class="op">=</span> <span class="st">&quot;1&quot;</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="co"># Depends on base (company), sales (product.product), and mail (pickings carry a chatter thread).</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-base</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../base&quot;</span><span class="op">, </span><span class="dt">version</span><span class="op"> =</span> <span class="st">&quot;1.0.0&quot;</span><span class="op"> }</span></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-sales</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../sales&quot;</span><span class="op">, </span><span class="dt">version</span><span class="op"> =</span> <span class="st">&quot;1.0.0&quot;</span><span class="op"> }</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-mail</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../mail&quot;</span><span class="op">, </span><span class="dt">version</span><span class="op"> =</span> <span class="st">&quot;1.0.0&quot;</span><span class="op"> }</span></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a><span class="kw">[dev-dependencies]</span></span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-db</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">workspace</span><span class="op"> =</span> <span class="cn">true</span><span class="op"> }</span></span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-sales</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../sales&quot;</span><span class="op">, </span><span class="dt">version</span><span class="op"> =</span> <span class="st">&quot;1.0.0&quot;</span><span class="op"> }</span></span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a><span class="dt">tokio</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">version</span><span class="op"> =</span> <span class="st">&quot;1&quot;</span><span class="op">, </span><span class="dt">features</span><span class="op"> =</span> <span class="op">[</span><span class="st">&quot;macros&quot;</span><span class="op">,</span> <span class="st">&quot;rt-multi-thread&quot;</span><span class="op">] }</span></span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a><span class="dt">serde_json</span> <span class="op">=</span> <span class="st">&quot;1&quot;</span></span></code></pre></div>
+<p>Note importanti:</p>
+<ul>
+<li>Il <code>version</code> del package è la <strong>versione del modulo</strong>, indipendente da quella del framework (SemVer per modulo). La versione del framework è condivisa da tutti i crate core (<code>0.1.0</code> nel workspace).</li>
+<li>Le dipendenze Cargo verso altri moduli (<code>meshble-mod-base</code>, ...) devono rispecchiare il <code>depends</code> del manifest del modulo. Allineare le due liste è intenzionale: una dipendenza dichiarata nel manifest ma non collegata come crate Cargo non sarebbe presente in <code>inventory</code>.</li>
+<li><code>rust_decimal</code> serve solo se il modulo fa aritmetica esatta (denaro, quantità); <code>serde_json</code> solo se ha report o codice che legge il record JSON.</li>
+</ul>
+<h3 id="collegare-il-crate-al-binario">Collegare il crate al binario</h3>
+<p>Il modulo si auto-registra solo se il suo crate viene <strong>linkato</strong> nel binario finale. Si fa in due passi in <code>apps/meshble-cli</code>.</p>
+<p>Prima si aggiunge la dipendenza in <code>apps/meshble-cli/Cargo.toml</code>:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode toml"><code class="sourceCode toml"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Linked so their models/ACLs/rules self-register into the catalog (inventory).</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-base</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../../modules/base&quot;</span><span class="op"> }</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-mail</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../../modules/mail&quot;</span><span class="op"> }</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-sales</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../../modules/sales&quot;</span><span class="op"> }</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-account</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../../modules/account&quot;</span><span class="op"> }</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-stock</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../../modules/stock&quot;</span><span class="op"> }</span></span></code></pre></div>
+<p>Poi si referenzia un simbolo del crate dentro <code>link_modules()</code> in <code>apps/meshble-cli/src/main.rs</code>, così il linker non scarta il crate (le sue registrazioni <code>inventory</code> sarebbero altrimenti assenti):</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co">/// Forces the module crates to link so their `inventory` registrations are present in this binary.</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> link_modules() <span class="op">{</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> _ <span class="op">=</span> (</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_base::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_mail::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_sales::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_account::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_stock::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p><code>run()</code> chiama <code>link_modules()</code> come prima riga, prima di qualunque comando. Senza il riferimento al <code>MANIFEST</code>, modelli, ACL e rule del modulo non comparirebbero nel catalogo.</p>
+<h3 id="il-prelude">Il prelude</h3>
+<p>Ogni <code>lib.rs</code> di modulo inizia con un'unica import:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">meshble::prelude::</span><span class="op">*;</span></span></code></pre></div>
+<p>Il prelude (<code>crates/meshble/src/lib.rs</code>) ri-esporta tutto il necessario: i tipi del metamodello (<code>FieldDef</code>, <code>FieldKind</code>, <code>Model</code>, <code>ModelDescriptor</code>, <code>ResolvedModel</code>), il manifest (<code>ModuleManifest</code>, <code>ModuleDep</code>), la sicurezza (<code>Acl</code>, <code>Ctx</code>, <code>Operation</code>, <code>RecordRule</code>, <code>RuleDomain</code>), il dominio (<code>Domain</code>, <code>Value</code>, <code>Operator</code>, <code>Condition</code>, ...), compute (<code>ComputeInput</code>, <code>ComputeFn</code>, <code>Children</code>), vincoli (<code>ConstraintFn</code>), azioni (<code>ActionInput</code>, <code>ActionOutcome</code>, <code>ActionFn</code>), report (<code>ReportFn</code>), wizard (<code>WizardContext</code>, <code>WizardDefaultGet</code>), viste (<code>FormView</code>, <code>FieldGroup</code>, <code>FieldSlot</code>, <code>NotebookPage</code>), la costante <code>FRAMEWORK_VERSION</code>, le macro <code>extend</code>/<code>model</code>, e da <code>meshble_schema</code> <code>to_ddl</code>, <code>to_ui_contract</code>, <code>openapi</code>, <code>FieldRule</code>, <code>UiRule</code>. Le macro <code>register_*!</code> sono macro a livello di crate (<code>meshble::register_acls!</code>, ...), richiamate con il prefisso <code>meshble::</code>.</p>
+<hr />
+<h2 id="2-dichiarare-un-modello">2. Dichiarare un modello</h2>
+<p>Un modello è una <code>struct</code> annotata con <code>#[model(name = "...", table = "...")]</code>. La macro <code>#[model]</code> (<code>crates/meshble-macros/src/lib.rs</code>) <strong>sostituisce</strong> la struct con un tipo marker (<code>pub struct StockLocation;</code>), genera <code>impl Model</code> con un <code>ModelDescriptor</code> statico, e auto-registra il modello nel catalogo via <code>inventory::submit!</code>. I "tipi" dei campi (<code>Text</code>, <code>Many2one</code>, ...) sono parole chiave del DSL mappate su <code>FieldKind</code>, non veri tipi Rust.</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>model<span class="at">(</span>name <span class="op">=</span> <span class="st">&quot;stock.location&quot;</span><span class="op">,</span> table <span class="op">=</span> <span class="st">&quot;stock_location&quot;</span><span class="at">)]</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> StockLocation <span class="op">{</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Name&quot;</span><span class="op">,</span> required<span class="at">)]</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    name<span class="op">:</span> Text<span class="op">,</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Type&quot;</span><span class="op">,</span> required<span class="op">,</span> <span class="kw">default</span> <span class="op">=</span> <span class="st">&quot;internal&quot;</span><span class="op">,</span> selection <span class="op">=</span> <span class="st">&quot;internal:Internal,supplier:Vendor,customer:Customer,inventory:Inventory Loss,transit:Transit&quot;</span><span class="at">)]</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>    usage<span class="op">:</span> Selection<span class="op">,</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Parent Location&quot;</span><span class="op">,</span> target <span class="op">=</span> <span class="st">&quot;stock.location&quot;</span><span class="at">)]</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>    parent_id<span class="op">:</span> Many2one<span class="op">,</span></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Company&quot;</span><span class="op">,</span> target <span class="op">=</span> <span class="st">&quot;res.company&quot;</span><span class="at">)]</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>    company_id<span class="op">:</span> Many2one<span class="op">,</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Active&quot;</span><span class="op">,</span> <span class="kw">default</span> <span class="op">=</span> <span class="st">&quot;true&quot;</span><span class="at">)]</span></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>    active<span class="op">:</span> Bool<span class="op">,</span></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Argomenti di <code>#[model(...)]</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Argomento</th>
+<th>Obbligatorio</th>
+<th>Significato</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>sì</td>
+<td>Nome logico del modello (es. <code>"stock.location"</code>).</td>
+</tr>
+<tr>
+<td><code>table</code></td>
+<td>no</td>
+<td>Tabella SQL. Se omesso, deriva da <code>name</code> sostituendo <code>.</code> con <code>_</code>.</td>
+</tr>
+<tr>
+<td><code>inherits</code> + <code>via</code></td>
+<td>no (insieme)</td>
+<td>Inheritance per delegazione: il modello espone i campi scalari memorizzati del genitore attraverso la FK <code>via</code>. Vanno dichiarati entrambi o nessuno. Emette una <code>InheritsRegistration</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="tipi-di-campo-fieldkind">Tipi di campo (FieldKind)</h3>
+<p>Il "tipo" della struct seleziona la variante <code>FieldKind</code> (<code>crates/meshble-core/src/metamodel.rs</code>). Gli alias riconosciuti dalla macro sono esattamente questi; un alias diverso è un errore di compilazione.</p>
+<table>
+<thead>
+<tr>
+<th>Alias DSL</th>
+<th>FieldKind</th>
+<th>Note / attributi richiesti</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Text</code></td>
+<td><code>Text</code></td>
+<td>Testo semplice.</td>
+</tr>
+<tr>
+<td><code>Html</code></td>
+<td><code>Html</code></td>
+<td>Rich text (<code>text</code>); sanitizzato a ogni scrittura (allowlist), widget <code>html</code>.</td>
+</tr>
+<tr>
+<td><code>Image</code></td>
+<td><code>Image</code></td>
+<td>FK <code>bigint</code> verso <code>ir.attachment</code> (i byte stanno nel blob store). Letto/scritto come id dell'attachment.</td>
+</tr>
+<tr>
+<td><code>Integer</code></td>
+<td><code>Integer</code></td>
+<td>Intero.</td>
+</tr>
+<tr>
+<td><code>Float</code></td>
+<td><code>Float</code></td>
+<td>Virgola mobile non esatta (<code>double precision</code>): quantità, pesi, fattori, tassi.</td>
+</tr>
+<tr>
+<td><code>Decimal</code></td>
+<td><code>Decimal { currency_field }</code></td>
+<td>Decimale esatto (<code>NUMERIC</code>). <code>currency = "campo"</code> lo rende monetario (widget <code>monetary</code>).</td>
+</tr>
+<tr>
+<td><code>Bool</code></td>
+<td><code>Bool</code></td>
+<td>Booleano.</td>
+</tr>
+<tr>
+<td><code>Date</code></td>
+<td><code>Date</code></td>
+<td>Data senza ora (<code>date</code>).</td>
+</tr>
+<tr>
+<td><code>Datetime</code></td>
+<td><code>Datetime</code></td>
+<td>Timestamp con timezone (<code>timestamptz</code>).</td>
+</tr>
+<tr>
+<td><code>Selection</code></td>
+<td><code>Selection(&amp;[(k, label)])</code></td>
+<td>Richiede <code>selection = "k:Label,..."</code>.</td>
+</tr>
+<tr>
+<td><code>Many2one</code></td>
+<td><code>Many2one { target }</code></td>
+<td>Relazione N→1, genera una colonna FK. Richiede <code>target = "model.name"</code>.</td>
+</tr>
+<tr>
+<td><code>One2many</code></td>
+<td><code>One2many { target, inverse }</code></td>
+<td>Relazione 1→N, nessuna colonna (vive sull'inverso). Richiede <code>target</code> e <code>inverse</code>.</td>
+</tr>
+<tr>
+<td><code>Many2many</code></td>
+<td><code>Many2many { target, relation, column, target_column }</code></td>
+<td>Relazione N↔︎N via tabella di giunzione. Nessuna colonna sul modello. Richiede tutti e quattro.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="riferimento-completo-degli-attributi-field">Riferimento completo degli attributi <code>#[field(...)]</code></h3>
+<p>Tutti gli attributi sono parsati in <code>build_field</code> (e nelle funzioni di submission ausiliarie) di <code>crates/meshble-macros/src/lib.rs</code>. Riempiono il <code>FieldDef</code> (<code>metamodel.rs</code>) oppure emettono una registrazione laterale.</p>
+<table>
+<thead>
+<tr>
+<th>Attributo</th>
+<th>Forma</th>
+<th>Effetto</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>label</code></td>
+<td><code>label = "..."</code></td>
+<td>Etichetta UI. Default: il nome del campo.</td>
+</tr>
+<tr>
+<td><code>required</code></td>
+<td>flag</td>
+<td><code>FieldDef.required = true</code> (NOT NULL).</td>
+</tr>
+<tr>
+<td><code>default</code></td>
+<td><code>default = "..."</code></td>
+<td>Valore di default come stringa, parsato per tipo, applicato in create quando il campo è non impostato.</td>
+</tr>
+<tr>
+<td><code>selection</code></td>
+<td><code>selection = "k:Label,..."</code></td>
+<td>Coppie chiave:etichetta per un campo <code>Selection</code>.</td>
+</tr>
+<tr>
+<td><code>target</code></td>
+<td><code>target = "model.name"</code></td>
+<td>Modello bersaglio di <code>Many2one</code> / <code>One2many</code> / <code>Many2many</code>.</td>
+</tr>
+<tr>
+<td><code>inverse</code></td>
+<td><code>inverse = "campo"</code></td>
+<td>Campo inverso di un <code>One2many</code> (il <code>Many2one</code> sul figlio).</td>
+</tr>
+<tr>
+<td><code>relation</code> / <code>column</code> / <code>target_column</code></td>
+<td>stringhe</td>
+<td>Tabella di giunzione e le due colonne di un <code>Many2many</code> (<code>column</code> → questo modello, <code>target_column</code> → il target).</td>
+</tr>
+<tr>
+<td><code>related</code></td>
+<td><code>related = "path"</code></td>
+<td>Campo <code>related</code>: specchio non memorizzato e in sola lettura del valore raggiunto seguendo un percorso relazionale (es. <code>order_id.partner_id</code>). Emette una <code>RelatedRegistration</code>; non genera colonna (<code>stored = false</code>).</td>
+</tr>
+<tr>
+<td><code>compute</code></td>
+<td><code>compute = "nome_fn"</code></td>
+<td>Nome della funzione di compute registrata per il campo.</td>
+</tr>
+<tr>
+<td><code>depends</code></td>
+<td><code>depends = "a,b,line_ids.x"</code></td>
+<td>Dipendenze del compute (CSV). Verificate da <code>validate_depends</code>: un campo dipendente inesistente è un errore. Un compute on-read (non memorizzato) non può dipendere da un percorso relazionale dotted.</td>
+</tr>
+<tr>
+<td><code>store</code></td>
+<td>flag</td>
+<td>Memorizza un campo computato (colonna materializzata in scrittura). Senza <code>store</code>, un campo con <code>compute</code> è on-read (nessuna colonna, ricalcolato a ogni lettura).</td>
+</tr>
+<tr>
+<td><code>tracked</code></td>
+<td>flag</td>
+<td>Traccia le modifiche del campo nel chatter (richiede modello mailed). Emette una <code>TrackedFieldRegistration</code>.</td>
+</tr>
+<tr>
+<td><code>groups</code></td>
+<td><code>groups = "a,b"</code></td>
+<td>Sicurezza di campo (D6): lettura E scrittura del campo richiedono l'appartenenza ad almeno uno dei gruppi. Emette una <code>FieldGroupRegistration</code>. Il superuser bypassa.</td>
+</tr>
+<tr>
+<td><code>currency</code></td>
+<td><code>currency = "campo"</code></td>
+<td>Solo per <code>Decimal</code>: campo valuta collegato (widget <code>monetary</code>).</td>
+</tr>
+<tr>
+<td><code>unique</code></td>
+<td>flag</td>
+<td>Genera un vincolo <code>UNIQUE</code> su colonna singola nel DDL.</td>
+</tr>
+<tr>
+<td><code>check</code></td>
+<td><code>check = "espr SQL"</code></td>
+<td>Espressione <code>CHECK</code> SQL grezza (fidata, a compile time) → vincolo <code>CHECK</code> di colonna.</td>
+</tr>
+</tbody>
+</table>
+<p>Regola di memorizzazione (<code>stored</code>) calcolata dalla macro:</p>
+<ul>
+<li><code>One2many</code>, <code>Many2many</code> e i campi con <code>related</code> non sono mai memorizzati (nessuna colonna).</li>
+<li>Un campo con <code>compute</code> è memorizzato solo se ha anche <code>store</code>.</li>
+<li>Tutti gli altri sono memorizzati.</li>
+</ul>
+<p>Esempi reali (da <code>modules/sales/src/lib.rs</code> e <code>modules/base/src/lib.rs</code>):</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Decimale monetario, aggregato esatto sui figli, memorizzato:</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Total&quot;</span><span class="op">,</span> compute <span class="op">=</span> <span class="st">&quot;compute_amount&quot;</span><span class="op">,</span> depends <span class="op">=</span> <span class="st">&quot;line_ids.price_total&quot;</span><span class="op">,</span> currency <span class="op">=</span> <span class="st">&quot;currency_id&quot;</span><span class="op">,</span> store<span class="at">)]</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>amount_total<span class="op">:</span> Decimal<span class="op">,</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="co">// Campo related (specchio read-only): il cliente dell&#39;ordine, da order_id.partner_id.</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Customer&quot;</span><span class="op">,</span> target <span class="op">=</span> <span class="st">&quot;res.partner&quot;</span><span class="op">,</span> related <span class="op">=</span> <span class="st">&quot;order_id.partner_id&quot;</span><span class="at">)]</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>order_partner_id<span class="op">:</span> Many2one<span class="op">,</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="co">// Sicurezza di campo: il costo è manager-only (lettura e scrittura).</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Cost&quot;</span><span class="op">,</span> <span class="kw">default</span> <span class="op">=</span> <span class="st">&quot;0&quot;</span><span class="op">,</span> groups <span class="op">=</span> <span class="st">&quot;sales.manager&quot;</span><span class="at">)]</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>purchase_price<span class="op">:</span> Decimal<span class="op">,</span></span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a><span class="co">// unique + check su res.currency:</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Code&quot;</span><span class="op">,</span> required<span class="op">,</span> unique<span class="at">)]</span></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>code<span class="op">:</span> Text<span class="op">,</span></span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Decimal Places&quot;</span><span class="op">,</span> <span class="kw">default</span> <span class="op">=</span> <span class="st">&quot;2&quot;</span><span class="op">,</span> check <span class="op">=</span> <span class="st">&quot;decimal_places &gt;= 0&quot;</span><span class="at">)]</span></span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>decimal_places<span class="op">:</span> Integer<span class="op">,</span></span></code></pre></div>
+<h3 id="estendere-un-modello-con-extend">Estendere un modello con <code>#[extend]</code></h3>
+<p><code>#[extend("model.name")]</code> aggiunge campi a un modello definito altrove, senza toccarne la base. L'estensione si auto-registra come <code>FieldExtension</code> e viene fusa da <code>resolve_registered</code> con controllo di conflitti (un campo già presente è un errore). Dal modulo <code>sales</code>:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co">/// `sale_margin` extension: adds `margin` via `#[extend]`, WITHOUT touching the base.</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>extend<span class="at">(</span><span class="st">&quot;sale.order&quot;</span><span class="at">)]</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> SaleMargin <span class="op">{</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Margin&quot;</span><span class="op">,</span> compute <span class="op">=</span> <span class="st">&quot;compute_margin&quot;</span><span class="op">,</span> depends <span class="op">=</span> <span class="st">&quot;line_ids.margin&quot;</span><span class="op">,</span> currency <span class="op">=</span> <span class="st">&quot;currency_id&quot;</span><span class="op">,</span> store<span class="at">)]</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    margin<span class="op">:</span> Decimal<span class="op">,</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>I campi accettano lo stesso identico set di attributi <code>#[field(...)]</code> del <code>#[model]</code>. Questo è il meccanismo con cui, ad esempio, il modulo account può "adottare" <code>account.tax</code> (stesso nome, nessuna migrazione) aggiungendo campi.</p>
+<hr />
+<h2 id="3-i-registri">3. I registri</h2>
+<p>Tutti i registri sono macro a livello di crate richiamate al <strong>top level</strong> del modulo. Ognuna emette una <code>inventory::submit!</code> con una struct specifica.</p>
+<h3 id="register_module--il-manifest"><code>register_module!</code> — il manifest</h3>
+<p>Ogni modulo dichiara un <code>ModuleManifest</code> statico e lo registra. Da <code>modules/stock/src/lib.rs</code>:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> MANIFEST<span class="op">:</span> ModuleManifest <span class="op">=</span> ModuleManifest <span class="op">{</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>    name<span class="op">:</span> <span class="st">&quot;stock&quot;</span><span class="op">,</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>    version<span class="op">:</span> <span class="st">&quot;1.0.0&quot;</span><span class="op">,</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>    framework<span class="op">:</span> <span class="st">&quot;&gt;=0.1, &lt;0.2&quot;</span><span class="op">,</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>    depends<span class="op">:</span> <span class="op">&amp;</span>[</span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>        ModuleDep <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;base&quot;</span><span class="op">,</span> req<span class="op">:</span> <span class="st">&quot;^1.0&quot;</span> <span class="op">},</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>        ModuleDep <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;sales&quot;</span><span class="op">,</span> req<span class="op">:</span> <span class="st">&quot;^1.0&quot;</span> <span class="op">},</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>        ModuleDep <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;mail&quot;</span><span class="op">,</span> req<span class="op">:</span> <span class="st">&quot;^1.0&quot;</span> <span class="op">},</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>    ]<span class="op">,</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>    summary<span class="op">:</span> <span class="st">&quot;Inventory — locations, quants, pickings and moves&quot;</span><span class="op">,</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_module!</span>(MANIFEST)<span class="op">;</span></span></code></pre></div>
+<p><code>ModuleManifest</code> (<code>crates/meshble-core/src/manifest.rs</code>) ha i campi <code>name</code>, <code>version</code> (SemVer del modulo), <code>framework</code> (range di compatibilità con il framework, es. <code>"&gt;=0.1, &lt;0.2"</code>), <code>depends</code> (slice di <code>ModuleDep { name, req }</code> con range SemVer verificati) e <code>summary</code>. Il resolver (<code>resolve_module_set</code>) valida compatibilità framework, range delle dipendenze, assenza di duplicati, di auto-dipendenze e di cicli, e restituisce i moduli in ordine topologico.</p>
+<h3 id="register_acls--la-struct-acl"><code>register_acls!</code> — la struct <code>Acl</code></h3>
+<p>ACL a livello di modello (<code>crates/meshble-core/src/security.rs</code>). Una <code>&amp;'static [Acl]</code> registrata; il server le raccoglie via <code>registered_acls()</code>.</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> Acl <span class="op">{</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> model<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> group<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> read<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> write<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> create<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> delete<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>L'accesso è concesso se <strong>uno qualunque</strong> dei gruppi dell'utente lo concede (semantica di unione). Il superuser è sempre ammesso. Da <code>modules/stock/src/lib.rs</code>:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> ACLS<span class="op">:</span> <span class="op">&amp;</span>[Acl] <span class="op">=</span> <span class="op">&amp;</span>[</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;stock.location&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;stock.user&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">false</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">false</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;stock.location&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;stock.manager&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">true</span> <span class="op">},</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;stock.picking&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;stock.user&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;stock.move&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;stock.user&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">true</span> <span class="op">},</span></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ...</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>]<span class="op">;</span></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_acls!</span>(ACLS)<span class="op">;</span></span></code></pre></div>
+<h3 id="register_rules--recordrule-ruledomain-e-la-dsl-domain"><code>register_rules!</code> — <code>RecordRule</code>, <code>RuleDomain</code> e la DSL <code>Domain</code></h3>
+<p>Le record rule sono regole a livello di riga. Il dominio non è una stringa valutata a runtime, ma dato tipato compilato in SQL parametrizzato.</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> RecordRule <span class="op">{</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> model<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> groups<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> [<span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span>]<span class="op">,</span>   <span class="co">// vuoto = globale (vale per tutti)</span></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> ops<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> [Operation]<span class="op">,</span>         <span class="co">// Read / Write / Create / Delete</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> domain<span class="op">:</span> RuleDomain<span class="op">,</span></span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">enum</span> RuleDomain <span class="op">{</span></span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a>    Static(<span class="kw">fn</span>() <span class="op">-&gt;</span> Domain)<span class="op">,</span>   <span class="co">// regola statica di modulo (un thunk: Domain non è const-construibile)</span></span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a>    Owned(Domain)<span class="op">,</span>            <span class="co">// regola caricata da DB a runtime</span></span>
+<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Semantica di combinazione (<code>record_rule_domain</code>): le regole globali (senza gruppo) sono tutte richieste → AND; le regole dei gruppi applicabili all'utente sono alternative → OR; i due insiemi vengono poi messi in AND. Il superuser non è soggetto ad alcuna restrizione.</p>
+<p>La DSL <code>Domain</code> (<code>crates/meshble-core/src/domain.rs</code>) si costruisce in modo fluente:</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="pp">Domain::</span>field(<span class="st">&quot;state&quot;</span>)<span class="op">.</span>ne(<span class="st">&quot;done&quot;</span>)                       <span class="co">// state &lt;&gt; &#39;done&#39;</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="pp">Domain::</span>field(<span class="st">&quot;amount_total&quot;</span>)<span class="op">.</span>lt(<span class="dv">10_000_i64</span>)            <span class="co">// amount_total &lt; 10000</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a><span class="pp">Domain::</span>field(<span class="st">&quot;order_id.state&quot;</span>)<span class="op">.</span>ne(<span class="st">&quot;done&quot;</span>)             <span class="co">// percorso dotted → subquery</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a><span class="pp">Domain::</span>field(<span class="st">&quot;partner_id&quot;</span>)<span class="op">.</span>is_not_null()</span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a><span class="pp">Domain::</span>field(<span class="st">&quot;state&quot;</span>)<span class="op">.</span>in_([<span class="st">&quot;draft&quot;</span><span class="op">,</span> <span class="st">&quot;sale&quot;</span>])</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a><span class="co">// combinatori:</span></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>a<span class="op">.</span>and(b)   a<span class="op">.</span>or(b)   a<span class="op">.</span>not()</span></code></pre></div>
+<p>Operatori disponibili sul <code>FieldBuilder</code>: <code>eq</code>, <code>ne</code>, <code>lt</code>, <code>le</code>, <code>gt</code>, <code>ge</code>, <code>like</code>, <code>ilike</code>, <code>is_null</code>, <code>is_not_null</code>, <code>in_</code>, <code>not_in</code>. Un percorso dotted attraverso un <code>Many2one</code>/<code>One2many</code> diventa una subquery (NULL-safe), così le rule possono attraversare relazioni. Domini non validi (campo inesistente, tipo incompatibile, operatore non adatto al tipo, percorso non relazionale) sono rifiutati alla compilazione del dominio, non in produzione.</p>
+<p>Esempio reale da <code>stock</code> (i move di un trasferimento "done" sono congelati):</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> move_picking_not_done() <span class="op">-&gt;</span> Domain <span class="op">{</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>    <span class="pp">Domain::</span>field(<span class="st">&quot;picking_id.state&quot;</span>)<span class="op">.</span>ne(<span class="st">&quot;done&quot;</span>)</span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> RECORD_RULES<span class="op">:</span> <span class="op">&amp;</span>[RecordRule] <span class="op">=</span> <span class="op">&amp;</span>[</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;stock.move&quot;</span><span class="op">,</span> groups<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span> ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span><span class="bu">Write</span>]<span class="op">,</span> domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(move_picking_not_done) <span class="op">},</span></span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;stock.move&quot;</span><span class="op">,</span> groups<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span> ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span>Create]<span class="op">,</span> domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(move_picking_not_done) <span class="op">},</span></span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;stock.move&quot;</span><span class="op">,</span> groups<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span> ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span>Delete]<span class="op">,</span> domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(move_picking_not_done) <span class="op">},</span></span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a>]<span class="op">;</span></span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_rules!</span>(RECORD_RULES)<span class="op">;</span></span></code></pre></div>
+<h3 id="register_action--funzioni-dazione-e-actionoutcome"><code>register_action!</code> — funzioni d'azione e <code>ActionOutcome</code></h3>
+<p>Un'azione è una transizione di stato nominata su un modello, eseguibile via <code>POST /api/&lt;model&gt;/&lt;id&gt;/action/&lt;name&gt;</code>. La firma:</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">type</span> ActionFn <span class="op">=</span> <span class="kw">fn</span>(<span class="op">&amp;</span>ActionInput) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>ActionOutcome<span class="op">,</span> <span class="dt">String</span><span class="op">&gt;;</span></span></code></pre></div>
+<p><code>ActionInput</code> (<code>crates/meshble-core/src/action.rs</code>) è la vista in sola lettura del record corrente, con accessor tipati: <code>str(field)</code>, <code>int(field)</code>, <code>decimal(field)</code>, <code>bool(field)</code>, <code>get(field)</code>. La guardia ("solo se draft") vive nel corpo e ritorna <code>Err(messaggio)</code> per rifiutare. <code>ActionOutcome</code> raccoglie gli aggiornamenti di campo (<code>set</code>) più una direttiva opzionale <code>assign_sequence(field, code)</code>, risolta dal layer di persistenza (per numerazione senza buchi). Da <code>modules/sales/src/lib.rs</code>:</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> confirm_order(i<span class="op">:</span> <span class="op">&amp;</span>ActionInput) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>ActionOutcome<span class="op">,</span> <span class="dt">String</span><span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">match</span> i<span class="op">.</span><span class="dt">str</span>(<span class="st">&quot;state&quot;</span>) <span class="op">{</span></span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;draft&quot;</span> <span class="op">=&gt;</span> <span class="cn">Ok</span>(<span class="pp">ActionOutcome::</span>new()</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>set(<span class="st">&quot;state&quot;</span><span class="op">,</span> <span class="pp">Value::</span><span class="bu">Str</span>(<span class="st">&quot;sale&quot;</span><span class="op">.</span>to_string()))</span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>set(<span class="st">&quot;invoice_status&quot;</span><span class="op">,</span> <span class="pp">Value::</span><span class="bu">Str</span>(<span class="st">&quot;to_invoice&quot;</span><span class="op">.</span>to_string()))</span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>assign_sequence(<span class="st">&quot;name&quot;</span><span class="op">,</span> <span class="st">&quot;SO&quot;</span>))<span class="op">,</span></span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>        s <span class="op">=&gt;</span> <span class="cn">Err</span>(<span class="pp">format!</span>(<span class="st">&quot;can only confirm a draft order (state is &#39;{s}&#39;)&quot;</span>))<span class="op">,</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_action!</span>(<span class="st">&quot;sale.order&quot;</span><span class="op">,</span> <span class="st">&quot;confirm&quot;</span><span class="op">,</span> confirm_order<span class="op">,</span> <span class="op">&amp;</span>[<span class="st">&quot;sales.user&quot;</span>])<span class="op">;</span></span></code></pre></div>
+<p>L'ultimo argomento è la slice di gruppi che possono eseguire l'azione (oltre alla ACL Write + record rule del modello); <code>&amp;[]</code> non restringe oltre.</p>
+<h3 id="register_report"><code>register_report!</code></h3>
+<p>Un report è una <code>fn(&amp;serde_json::Value) -&gt; String</code> pura che rende un record (con i figli One2many già inlinati) in un documento HTML, esposto a <code>GET /api/&lt;model&gt;/&lt;id&gt;/report/&lt;name&gt;</code> e protetto dall'accesso in lettura al record.</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">type</span> ReportFn <span class="op">=</span> <span class="kw">fn</span>(<span class="op">&amp;</span><span class="pp">serde_json::</span>Value) <span class="op">-&gt;</span> <span class="dt">String</span><span class="op">;</span></span></code></pre></div>
+<div class="sourceCode" id="cb17"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_report!</span>(<span class="st">&quot;sale.order&quot;</span><span class="op">,</span> <span class="st">&quot;quotation&quot;</span><span class="op">,</span> <span class="st">&quot;Quotation&quot;</span><span class="op">,</span> render_quotation)<span class="op">;</span></span></code></pre></div>
+<p>Gli argomenti sono <code>model</code>, <code>name</code> (segmento URL), <code>title</code> (etichetta umana / nome file) e la funzione di render. Il contenuto memorizzato è non fidato: va sempre escapato (la <code>render_quotation</code> reale usa un helper <code>esc</code> per evitare XSS persistente).</p>
+<h3 id="register_wizard-e-register_transient--modelli-transient-e-default_get"><code>register_wizard!</code> e <code>register_transient!</code> — modelli transient e <code>default_get</code></h3>
+<p>Un wizard è un modello <strong>transient</strong> (uno scratchpad con righe effimere, raccolte da un cron orario per età) collegato a una funzione <code>default_get</code>. Il modello transient deve dichiarare un campo <code>create_date: Datetime</code> nullable (la migrazione gli dà un <code>DEFAULT now()</code>). Da <code>modules/sales/src/lib.rs</code>:</p>
+<div class="sourceCode" id="cb18"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>model<span class="at">(</span>name <span class="op">=</span> <span class="st">&quot;sale.order.discount&quot;</span><span class="op">,</span> table <span class="op">=</span> <span class="st">&quot;sale_order_discount&quot;</span><span class="at">)]</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> SaleOrderDiscount <span class="op">{</span></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Order&quot;</span><span class="op">,</span> required<span class="op">,</span> target <span class="op">=</span> <span class="st">&quot;sale.order&quot;</span><span class="at">)]</span></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>    order_id<span class="op">:</span> Many2one<span class="op">,</span></span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Discount %&quot;</span><span class="op">,</span> <span class="kw">default</span> <span class="op">=</span> <span class="st">&quot;0&quot;</span><span class="at">)]</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>    discount<span class="op">:</span> Decimal<span class="op">,</span></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>    <span class="co">// GC timestamp: migration gives this a DEFAULT now(); the transient cron reclaims aged rows.</span></span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Created&quot;</span><span class="at">)]</span></span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>    create_date<span class="op">:</span> Datetime<span class="op">,</span></span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_transient!</span>(<span class="st">&quot;sale.order.discount&quot;</span>)<span class="op">;</span></span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_wizard!</span>(<span class="st">&quot;sale.order.discount&quot;</span><span class="op">,</span> default_get_discount)<span class="op">;</span></span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a><span class="co">/// default_get: seed `order_id` from the open context&#39;s active record.</span></span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> default_get_discount(ctx<span class="op">:</span> <span class="op">&amp;</span>WizardContext) <span class="op">-&gt;</span> <span class="dt">Vec</span><span class="op">&lt;</span>(<span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span> Value)<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">match</span> ctx<span class="op">.</span>active_id <span class="op">{</span></span>
+<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Some</span>(id) <span class="op">=&gt;</span> <span class="pp">vec!</span>[(<span class="st">&quot;order_id&quot;</span><span class="op">,</span> <span class="pp">Value::</span>Int(id))]<span class="op">,</span></span>
+<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a>        <span class="cn">None</span> <span class="op">=&gt;</span> <span class="pp">vec!</span>[]<span class="op">,</span></span>
+<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb18-20"><a href="#cb18-20" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p><code>WizardDefaultGet</code> ha firma <code>fn(&amp;WizardContext) -&gt; Vec&lt;(&amp;'static str, Value)&gt;</code>; <code>WizardContext</code> (<code>crates/meshble-core/src/wizard.rs</code>) porta <code>active_model</code>, <code>active_id</code>, <code>active_ids</code>. È puro in v1 (nessun accesso DB). Il wizard si apre via <code>POST /api/&lt;model&gt;/open</code>, che calcola i default, crea la riga scratchpad sotto il chiamante (ACL di create normale) e la restituisce. La logica di "apply" è un metodo di servizio dedicato per-wizard più un endpoint (es. <code>apply_discount</code> → <code>POST /api/sale.order.discount/&lt;id&gt;/apply_discount</code>), <strong>non</strong> parte della registrazione del wizard.</p>
+<h3 id="register_mailed"><code>register_mailed!</code></h3>
+<p>Una riga, nessun mixin: il modello acquisisce un thread di messaggi, follower e attività via il link polimorfico <code>(res_model, res_id)</code>, e il framework pulisce il thread alla cancellazione del record. È la precondizione perché <code>#[field(tracked)]</code> registri le modifiche nel chatter.</p>
+<div class="sourceCode" id="cb19"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_mailed!</span>(<span class="st">&quot;stock.picking&quot;</span>)<span class="op">;</span></span></code></pre></div>
+<h3 id="register_view--formview-fieldgroup-fieldslot-notebookpage"><code>register_view!</code> — <code>FormView</code>, <code>FieldGroup</code>, <code>FieldSlot</code>, <code>NotebookPage</code></h3>
+<p>Una vista form (<code>crates/meshble-core/src/view.rs</code>) è dato statico emesso nel contratto-UI, così il frontend rende una vista reale invece di scaricare i campi in ordine di dichiarazione. Le strutture:</p>
+<div class="sourceCode" id="cb20"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> FieldSlot   <span class="op">{</span> <span class="kw">pub</span> name<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span> <span class="kw">pub</span> full<span class="op">:</span> <span class="dt">bool</span> <span class="op">}</span>            <span class="co">// full = occupa entrambe le colonne</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> FieldGroup  <span class="op">{</span> <span class="kw">pub</span> title<span class="op">:</span> <span class="dt">Option</span><span class="op">&lt;&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">&gt;,</span> <span class="kw">pub</span> fields<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> [FieldSlot] <span class="op">}</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> NotebookPage<span class="op">{</span> <span class="kw">pub</span> title<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span> <span class="kw">pub</span> fields<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> [<span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span>] <span class="op">}</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> FormView    <span class="op">{</span> <span class="kw">pub</span> model<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span> <span class="kw">pub</span> groups<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> [FieldGroup]<span class="op">,</span> <span class="kw">pub</span> pages<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> [NotebookPage] <span class="op">}</span></span></code></pre></div>
+<p>La macro prende <code>model</code>, la slice di <code>FieldGroup</code> e la slice di <code>NotebookPage</code>, ed emette un <code>FormView</code>. Da <code>modules/base/src/lib.rs</code>:</p>
+<div class="sourceCode" id="cb21"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_view!</span>(</span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;res.partner&quot;</span><span class="op">,</span></span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span>[</span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a>        FieldGroup <span class="op">{</span></span>
+<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a>            title<span class="op">:</span> <span class="cn">None</span><span class="op">,</span></span>
+<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a>            fields<span class="op">:</span> <span class="op">&amp;</span>[</span>
+<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a>                FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;name&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">true</span> <span class="op">},</span></span>
+<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a>                FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;is_company&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a>                FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;parent_id&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb21-10"><a href="#cb21-10" aria-hidden="true" tabindex="-1"></a>                FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;active&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb21-11"><a href="#cb21-11" aria-hidden="true" tabindex="-1"></a>            ]<span class="op">,</span></span>
+<span id="cb21-12"><a href="#cb21-12" aria-hidden="true" tabindex="-1"></a>        <span class="op">},</span></span>
+<span id="cb21-13"><a href="#cb21-13" aria-hidden="true" tabindex="-1"></a>        FieldGroup <span class="op">{</span></span>
+<span id="cb21-14"><a href="#cb21-14" aria-hidden="true" tabindex="-1"></a>            title<span class="op">:</span> <span class="cn">Some</span>(<span class="st">&quot;Contact&quot;</span>)<span class="op">,</span></span>
+<span id="cb21-15"><a href="#cb21-15" aria-hidden="true" tabindex="-1"></a>            fields<span class="op">:</span> <span class="op">&amp;</span>[FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;email&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span> FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;phone&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">false</span> <span class="op">}</span>]<span class="op">,</span></span>
+<span id="cb21-16"><a href="#cb21-16" aria-hidden="true" tabindex="-1"></a>        <span class="op">},</span></span>
+<span id="cb21-17"><a href="#cb21-17" aria-hidden="true" tabindex="-1"></a>    ]<span class="op">,</span></span>
+<span id="cb21-18"><a href="#cb21-18" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span>[]   <span class="co">// nessuna notebook page</span></span>
+<span id="cb21-19"><a href="#cb21-19" aria-hidden="true" tabindex="-1"></a>)<span class="op">;</span></span></code></pre></div>
+<p>Per una vista con notebook (relazione One2many in una tab), da <code>sales</code>:</p>
+<div class="sourceCode" id="cb22"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="op">&amp;</span>[NotebookPage <span class="op">{</span> title<span class="op">:</span> <span class="st">&quot;Order lines&quot;</span><span class="op">,</span> fields<span class="op">:</span> <span class="op">&amp;</span>[<span class="st">&quot;line_ids&quot;</span>] <span class="op">}</span>]</span></code></pre></div>
+<hr />
+<h2 id="4-funzioni-di-compute">4. Funzioni di compute</h2>
+<p>Un compute è una <code>fn(&amp;ComputeInput) -&gt; Value</code> pura registrata per nome con <code>register_compute!</code>. L'engine (<code>crates/meshble-core/src/compute.rs</code>) riempie ogni campo computato memorizzato (in scrittura, <code>compute_stored</code>) o on-read (a ogni lettura, <code>compute_on_read</code>) la cui funzione è registrata.</p>
+<p><code>ComputeInput</code> è la vista in sola lettura del record (i suoi campi + i figli One2many). Accessor scalari: <code>int</code>, <code>float</code>, <code>str</code>, <code>bool</code>, <code>decimal</code>, <code>get</code>. Accessor di aggregazione sui figli: <code>children(o2m)</code>, <code>count(o2m)</code>, <code>sum_float(o2m, child_field)</code>, <code>sum_decimal(o2m, child_field)</code> (somma esatta, senza arrotondamento f64). <code>Value</code> è l'enum dei valori (<code>Str</code>, <code>Int</code>, <code>Float</code>, <code>Decimal</code>, <code>Bool</code>, <code>Null</code>, <code>List</code>).</p>
+<p>Compute same-record (entrambi gli input sul record) e aggregato (sui figli), da <code>sales</code>:</p>
+<div class="sourceCode" id="cb23"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="co">/// A line&#39;s subtotal = discounted net (qty × unit price × (1 - discount%)).</span></span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> compute_line_subtotal(i<span class="op">:</span> <span class="op">&amp;</span>ComputeInput) <span class="op">-&gt;</span> Value <span class="op">{</span></span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a>    <span class="pp">Value::</span>Decimal(line_net(i))</span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_compute!</span>(<span class="st">&quot;compute_line_subtotal&quot;</span><span class="op">,</span> compute_line_subtotal)<span class="op">;</span></span>
+<span id="cb23-6"><a href="#cb23-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-7"><a href="#cb23-7" aria-hidden="true" tabindex="-1"></a><span class="co">/// amount_total of an order = exact sum of its lines&#39; taxed totals.</span></span>
+<span id="cb23-8"><a href="#cb23-8" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> compute_amount(i<span class="op">:</span> <span class="op">&amp;</span>ComputeInput) <span class="op">-&gt;</span> Value <span class="op">{</span></span>
+<span id="cb23-9"><a href="#cb23-9" aria-hidden="true" tabindex="-1"></a>    <span class="pp">Value::</span>Decimal(i<span class="op">.</span>sum_decimal(<span class="st">&quot;line_ids&quot;</span><span class="op">,</span> <span class="st">&quot;price_total&quot;</span>))</span>
+<span id="cb23-10"><a href="#cb23-10" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb23-11"><a href="#cb23-11" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_compute!</span>(<span class="st">&quot;compute_amount&quot;</span><span class="op">,</span> compute_amount)<span class="op">;</span></span></code></pre></div>
+<p>Regole chiave:</p>
+<ul>
+<li>Un compute memorizzato (campo con <code>compute</code> + <code>store</code>) è valutato in scrittura, può aggregare sui figli e può dichiarare <code>depends</code> con percorsi relazionali dotted.</li>
+<li>Un compute on-read (campo con <code>compute</code> senza <code>store</code>) è valutato a ogni lettura, è same-record (i figli non sono caricati) e <strong>non</strong> può avere <code>depends</code> dotted (<code>validate_depends</code> lo rifiuta).</li>
+<li>I <code>depends</code> sono verificati: una dipendenza verso un campo inesistente è un errore di risoluzione.</li>
+</ul>
+<hr />
+<h2 id="5-vincoli-in-transazione-constrains">5. Vincoli in transazione (<code>constrains</code>)</h2>
+<p>Un vincolo cross-record (<code>crates/meshble-core/src/constraints.rs</code>) gira <strong>dentro la transazione di scrittura</strong>, dopo che il record e i suoi figli One2many sono stati scritti e ri-letti, e rifiuta la scrittura (errore tipato, rollback) se l'invariante è violata. A differenza di un <code>CHECK</code> SQL (single-row), legge l'header insieme ai figli tramite lo stesso <code>ComputeInput</code> dell'engine di compute, quindi esprime invarianti che attraversano un header e le sue righe.</p>
+<p>La firma e il limite:</p>
+<div class="sourceCode" id="cb24"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">type</span> ConstraintFn <span class="op">=</span> <span class="kw">fn</span>(<span class="op">&amp;</span>ComputeInput) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">,</span> <span class="dt">String</span><span class="op">&gt;;</span></span></code></pre></div>
+<p><strong>Limite importante: un <code>ConstraintFn</code> non ha accesso al DB.</strong> Legge solo i valori già presenti nel <code>ComputeInput</code> (il record e i figli scritti), non può fare query. Invarianti che richiedono di leggere altri record (es. la company di un account riferito via FK) non sono esprimibili qui e vanno chiuse con una record rule o una validazione FK company-aware.</p>
+<p>Si registra con <code>register_constraint!(model, &amp;[campi_trigger], func)</code>. I campi trigger sono i campi scritti (e i nomi dei campi One2many) che guidano l'invariante; una lista vuota fa girare il vincolo a ogni scrittura. Su create gira sempre. Esempio canonico (entry contabile bilanciata) da <code>modules/account/src/lib.rs</code>:</p>
+<div class="sourceCode" id="cb25"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> check_balanced(m<span class="op">:</span> <span class="op">&amp;</span>ComputeInput) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">,</span> <span class="dt">String</span><span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> debit<span class="op">:</span> Decimal <span class="op">=</span> m<span class="op">.</span>sum_decimal(<span class="st">&quot;line_ids&quot;</span><span class="op">,</span> <span class="st">&quot;debit&quot;</span>)<span class="op">;</span></span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> credit<span class="op">:</span> Decimal <span class="op">=</span> m<span class="op">.</span>sum_decimal(<span class="st">&quot;line_ids&quot;</span><span class="op">,</span> <span class="st">&quot;credit&quot;</span>)<span class="op">;</span></span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> debit <span class="op">!=</span> credit <span class="op">{</span></span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="cn">Err</span>(<span class="pp">format!</span>(<span class="st">&quot;unbalanced journal entry: total debit {debit} != total credit {credit}&quot;</span>))<span class="op">;</span></span>
+<span id="cb25-6"><a href="#cb25-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb25-7"><a href="#cb25-7" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Ok</span>(())</span>
+<span id="cb25-8"><a href="#cb25-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb25-9"><a href="#cb25-9" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_constraint!</span>(<span class="st">&quot;account.move&quot;</span><span class="op">,</span> <span class="op">&amp;</span>[<span class="st">&quot;line_ids&quot;</span>]<span class="op">,</span> check_balanced)<span class="op">;</span></span></code></pre></div>
+<p>In v1 i vincoli girano sul modello top-level scritto: un vincolo su un figlio scritto attraverso i comandi nested One2many del genitore, o su un genitore in inheritance per delegazione (<code>inherits</code>/<code>via</code>), non è valutato.</p>
+<hr />
+<h2 id="6-operazioni-cross-record-metodo-di-servizio--endpoint-dedicato">6. Operazioni cross-record: metodo di servizio + endpoint dedicato</h2>
+<p>Azioni, compute e vincoli coprono le transizioni single-record e le invarianti header+righe. Per operazioni che toccano <strong>più record</strong> in una transazione (creare documenti collegati, spostare giacenza, postare scritture) il pattern è diverso: un <strong>metodo di servizio</strong> sul <code>Db</code>, autorizzato esplicitamente con <code>check_access</code>, che poi esegue l'effetto elevato (<code>ctx.sudo()</code>), più una <strong>rotta axum dedicata</strong> che autentica e lo invoca. Questo non passa per la macro <code>register_action!</code>.</p>
+<p>Il caso reale è <code>validate_picking</code> / <code>create_delivery</code> (<code>crates/meshble-db/src/lib.rs</code>).</p>
+<h3 id="il-metodo-di-servizio">Il metodo di servizio</h3>
+<p><code>validate_picking</code> valida un trasferimento draft: setta i suoi move done, aggiorna i quant e numera il documento, tutto in una transazione. Estratto della struttura (gate di accesso → lettura sicura → effetto in transazione):</p>
+<div class="sourceCode" id="cb26"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> validate_picking(</span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a>    ctx<span class="op">:</span> <span class="op">&amp;</span>Ctx<span class="op">,</span></span>
+<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a>    acls<span class="op">:</span> <span class="op">&amp;</span>[Acl]<span class="op">,</span></span>
+<span id="cb26-5"><a href="#cb26-5" aria-hidden="true" tabindex="-1"></a>    rules<span class="op">:</span> <span class="op">&amp;</span>[RecordRule]<span class="op">,</span></span>
+<span id="cb26-6"><a href="#cb26-6" aria-hidden="true" tabindex="-1"></a>    picking_id<span class="op">:</span> <span class="dt">i64</span><span class="op">,</span></span>
+<span id="cb26-7"><a href="#cb26-7" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span><span class="dt">String</span><span class="op">,</span> DbError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb26-8"><a href="#cb26-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> picking_model <span class="op">=</span> resolve_registered(<span class="st">&quot;stock.picking&quot;</span>)<span class="op">.</span>map_err(<span class="pp">DbError::</span>BadInput)<span class="op">?;</span></span>
+<span id="cb26-9"><a href="#cb26-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb26-10"><a href="#cb26-10" aria-hidden="true" tabindex="-1"></a>    <span class="co">// 1) Gate: il chiamante deve avere WRITE su stock.picking.</span></span>
+<span id="cb26-11"><a href="#cb26-11" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">!</span>check_access(<span class="pp">Operation::</span><span class="bu">Write</span><span class="op">,</span> picking_model<span class="op">.</span>name<span class="op">,</span> ctx<span class="op">,</span> acls) <span class="op">{</span></span>
+<span id="cb26-12"><a href="#cb26-12" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="cn">Err</span>(<span class="pp">DbError::</span>AccessDenied <span class="op">{</span> model<span class="op">:</span> picking_model<span class="op">.</span>name<span class="op">.</span>to_string()<span class="op">,</span> operation<span class="op">:</span> <span class="st">&quot;validate&quot;</span> <span class="op">}</span>)<span class="op">;</span></span>
+<span id="cb26-13"><a href="#cb26-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb26-14"><a href="#cb26-14" aria-hidden="true" tabindex="-1"></a>    <span class="co">// 2) Lettura sicura del record sotto ACL + record rule del chiamante.</span></span>
+<span id="cb26-15"><a href="#cb26-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> picking <span class="op">=</span> <span class="kw">self</span></span>
+<span id="cb26-16"><a href="#cb26-16" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>find_one_secured(<span class="op">&amp;</span>picking_model<span class="op">,</span> ctx<span class="op">,</span> acls<span class="op">,</span> rules<span class="op">,</span> picking_id)</span>
+<span id="cb26-17"><a href="#cb26-17" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span><span class="kw">await</span><span class="op">?</span></span>
+<span id="cb26-18"><a href="#cb26-18" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>ok_or_else(<span class="op">||</span> <span class="pp">DbError::</span>BadInput(<span class="st">&quot;transfer not found or not permitted&quot;</span><span class="op">.</span>to_string()))<span class="op">?;</span></span>
+<span id="cb26-19"><a href="#cb26-19" aria-hidden="true" tabindex="-1"></a>    <span class="co">// 3) Guardia di stato e poi l&#39;effetto in transazione (quant upsert, move → done, numerazione).</span></span>
+<span id="cb26-20"><a href="#cb26-20" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ... (begin tx, FOR UPDATE compare-and-set su state=&#39;draft&#39;, upsert quant, commit) ...</span></span>
+<span id="cb26-21"><a href="#cb26-21" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p><code>create_delivery</code> mostra il pattern dell'effetto elevato. Crea una consegna draft da un ordine confermato: il gate è sulla WRITE dell'ordine del chiamante, ma la risoluzione delle location e la creazione di picking + move avvengono <strong>elevate</strong> (<code>ctx.sudo()</code>), così un commerciale non deve anche avere i diritti di create sullo stock:</p>
+<div class="sourceCode" id="cb27"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> create_delivery(</span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span> ctx<span class="op">:</span> <span class="op">&amp;</span>Ctx<span class="op">,</span> acls<span class="op">:</span> <span class="op">&amp;</span>[Acl]<span class="op">,</span> rules<span class="op">:</span> <span class="op">&amp;</span>[RecordRule]<span class="op">,</span> order_id<span class="op">:</span> <span class="dt">i64</span><span class="op">,</span></span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span><span class="dt">i64</span><span class="op">,</span> DbError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">.</span>create_order_picking(ctx<span class="op">,</span> acls<span class="op">,</span> rules<span class="op">,</span> <span class="st">&quot;sale.order&quot;</span><span class="op">,</span> order_id<span class="op">,</span></span>
+<span id="cb27-5"><a href="#cb27-5" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;create_delivery&quot;</span><span class="op">,</span> <span class="st">&quot;sale&quot;</span><span class="op">,</span> <span class="st">&quot;delivery&quot;</span><span class="op">,</span> <span class="st">&quot;internal&quot;</span><span class="op">,</span> <span class="st">&quot;customer&quot;</span>)<span class="op">.</span><span class="kw">await</span></span>
+<span id="cb27-6"><a href="#cb27-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>dove <code>create_order_picking</code> fa, semplificato:</p>
+<div class="sourceCode" id="cb28"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="op">!</span>check_access(<span class="pp">Operation::</span><span class="bu">Write</span><span class="op">,</span> order_model<span class="op">.</span>name<span class="op">,</span> ctx<span class="op">,</span> acls) <span class="op">{</span></span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="cn">Err</span>(<span class="pp">DbError::</span>AccessDenied <span class="op">{</span> model<span class="op">:</span> order_model<span class="op">.</span>name<span class="op">.</span>to_string()<span class="op">,</span> operation <span class="op">}</span>)<span class="op">;</span></span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> order <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>find_one_secured(<span class="op">&amp;</span>order_model<span class="op">,</span> ctx<span class="op">,</span> acls<span class="op">,</span> rules<span class="op">,</span> order_id)<span class="op">.</span><span class="kw">await</span><span class="op">?</span></span>
+<span id="cb28-5"><a href="#cb28-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">.</span>ok_or_else(<span class="op">||</span> <span class="pp">DbError::</span>BadInput(<span class="st">&quot;order not found or not permitted&quot;</span><span class="op">.</span>to_string()))<span class="op">?;</span></span>
+<span id="cb28-6"><a href="#cb28-6" aria-hidden="true" tabindex="-1"></a><span class="co">// ... guardia di stato ...</span></span>
+<span id="cb28-7"><a href="#cb28-7" aria-hidden="true" tabindex="-1"></a><span class="co">// L&#39;effetto di sistema (risolvere endpoint + creare picking/move) gira elevato:</span></span>
+<span id="cb28-8"><a href="#cb28-8" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> elevated <span class="op">=</span> ctx<span class="op">.</span>sudo()<span class="op">;</span></span>
+<span id="cb28-9"><a href="#cb28-9" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> picking_id <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>insert_secured(<span class="op">&amp;</span>picking_model<span class="op">,</span> <span class="op">&amp;</span>elevated<span class="op">,</span> <span class="op">&amp;</span>[]<span class="op">,</span> <span class="op">&amp;</span>[]<span class="op">,</span> payload<span class="op">.</span>as_object()<span class="op">.</span>unwrap())<span class="op">.</span><span class="kw">await</span><span class="op">?;</span></span>
+<span id="cb28-10"><a href="#cb28-10" aria-hidden="true" tabindex="-1"></a><span class="co">// ... insert dei move elevati ...</span></span></code></pre></div>
+<h3 id="la-rotta-axum">La rotta axum</h3>
+<p>Ogni metodo di servizio ha un handler dedicato in <code>crates/meshble-server/src/lib.rs</code>, registrato in <code>router_with_data_rasterized</code>:</p>
+<div class="sourceCode" id="cb29"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="op">.</span>route(<span class="st">&quot;/api/:name/:id/validate&quot;</span><span class="op">,</span> post(validate_picking_handler))</span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a><span class="op">.</span>route(<span class="st">&quot;/api/:name/:id/create_delivery&quot;</span><span class="op">,</span> post(create_delivery_handler))</span>
+<span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a><span class="op">.</span>route(<span class="st">&quot;/api/:name/:id/create_receipt&quot;</span><span class="op">,</span> post(create_receipt_handler))</span></code></pre></div>
+<p>L'handler vincola il modello (v1: pinned), autentica il <code>Ctx</code> dal bearer, invoca il metodo e mappa l'errore:</p>
+<div class="sourceCode" id="cb30"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="kw">async</span> <span class="kw">fn</span> create_delivery_handler(</span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>    State(state)<span class="op">:</span> State<span class="op">&lt;</span>AppState<span class="op">&gt;,</span></span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Path</span>((name<span class="op">,</span> id))<span class="op">:</span> <span class="dt">Path</span><span class="op">&lt;</span>(<span class="dt">String</span><span class="op">,</span> <span class="dt">i64</span>)<span class="op">&gt;,</span></span>
+<span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a>    headers<span class="op">:</span> HeaderMap<span class="op">,</span></span>
+<span id="cb30-5"><a href="#cb30-5" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> Response <span class="op">{</span></span>
+<span id="cb30-6"><a href="#cb30-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> name <span class="op">!=</span> <span class="st">&quot;sale.order&quot;</span> <span class="op">{</span></span>
+<span id="cb30-7"><a href="#cb30-7" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> (<span class="pp">StatusCode::</span>BAD_REQUEST<span class="op">,</span> <span class="st">&quot;create_delivery is only valid on sale.order&quot;</span>)<span class="op">.</span>into_response()<span class="op">;</span></span>
+<span id="cb30-8"><a href="#cb30-8" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb30-9"><a href="#cb30-9" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Err</span>(r) <span class="op">=</span> resolve_model(<span class="op">&amp;</span>state<span class="op">,</span> <span class="op">&amp;</span>name) <span class="op">{</span> <span class="cf">return</span> r<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb30-10"><a href="#cb30-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> backend <span class="op">=</span> state<span class="op">.</span>data<span class="op">.</span>as_ref()<span class="op">.</span>expect(<span class="st">&quot;data backend present on data routes&quot;</span>)<span class="op">;</span></span>
+<span id="cb30-11"><a href="#cb30-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> ctx <span class="op">=</span> <span class="cf">match</span> authenticate(backend<span class="op">,</span> <span class="op">&amp;</span>headers) <span class="op">{</span> <span class="cn">Ok</span>(c) <span class="op">=&gt;</span> c<span class="op">,</span> <span class="cn">Err</span>(r) <span class="op">=&gt;</span> <span class="cf">return</span> r <span class="op">};</span></span>
+<span id="cb30-12"><a href="#cb30-12" aria-hidden="true" tabindex="-1"></a>    <span class="cf">match</span> backend<span class="op">.</span>db<span class="op">.</span>create_delivery(<span class="op">&amp;</span>ctx<span class="op">,</span> backend<span class="op">.</span>acls<span class="op">,</span> backend<span class="op">.</span>rules<span class="op">,</span> id)<span class="op">.</span><span class="kw">await</span> <span class="op">{</span></span>
+<span id="cb30-13"><a href="#cb30-13" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Ok</span>(picking) <span class="op">=&gt;</span> json_status(<span class="pp">StatusCode::</span>CREATED<span class="op">,</span> <span class="pp">serde_json::json!</span>(<span class="op">{</span> <span class="st">&quot;picking&quot;</span><span class="op">:</span> picking <span class="op">}</span>)<span class="op">.</span>to_string())<span class="op">,</span></span>
+<span id="cb30-14"><a href="#cb30-14" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Err</span>(e) <span class="op">=&gt;</span> write_error(<span class="st">&quot;create_delivery&quot;</span><span class="op">,</span> e)<span class="op">,</span></span>
+<span id="cb30-15"><a href="#cb30-15" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb30-16"><a href="#cb30-16" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>In sintesi: l'autorizzazione vive nel layer db (<code>check_access</code>), l'effetto di sistema gira elevato dopo il gate, e l'handler si limita ad autenticare e a dare forma alla risposta.</p>
+<hr />
+<h2 id="7-esempio-end-to-end-un-piccolo-modulo-library">7. Esempio end-to-end: un piccolo modulo <code>library</code></h2>
+<p>Mettiamo insieme tutto con un modulo nuovo e minimale: un catalogo di libri.</p>
+<h3 id="71-moduleslibrarycargotoml">7.1 <code>modules/library/Cargo.toml</code></h3>
+<div class="sourceCode" id="cb31"><pre class="sourceCode toml"><code class="sourceCode toml"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="kw">[package]</span></span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a><span class="dt">name</span> <span class="op">=</span> <span class="st">&quot;meshble-mod-library&quot;</span></span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a><span class="dt">description</span> <span class="op">=</span> <span class="st">&quot;Meshble library module: a tiny book catalog&quot;</span></span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a><span class="dt">version</span> <span class="op">=</span> <span class="st">&quot;1.0.0&quot;</span></span>
+<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a><span class="dt">edition.workspace</span> <span class="op">=</span> <span class="cn">true</span></span>
+<span id="cb31-6"><a href="#cb31-6" aria-hidden="true" tabindex="-1"></a><span class="dt">license.workspace</span> <span class="op">=</span> <span class="cn">true</span></span>
+<span id="cb31-7"><a href="#cb31-7" aria-hidden="true" tabindex="-1"></a><span class="dt">repository.workspace</span> <span class="op">=</span> <span class="cn">true</span></span>
+<span id="cb31-8"><a href="#cb31-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb31-9"><a href="#cb31-9" aria-hidden="true" tabindex="-1"></a><span class="kw">[dependencies]</span></span>
+<span id="cb31-10"><a href="#cb31-10" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">workspace</span><span class="op"> =</span> <span class="cn">true</span><span class="op"> }</span></span>
+<span id="cb31-11"><a href="#cb31-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Dipende da base per usare res.partner (l&#39;autore) come target di relazione.</span></span>
+<span id="cb31-12"><a href="#cb31-12" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-base</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../base&quot;</span><span class="op">, </span><span class="dt">version</span><span class="op"> =</span> <span class="st">&quot;1.0.0&quot;</span><span class="op"> }</span></span>
+<span id="cb31-13"><a href="#cb31-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb31-14"><a href="#cb31-14" aria-hidden="true" tabindex="-1"></a><span class="kw">[dev-dependencies]</span></span>
+<span id="cb31-15"><a href="#cb31-15" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-db</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">workspace</span><span class="op"> =</span> <span class="cn">true</span><span class="op"> }</span></span>
+<span id="cb31-16"><a href="#cb31-16" aria-hidden="true" tabindex="-1"></a><span class="dt">tokio</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">version</span><span class="op"> =</span> <span class="st">&quot;1&quot;</span><span class="op">, </span><span class="dt">features</span><span class="op"> =</span> <span class="op">[</span><span class="st">&quot;macros&quot;</span><span class="op">,</span> <span class="st">&quot;rt-multi-thread&quot;</span><span class="op">] }</span></span>
+<span id="cb31-17"><a href="#cb31-17" aria-hidden="true" tabindex="-1"></a><span class="dt">serde_json</span> <span class="op">=</span> <span class="st">&quot;1&quot;</span></span></code></pre></div>
+<h3 id="72-moduleslibrarysrclibrs">7.2 <code>modules/library/src/lib.rs</code></h3>
+<div class="sourceCode" id="cb32"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="co">//! Application module `library`: a tiny book catalog.</span></span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">meshble::prelude::</span><span class="op">*;</span></span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> MANIFEST<span class="op">:</span> ModuleManifest <span class="op">=</span> ModuleManifest <span class="op">{</span></span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a>    name<span class="op">:</span> <span class="st">&quot;library&quot;</span><span class="op">,</span></span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a>    version<span class="op">:</span> <span class="st">&quot;1.0.0&quot;</span><span class="op">,</span></span>
+<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a>    framework<span class="op">:</span> <span class="st">&quot;&gt;=0.1, &lt;0.2&quot;</span><span class="op">,</span></span>
+<span id="cb32-8"><a href="#cb32-8" aria-hidden="true" tabindex="-1"></a>    depends<span class="op">:</span> <span class="op">&amp;</span>[ModuleDep <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;base&quot;</span><span class="op">,</span> req<span class="op">:</span> <span class="st">&quot;^1.0&quot;</span> <span class="op">}</span>]<span class="op">,</span></span>
+<span id="cb32-9"><a href="#cb32-9" aria-hidden="true" tabindex="-1"></a>    summary<span class="op">:</span> <span class="st">&quot;A tiny book catalog&quot;</span><span class="op">,</span></span>
+<span id="cb32-10"><a href="#cb32-10" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb32-11"><a href="#cb32-11" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_module!</span>(MANIFEST)<span class="op">;</span></span>
+<span id="cb32-12"><a href="#cb32-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-13"><a href="#cb32-13" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>model<span class="at">(</span>name <span class="op">=</span> <span class="st">&quot;library.book&quot;</span><span class="op">,</span> table <span class="op">=</span> <span class="st">&quot;library_book&quot;</span><span class="at">)]</span></span>
+<span id="cb32-14"><a href="#cb32-14" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> LibraryBook <span class="op">{</span></span>
+<span id="cb32-15"><a href="#cb32-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Title&quot;</span><span class="op">,</span> required<span class="at">)]</span></span>
+<span id="cb32-16"><a href="#cb32-16" aria-hidden="true" tabindex="-1"></a>    name<span class="op">:</span> Text<span class="op">,</span></span>
+<span id="cb32-17"><a href="#cb32-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-18"><a href="#cb32-18" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;ISBN&quot;</span><span class="op">,</span> unique<span class="at">)]</span></span>
+<span id="cb32-19"><a href="#cb32-19" aria-hidden="true" tabindex="-1"></a>    isbn<span class="op">:</span> Text<span class="op">,</span></span>
+<span id="cb32-20"><a href="#cb32-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-21"><a href="#cb32-21" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Author&quot;</span><span class="op">,</span> target <span class="op">=</span> <span class="st">&quot;res.partner&quot;</span><span class="at">)]</span></span>
+<span id="cb32-22"><a href="#cb32-22" aria-hidden="true" tabindex="-1"></a>    author_id<span class="op">:</span> Many2one<span class="op">,</span></span>
+<span id="cb32-23"><a href="#cb32-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-24"><a href="#cb32-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Status&quot;</span><span class="op">,</span> required<span class="op">,</span> <span class="kw">default</span> <span class="op">=</span> <span class="st">&quot;available&quot;</span><span class="op">,</span> selection <span class="op">=</span> <span class="st">&quot;available:Available,borrowed:Borrowed&quot;</span><span class="at">)]</span></span>
+<span id="cb32-25"><a href="#cb32-25" aria-hidden="true" tabindex="-1"></a>    state<span class="op">:</span> Selection<span class="op">,</span></span>
+<span id="cb32-26"><a href="#cb32-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-27"><a href="#cb32-27" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>field<span class="at">(</span>label <span class="op">=</span> <span class="st">&quot;Active&quot;</span><span class="op">,</span> <span class="kw">default</span> <span class="op">=</span> <span class="st">&quot;true&quot;</span><span class="at">)]</span></span>
+<span id="cb32-28"><a href="#cb32-28" aria-hidden="true" tabindex="-1"></a>    active<span class="op">:</span> Bool<span class="op">,</span></span>
+<span id="cb32-29"><a href="#cb32-29" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb32-30"><a href="#cb32-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-31"><a href="#cb32-31" aria-hidden="true" tabindex="-1"></a><span class="co">/// Access control: members read the catalog, librarians maintain it.</span></span>
+<span id="cb32-32"><a href="#cb32-32" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> ACLS<span class="op">:</span> <span class="op">&amp;</span>[Acl] <span class="op">=</span> <span class="op">&amp;</span>[</span>
+<span id="cb32-33"><a href="#cb32-33" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;library.book&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;library.member&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">false</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">false</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb32-34"><a href="#cb32-34" aria-hidden="true" tabindex="-1"></a>    Acl <span class="op">{</span> model<span class="op">:</span> <span class="st">&quot;library.book&quot;</span><span class="op">,</span> group<span class="op">:</span> <span class="st">&quot;library.librarian&quot;</span><span class="op">,</span> read<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> write<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> create<span class="op">:</span> <span class="cn">true</span><span class="op">,</span> delete<span class="op">:</span> <span class="cn">true</span> <span class="op">},</span></span>
+<span id="cb32-35"><a href="#cb32-35" aria-hidden="true" tabindex="-1"></a>]<span class="op">;</span></span>
+<span id="cb32-36"><a href="#cb32-36" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_acls!</span>(ACLS)<span class="op">;</span></span>
+<span id="cb32-37"><a href="#cb32-37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-38"><a href="#cb32-38" aria-hidden="true" tabindex="-1"></a><span class="co">/// Members never see borrowed books in the catalog list.</span></span>
+<span id="cb32-39"><a href="#cb32-39" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> only_available() <span class="op">-&gt;</span> Domain <span class="op">{</span></span>
+<span id="cb32-40"><a href="#cb32-40" aria-hidden="true" tabindex="-1"></a>    <span class="pp">Domain::</span>field(<span class="st">&quot;state&quot;</span>)<span class="op">.</span>eq(<span class="st">&quot;available&quot;</span>)</span>
+<span id="cb32-41"><a href="#cb32-41" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb32-42"><a href="#cb32-42" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> RECORD_RULES<span class="op">:</span> <span class="op">&amp;</span>[RecordRule] <span class="op">=</span> <span class="op">&amp;</span>[</span>
+<span id="cb32-43"><a href="#cb32-43" aria-hidden="true" tabindex="-1"></a>    RecordRule <span class="op">{</span></span>
+<span id="cb32-44"><a href="#cb32-44" aria-hidden="true" tabindex="-1"></a>        model<span class="op">:</span> <span class="st">&quot;library.book&quot;</span><span class="op">,</span></span>
+<span id="cb32-45"><a href="#cb32-45" aria-hidden="true" tabindex="-1"></a>        groups<span class="op">:</span> <span class="op">&amp;</span>[<span class="st">&quot;library.member&quot;</span>]<span class="op">,</span></span>
+<span id="cb32-46"><a href="#cb32-46" aria-hidden="true" tabindex="-1"></a>        ops<span class="op">:</span> <span class="op">&amp;</span>[<span class="pp">Operation::</span><span class="bu">Read</span>]<span class="op">,</span></span>
+<span id="cb32-47"><a href="#cb32-47" aria-hidden="true" tabindex="-1"></a>        domain<span class="op">:</span> <span class="pp">RuleDomain::</span>Static(only_available)<span class="op">,</span></span>
+<span id="cb32-48"><a href="#cb32-48" aria-hidden="true" tabindex="-1"></a>    <span class="op">},</span></span>
+<span id="cb32-49"><a href="#cb32-49" aria-hidden="true" tabindex="-1"></a>]<span class="op">;</span></span>
+<span id="cb32-50"><a href="#cb32-50" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_rules!</span>(RECORD_RULES)<span class="op">;</span></span>
+<span id="cb32-51"><a href="#cb32-51" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-52"><a href="#cb32-52" aria-hidden="true" tabindex="-1"></a><span class="co">/// `borrow`: an available book becomes borrowed.</span></span>
+<span id="cb32-53"><a href="#cb32-53" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> borrow_book(i<span class="op">:</span> <span class="op">&amp;</span>ActionInput) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>ActionOutcome<span class="op">,</span> <span class="dt">String</span><span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb32-54"><a href="#cb32-54" aria-hidden="true" tabindex="-1"></a>    <span class="cf">match</span> i<span class="op">.</span><span class="dt">str</span>(<span class="st">&quot;state&quot;</span>) <span class="op">{</span></span>
+<span id="cb32-55"><a href="#cb32-55" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;available&quot;</span> <span class="op">=&gt;</span> <span class="cn">Ok</span>(<span class="pp">ActionOutcome::</span>new()<span class="op">.</span>set(<span class="st">&quot;state&quot;</span><span class="op">,</span> <span class="pp">Value::</span><span class="bu">Str</span>(<span class="st">&quot;borrowed&quot;</span><span class="op">.</span>to_string())))<span class="op">,</span></span>
+<span id="cb32-56"><a href="#cb32-56" aria-hidden="true" tabindex="-1"></a>        s <span class="op">=&gt;</span> <span class="cn">Err</span>(<span class="pp">format!</span>(<span class="st">&quot;only an available book can be borrowed (state is &#39;{s}&#39;)&quot;</span>))<span class="op">,</span></span>
+<span id="cb32-57"><a href="#cb32-57" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb32-58"><a href="#cb32-58" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb32-59"><a href="#cb32-59" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_action!</span>(<span class="st">&quot;library.book&quot;</span><span class="op">,</span> <span class="st">&quot;borrow&quot;</span><span class="op">,</span> borrow_book<span class="op">,</span> <span class="op">&amp;</span>[<span class="st">&quot;library.librarian&quot;</span>])<span class="op">;</span></span>
+<span id="cb32-60"><a href="#cb32-60" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-61"><a href="#cb32-61" aria-hidden="true" tabindex="-1"></a><span class="co">/// Form layout.</span></span>
+<span id="cb32-62"><a href="#cb32-62" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_view!</span>(</span>
+<span id="cb32-63"><a href="#cb32-63" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;library.book&quot;</span><span class="op">,</span></span>
+<span id="cb32-64"><a href="#cb32-64" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span>[FieldGroup <span class="op">{</span></span>
+<span id="cb32-65"><a href="#cb32-65" aria-hidden="true" tabindex="-1"></a>        title<span class="op">:</span> <span class="cn">None</span><span class="op">,</span></span>
+<span id="cb32-66"><a href="#cb32-66" aria-hidden="true" tabindex="-1"></a>        fields<span class="op">:</span> <span class="op">&amp;</span>[</span>
+<span id="cb32-67"><a href="#cb32-67" aria-hidden="true" tabindex="-1"></a>            FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;name&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">true</span> <span class="op">},</span></span>
+<span id="cb32-68"><a href="#cb32-68" aria-hidden="true" tabindex="-1"></a>            FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;isbn&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb32-69"><a href="#cb32-69" aria-hidden="true" tabindex="-1"></a>            FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;author_id&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb32-70"><a href="#cb32-70" aria-hidden="true" tabindex="-1"></a>            FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;state&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb32-71"><a href="#cb32-71" aria-hidden="true" tabindex="-1"></a>            FieldSlot <span class="op">{</span> name<span class="op">:</span> <span class="st">&quot;active&quot;</span><span class="op">,</span> full<span class="op">:</span> <span class="cn">false</span> <span class="op">},</span></span>
+<span id="cb32-72"><a href="#cb32-72" aria-hidden="true" tabindex="-1"></a>        ]<span class="op">,</span></span>
+<span id="cb32-73"><a href="#cb32-73" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span>]<span class="op">,</span></span>
+<span id="cb32-74"><a href="#cb32-74" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span>[]</span>
+<span id="cb32-75"><a href="#cb32-75" aria-hidden="true" tabindex="-1"></a>)<span class="op">;</span></span></code></pre></div>
+<h3 id="73-collegare-il-modulo">7.3 Collegare il modulo</h3>
+<p>In <code>apps/meshble-cli/Cargo.toml</code>:</p>
+<div class="sourceCode" id="cb33"><pre class="sourceCode toml"><code class="sourceCode toml"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="dt">meshble-mod-library</span> <span class="op">=</span> <span class="op">{ </span><span class="dt">path</span><span class="op"> =</span> <span class="st">&quot;../../modules/library&quot;</span><span class="op"> }</span></span></code></pre></div>
+<p>In <code>apps/meshble-cli/src/main.rs</code>, dentro <code>link_modules()</code>:</p>
+<div class="sourceCode" id="cb34"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> _ <span class="op">=</span> (</span>
+<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span><span class="pp">meshble_mod_base::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb34-3"><a href="#cb34-3" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ... gli altri ...</span></span>
+<span id="cb34-4"><a href="#cb34-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span><span class="pp">meshble_mod_library::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb34-5"><a href="#cb34-5" aria-hidden="true" tabindex="-1"></a>)<span class="op">;</span></span></code></pre></div>
+<h3 id="74-installare-il-modulo">7.4 Installare il modulo</h3>
+<p>Su un database fresco la migrazione installa solo <code>base</code> (+ closure); gli altri moduli sono opt-in. Dopo aver compilato il binario <code>meshble</code>:</p>
+<div class="sourceCode" id="cb35"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Migra le schema framework + base (installazione iniziale)</span></span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> migrate</span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb35-4"><a href="#cb35-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Installa library e la sua dependency closure (deps prima), poi migra le tabelle</span></span>
+<span id="cb35-5"><a href="#cb35-5" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> module install library</span>
+<span id="cb35-6"><a href="#cb35-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb35-7"><a href="#cb35-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Verifica</span></span>
+<span id="cb35-8"><a href="#cb35-8" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> module list</span></code></pre></div>
+<p><code>module install</code> chiama <code>module_closure(name)</code> (nome + dipendenze transitive, deps prima), marca i moduli come installati e poi rilancia <code>migrate_installed</code> (idempotente) per creare le tabelle. Avvia poi il server (che serve solo i modelli dei moduli installati):</p>
+<div class="sourceCode" id="cb36"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="ex">meshble</span> serve</span></code></pre></div>
+<h3 id="75-curl-contro-lapi-generata">7.5 Curl contro l'API generata</h3>
+<p>Tutte le rotte dati richiedono un bearer. Prima si fa login (<code>POST /auth/login</code> restituisce <code>access_token</code> / <code>refresh_token</code> / <code>token_type: "Bearer"</code> / <code>expires_in</code>). Il server ascolta per default su <code>127.0.0.1:8099</code> (<code>server.bind</code> in <code>meshble.toml</code>):</p>
+<div class="sourceCode" id="cb37"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a><span class="va">TOKEN</span><span class="op">=</span><span class="va">$(</span><span class="ex">curl</span> <span class="at">-s</span> http://127.0.0.1:8099/auth/login <span class="dt">\</span></span>
+<span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="dt">\</span></span>
+<span id="cb37-3"><a href="#cb37-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{&quot;login&quot;:&quot;admin&quot;,&quot;password&quot;:&quot;&#39;&quot;</span><span class="va">$MESHBLE_ADMIN_PASSWORD</span><span class="st">&quot;&#39;&quot;}&#39;</span> <span class="dt">\</span></span>
+<span id="cb37-4"><a href="#cb37-4" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="ex">python3</span> <span class="at">-c</span> <span class="st">&#39;import sys,json; print(json.load(sys.stdin)[&quot;access_token&quot;])&#39;</span><span class="va">)</span></span>
+<span id="cb37-5"><a href="#cb37-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb37-6"><a href="#cb37-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Crea un libro (POST /api/:name → { &quot;id&quot;: &lt;n&gt; } con 201)</span></span>
+<span id="cb37-7"><a href="#cb37-7" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://127.0.0.1:8099/api/library.book <span class="dt">\</span></span>
+<span id="cb37-8"><a href="#cb37-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb37-9"><a href="#cb37-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="dt">\</span></span>
+<span id="cb37-10"><a href="#cb37-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{&quot;name&quot;:&quot;The Rust Programming Language&quot;,&quot;isbn&quot;:&quot;9781718500457&quot;,&quot;state&quot;:&quot;available&quot;}&#39;</span></span>
+<span id="cb37-11"><a href="#cb37-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb37-12"><a href="#cb37-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Lista (GET /api/:name) → envelope { data, total, limit, offset }</span></span>
+<span id="cb37-13"><a href="#cb37-13" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://127.0.0.1:8099/api/library.book <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span></span>
+<span id="cb37-14"><a href="#cb37-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb37-15"><a href="#cb37-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Esegui l&#39;azione borrow (POST /api/:name/:id/action/:action)</span></span>
+<span id="cb37-16"><a href="#cb37-16" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-X</span> POST http://127.0.0.1:8099/api/library.book/1/action/borrow <span class="dt">\</span></span>
+<span id="cb37-17"><a href="#cb37-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span></span>
+<span id="cb37-18"><a href="#cb37-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb37-19"><a href="#cb37-19" aria-hidden="true" tabindex="-1"></a><span class="co"># Recupera il contratto-UI della vista (GET /api/:name/view)</span></span>
+<span id="cb37-20"><a href="#cb37-20" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://127.0.0.1:8099/api/library.book/view <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span></span></code></pre></div>
+<p>Le rotte CRUD generate sono <code>GET/POST /api/:name</code>, <code>GET/PATCH/DELETE /api/:name/:id</code>, l'azione <code>POST /api/:name/:id/action/:action</code>, il report <code>GET /api/:name/:id/report/:report</code>, l'apertura wizard <code>POST /api/:name/open</code>. Vedi <a href="api.html">api.md</a> per l'elenco completo.</p>
+<hr />
+<h2 id="8-test-di-integrazione-di-un-modulo">8. Test di integrazione di un modulo</h2>
+<p>Il pattern usato in <code>modules/stock/tests/</code> è: un test <code>#[tokio::test]</code> che si <strong>salta</strong> se <code>DATABASE_URL</code> non è impostato, collega i moduli, ricrea lo schema dal <code>migration_plan()</code> e opera sul <code>Db</code> con un <code>Ctx</code> superuser. Le dipendenze di test stanno in <code>[dev-dependencies]</code> (vedi <code>meshble-db</code>, <code>tokio</code>, <code>serde_json</code> nel <code>Cargo.toml</code> del modulo).</p>
+<p>Scheletro (da <code>modules/stock/tests/validate.rs</code>, ridotto):</p>
+<div class="sourceCode" id="cb38"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">meshble::prelude::</span><span class="op">*;</span></span>
+<span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">meshble_db::</span>Db<span class="op">;</span></span>
+<span id="cb38-3"><a href="#cb38-3" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">serde_json::</span>json<span class="op">;</span></span>
+<span id="cb38-4"><a href="#cb38-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb38-5"><a href="#cb38-5" aria-hidden="true" tabindex="-1"></a><span class="co">/// Forza il link dei moduli così le loro registrazioni inventory sono nel binario di test.</span></span>
+<span id="cb38-6"><a href="#cb38-6" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> link() <span class="op">{</span></span>
+<span id="cb38-7"><a href="#cb38-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> _ <span class="op">=</span> (</span>
+<span id="cb38-8"><a href="#cb38-8" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_stock::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb38-9"><a href="#cb38-9" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_sales::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb38-10"><a href="#cb38-10" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_base::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb38-11"><a href="#cb38-11" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_mail::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb38-12"><a href="#cb38-12" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb38-13"><a href="#cb38-13" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb38-14"><a href="#cb38-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb38-15"><a href="#cb38-15" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span><span class="pp">tokio::</span>test<span class="at">]</span></span>
+<span id="cb38-16"><a href="#cb38-16" aria-hidden="true" tabindex="-1"></a><span class="kw">async</span> <span class="kw">fn</span> validate_moves_stock_and_is_single_shot() <span class="op">{</span></span>
+<span id="cb38-17"><a href="#cb38-17" aria-hidden="true" tabindex="-1"></a>    link()<span class="op">;</span></span>
+<span id="cb38-18"><a href="#cb38-18" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Si salta senza DATABASE_URL (così la suite passa anche senza DB).</span></span>
+<span id="cb38-19"><a href="#cb38-19" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> url <span class="op">=</span> <span class="cf">match</span> <span class="pp">std::env::</span>var(<span class="st">&quot;DATABASE_URL&quot;</span>) <span class="op">{</span></span>
+<span id="cb38-20"><a href="#cb38-20" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Ok</span>(u) <span class="op">=&gt;</span> u<span class="op">,</span></span>
+<span id="cb38-21"><a href="#cb38-21" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Err</span>(_) <span class="op">=&gt;</span> <span class="op">{</span> <span class="pp">eprintln!</span>(<span class="st">&quot;skipping: DATABASE_URL not set&quot;</span>)<span class="op">;</span> <span class="cf">return</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb38-22"><a href="#cb38-22" aria-hidden="true" tabindex="-1"></a>    <span class="op">};</span></span>
+<span id="cb38-23"><a href="#cb38-23" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> db <span class="op">=</span> <span class="pp">Db::</span>connect(<span class="op">&amp;</span>url)<span class="op">.</span><span class="kw">await</span><span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb38-24"><a href="#cb38-24" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> su <span class="op">=</span> <span class="pp">Ctx::</span>new(<span class="dv">0</span><span class="op">,</span> <span class="pp">vec!</span>[])<span class="op">.</span>sudo()<span class="op">;</span></span>
+<span id="cb38-25"><a href="#cb38-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb38-26"><a href="#cb38-26" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Ricrea lo schema dal piano di migrazione (ordinato per FK), idempotente.</span></span>
+<span id="cb38-27"><a href="#cb38-27" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> plan <span class="op">=</span> migration_plan()<span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb38-28"><a href="#cb38-28" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> t <span class="kw">in</span> plan<span class="op">.</span>iter()<span class="op">.</span>rev() <span class="op">{</span> db<span class="op">.</span>drop_table(<span class="op">&amp;</span>t<span class="op">.</span>model)<span class="op">.</span><span class="kw">await</span><span class="op">.</span>unwrap()<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb38-29"><a href="#cb38-29" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> t <span class="kw">in</span> <span class="op">&amp;</span>plan <span class="op">{</span> db<span class="op">.</span>create_table(<span class="op">&amp;</span>t<span class="op">.</span>model)<span class="op">.</span><span class="kw">await</span><span class="op">.</span>unwrap()<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb38-30"><a href="#cb38-30" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> t <span class="kw">in</span> <span class="op">&amp;</span>plan <span class="op">{</span> db<span class="op">.</span>create_m2m_relations(<span class="op">&amp;</span>t<span class="op">.</span>model)<span class="op">.</span><span class="kw">await</span><span class="op">.</span>unwrap()<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb38-31"><a href="#cb38-31" aria-hidden="true" tabindex="-1"></a>    db<span class="op">.</span>ensure_stock_indexes()<span class="op">.</span><span class="kw">await</span><span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb38-32"><a href="#cb38-32" aria-hidden="true" tabindex="-1"></a>    db<span class="op">.</span>ensure_sequence_schema()<span class="op">.</span><span class="kw">await</span><span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb38-33"><a href="#cb38-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb38-34"><a href="#cb38-34" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Risolvi i modelli dal catalogo e inserisci dati con insert_secured.</span></span>
+<span id="cb38-35"><a href="#cb38-35" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> picking <span class="op">=</span> resolve_registered(<span class="st">&quot;stock.picking&quot;</span>)<span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb38-36"><a href="#cb38-36" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ... let receipt = db.insert_secured(&amp;picking, &amp;su, &amp;[], &amp;[], v.as_object().unwrap()).await.unwrap();</span></span>
+<span id="cb38-37"><a href="#cb38-37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb38-38"><a href="#cb38-38" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Esegui il metodo di servizio e fai le asserzioni.</span></span>
+<span id="cb38-39"><a href="#cb38-39" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> n1 <span class="op">=</span> db<span class="op">.</span>validate_picking(<span class="op">&amp;</span>su<span class="op">,</span> <span class="op">&amp;</span>[]<span class="op">,</span> <span class="op">&amp;</span>[]<span class="op">,</span> receipt)<span class="op">.</span><span class="kw">await</span><span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb38-40"><a href="#cb38-40" aria-hidden="true" tabindex="-1"></a>    <span class="pp">assert!</span>(n1<span class="op">.</span>starts_with(<span class="st">&quot;IN/&quot;</span>))<span class="op">;</span></span>
+<span id="cb38-41"><a href="#cb38-41" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb38-42"><a href="#cb38-42" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Pulizia.</span></span>
+<span id="cb38-43"><a href="#cb38-43" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> t <span class="kw">in</span> plan<span class="op">.</span>iter()<span class="op">.</span>rev() <span class="op">{</span> db<span class="op">.</span>drop_table(<span class="op">&amp;</span>t<span class="op">.</span>model)<span class="op">.</span><span class="kw">await</span><span class="op">.</span>unwrap()<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb38-44"><a href="#cb38-44" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Punti essenziali del pattern:</p>
+<ul>
+<li><code>link()</code> referenzia i <code>MANIFEST</code> di ogni modulo coinvolto (incluse le dipendenze), altrimenti i loro modelli non sarebbero registrati nel binario di test.</li>
+<li>Il test ritorna senza fallire se <code>DATABASE_URL</code> non è presente, così <code>cargo test</code> resta verde anche su una macchina senza Postgres.</li>
+<li><code>migration_plan()</code> dà i target ordinati per FK (<code>MigrationTarget { module, version, model }</code>); si dropano in ordine inverso e si creano in ordine diretto, poi le relazioni Many2many in un secondo passaggio.</li>
+<li>Si lavora con un <code>Ctx</code> superuser (<code>Ctx::new(0, vec![]).sudo()</code>) per saltare ACL/record rule nel setup, e si usano i metodi <code>*_secured</code> del <code>Db</code> (<code>insert_secured</code>, <code>find_one_secured</code>, <code>find_secured</code>, <code>count_secured</code>).</li>
+</ul>
+<p>Per le verifiche non-DB (forma del descriptor, presenza degli attributi) basta un test unitario <code>#[cfg(test)]</code> nel <code>lib.rs</code> del modulo che chiama <code>resolve_registered("...")</code> e ispeziona i <code>FieldDef</code>, come negli esempi in <code>modules/sales/src/lib.rs</code>.</p>
+
+      </article>
+      <footer class="mt-16 border-t border-border pt-6 text-[13px] text-muted">
+        <span class="font-mono">meshble · documentazione</span>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

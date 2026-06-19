@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="it" class="scroll-smooth">
+<head>
+  <title>Meshble · Moduli · IT</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: {
+      bg: '#0D1014', surface: '#14181D', surface2: '#1B2026', border: '#272D34',
+      text: '#E5E9ED', muted: '#8B949E', accent: '#22B8CF', accentfg: '#06181C',
+      accenthover: '#46C8DB', success: '#3DD68C', violet: '#7B8CFF',
+    }, fontFamily: {
+      display: ['Space Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      body: ['Hanken Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+    } } } }
+  </script>
+  <style>
+    :root { color-scheme: dark; }
+    body { background:#0d1014; color:#e5e9ed; font-family:'Hanken Grotesk',ui-sans-serif,system-ui,sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+    .scanline { position:relative; }
+    .scanline::before { content:''; position:absolute; left:0; top:.15em; bottom:.15em; width:2px; border-radius:999px; background:#22b8cf; }
+    .pulse { animation:pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    @media (prefers-reduced-motion: reduce){ .pulse{animation:none} }
+    .markdown { font-size:15.5px; line-height:1.7; color:#c8cfd6; }
+    .markdown > :first-child { margin-top:0; }
+    .markdown h1,.markdown h2,.markdown h3,.markdown h4 { font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif; color:#e5e9ed; font-weight:600; letter-spacing:-.01em; line-height:1.25; }
+    .markdown h1 { font-size:2rem; margin:0 0 .75rem; letter-spacing:-.02em; }
+    .markdown h2 { font-size:1.5rem; margin:2.6rem 0 1rem; padding-top:1.4rem; border-top:1px solid #272d34; }
+    .markdown h3 { font-size:1.18rem; margin:2rem 0 .7rem; }
+    .markdown h4 { font-size:1rem; margin:1.6rem 0 .5rem; color:#cdd4db; }
+    .markdown p { margin:0 0 1.05rem; }
+    .markdown a { color:#46c8db; text-decoration:none; border-bottom:1px solid rgba(70,200,219,.3); }
+    .markdown a:hover { color:#22b8cf; border-bottom-color:#22b8cf; }
+    .markdown strong { color:#e5e9ed; font-weight:600; }
+    .markdown ul,.markdown ol { margin:0 0 1.05rem; padding-left:1.35rem; }
+    .markdown li { margin:.3rem 0; }
+    .markdown li::marker { color:#5b636c; }
+    .markdown code { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:.86em; background:#1b2026; border:1px solid #272d34; border-radius:5px; padding:.1em .38em; color:#cdd4db; }
+    .markdown pre { background:#0f1216; border:1px solid #272d34; border-radius:8px; padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.2rem; }
+    .markdown pre code { font-size:12.8px; line-height:1.65; background:none; border:0; padding:0; color:#d7dde3; }
+    .markdown blockquote { margin:0 0 1.2rem; padding:.2rem 0 .2rem 1rem; border-left:2px solid #22b8cf; color:#9aa3ac; }
+    .markdown hr { border:0; border-top:1px solid #272d34; margin:2rem 0; }
+    .markdown table { width:100%; border-collapse:collapse; margin:0 0 1.3rem; font-size:14px; display:block; overflow-x:auto; }
+    .markdown th,.markdown td { border:1px solid #272d34; padding:.5rem .7rem; text-align:left; }
+    .markdown th { background:#1b2026; color:#e5e9ed; font-weight:600; }
+    .markdown td code { white-space:nowrap; }
+    a,button { transition:color .16s ease,background-color .16s ease,border-color .16s ease; }
+    .docnav::-webkit-scrollbar { height:6px; width:6px; }
+    .docnav::-webkit-scrollbar-thumb { background:#272d34; border-radius:999px; }
+  </style>
+</head>
+<body class="font-body antialiased">
+  <header class="sticky top-0 z-40 border-b border-border/80 bg-bg/85 backdrop-blur">
+    <div class="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-6 px-5 sm:px-8">
+      <a href="../../it/index.html" class="flex items-center gap-2">
+        <span class="pulse h-2 w-2 rounded-full bg-accent"></span>
+        <span class="font-display text-[17px] font-semibold text-text">meshble</span>
+        <span class="font-mono text-[12px] text-muted">/ docs</span>
+      </a>
+      <div class="flex items-center gap-5 text-[14px] text-muted">
+        <a class="hover:text-text" href="../../it/index.html">← Landing</a>
+        <div class="flex items-center gap-1 font-mono text-[12px]">
+          <span class="rounded bg-surface px-1.5 py-0.5 text-text">IT</span>
+          <a class="rounded px-1.5 py-0.5 hover:text-text" href="../en/moduli.html">EN</a>
+        </div>
+        <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </header>
+  <div class="mx-auto max-w-[1180px] px-5 sm:px-8 lg:grid lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10">
+    <aside class="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:overflow-y-auto py-6 lg:py-9">
+      <div class="mb-3 hidden font-mono text-[11px] uppercase tracking-[0.16em] text-muted lg:block">Documentazione</div>
+      <nav class="docnav flex gap-2 overflow-x-auto pb-2 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:pb-0">
+        <a href="README.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Panoramica</a>
+        <a href="architettura.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Architettura</a>
+        <a href="installazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Installazione</a>
+        <a href="configurazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Configurazione</a>
+        <a href="moduli.html" class="scanline shrink-0 whitespace-nowrap rounded-md bg-surface px-3 py-1.5 text-[14px] text-text lg:whitespace-normal">Moduli</a>
+        <a href="moduli-custom.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Moduli custom</a>
+        <a href="api.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">API e contratto-UI</a>
+        <a href="sicurezza.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Sicurezza</a>
+      </nav>
+    </aside>
+    <main class="min-w-0 py-8 lg:py-9">
+      <article class="markdown max-w-[760px]">
+<h1 id="moduli">Moduli</h1>
+<p>Meshble è un framework ERP headless guidato da schema: ogni funzionalità di dominio è impacchettata in un <strong>modulo</strong>. Un modulo è una crate Rust che, tramite un <code>ModuleManifest</code> e una manciata di macro <code>register_*!</code>, dichiara i propri modelli, le ACL, le record rule, le azioni e i metodi di servizio nel registro a compile time. Questa pagina descrive il sistema dei moduli — il manifest, la dichiarazione delle dipendenze, la chiusura delle dipendenze, la semantica di install/uninstall, il registro di installazione e il controllo di compatibilità con il framework — e poi cataloga i moduli inclusi (<code>base</code>, <code>mail</code>, <code>sales</code>, <code>account</code>, <code>stock</code>) con i modelli che spediscono e le loro feature principali. Per scrivere un modulo proprio, vedi <a href="moduli-custom.html">moduli-custom.md</a>.</p>
+<h2 id="il-modulemanifest">Il <code>ModuleManifest</code></h2>
+<p>Ogni modulo dichiara un <code>ModuleManifest</code> statico — dati dichiarativi validati a build/install time. La struttura è definita in <code>crates/meshble-core/src/manifest.rs</code>:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> ModuleManifest <span class="op">{</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> name<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="co">/// SemVer of the module, e.g. &quot;1.0.0&quot;.</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> version<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    <span class="co">/// Compatibility range with the framework, e.g. &quot;&gt;=0.1, &lt;0.2&quot;.</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> framework<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    <span class="co">/// Dependencies on other modules, with version ranges.</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> depends<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> [ModuleDep]<span class="op">,</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> summary<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Campo</th>
+<th>Tipo</th>
+<th>Significato</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td><code>&amp;'static str</code></td>
+<td>Nome tecnico del modulo (es. <code>"sales"</code>). Deve essere unico nel catalogo.</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td><code>&amp;'static str</code></td>
+<td>Versione SemVer del modulo, indipendente da quella del framework.</td>
+</tr>
+<tr>
+<td><code>framework</code></td>
+<td><code>&amp;'static str</code></td>
+<td>Range SemVer di compatibilità con il framework (es. <code>"&gt;=0.1, &lt;0.2"</code>).</td>
+</tr>
+<tr>
+<td><code>depends</code></td>
+<td><code>&amp;'static [ModuleDep]</code></td>
+<td>Dipendenze da altri moduli, ognuna con il proprio range di versione.</td>
+</tr>
+<tr>
+<td><code>summary</code></td>
+<td><code>&amp;'static str</code></td>
+<td>Descrizione breve, mostrata da <code>meshble module list</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Ogni dipendenza è un <code>ModuleDep</code>, ovvero il nome del modulo richiesto più un vincolo di versione SemVer:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> ModuleDep <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> name<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> req<span class="op">:</span> <span class="op">&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">,</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>A differenza di una semplice lista di nomi, ogni dipendenza porta un <strong>range di versione verificabile</strong> (es. <code>^1.0</code>): la risoluzione controlla che il modulo dipeso sia presente <em>e</em> che la sua versione soddisfi il range, non solo che esista.</p>
+<h3 id="register_module"><code>register_module!</code></h3>
+<p>Il manifest da solo non è visibile al catalogo: il modulo deve registrarlo. Si fa con una riga, al livello top del modulo, subito dopo aver definito il <code>MANIFEST</code>:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">static</span> MANIFEST<span class="op">:</span> ModuleManifest <span class="op">=</span> ModuleManifest <span class="op">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    name<span class="op">:</span> <span class="st">&quot;base&quot;</span><span class="op">,</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    version<span class="op">:</span> <span class="st">&quot;1.0.0&quot;</span><span class="op">,</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    framework<span class="op">:</span> <span class="st">&quot;&gt;=0.1, &lt;0.2&quot;</span><span class="op">,</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    depends<span class="op">:</span> <span class="op">&amp;</span>[]<span class="op">,</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>    summary<span class="op">:</span> <span class="st">&quot;Foundational models: currency, partner, company&quot;</span><span class="op">,</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="pp">meshble::register_module!</span>(MANIFEST)<span class="op">;</span></span></code></pre></div>
+<p>La macro (definita in <code>crates/meshble/src/lib.rs</code>) emette una <code>ModuleRegistration</code> nel registro a compile time tramite <code>inventory</code>, conservando anche il <code>module_path!()</code> della crate. Quel percorso è ciò che consente a <code>module_of(model)</code> di risalire dal modello al modulo che lo possiede — la base del gating per modulo installato in migrazione e in servizio.</p>
+<p>Perché le registrazioni <code>inventory</code> siano presenti nel binario, la crate del modulo deve essere effettivamente linkata. Il binario <code>meshble</code> lo forza in <code>apps/meshble-cli/src/main.rs</code>:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> link_modules() <span class="op">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> _ <span class="op">=</span> (</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_base::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_mail::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_sales::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_account::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">meshble_mod_stock::</span>MANIFEST<span class="op">,</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Un modulo è <strong>disponibile</strong> quando la sua crate è linkata nel binario (compile time); diventa <strong>installato</strong> solo quando ha una riga nel registro di installazione (vedi sotto).</p>
+<h2 id="il-controllo-di-compatibilità-con-il-framework">Il controllo di compatibilità con il framework</h2>
+<p>Prima di qualunque risoluzione, ogni manifest viene confrontato con la versione del framework dalla funzione <code>check_compat</code> (in <code>crates/meshble-core/src/manifest.rs</code>). La versione del framework è la costante <code>FRAMEWORK_VERSION</code>, derivata da <code>CARGO_PKG_VERSION</code> di <code>meshble-core</code> (definita in <code>crates/meshble-core/src/lib.rs</code>) — al momento <code>0.1.0</code>. Tutti i moduli inclusi dichiarano <code>framework = "&gt;=0.1, &lt;0.2"</code>, quindi sono compatibili con questa linea.</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> check_compat(</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>    manifest<span class="op">:</span> <span class="op">&amp;</span>ModuleManifest<span class="op">,</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    framework_version<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span><span class="op">,</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">,</span> ResolutionError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> fw <span class="op">=</span> <span class="pp">Version::</span>parse(framework_version)<span class="op">?;</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> _ <span class="op">=</span> <span class="pp">Version::</span>parse(manifest<span class="op">.</span>version)<span class="op">?;</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> req <span class="op">=</span> <span class="pp">VersionReq::</span>parse(manifest<span class="op">.</span>framework)<span class="op">?;</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">!</span>req<span class="op">.</span>matches(<span class="op">&amp;</span>release_of(<span class="op">&amp;</span>fw)) <span class="op">{</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="cn">Err</span>(<span class="pp">ResolutionError::</span>Incompatible <span class="op">{</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>            module<span class="op">:</span> manifest<span class="op">.</span>name<span class="op">.</span>to_string()<span class="op">,</span></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>            needs<span class="op">:</span> manifest<span class="op">.</span>framework<span class="op">.</span>to_string()<span class="op">,</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>            found<span class="op">:</span> framework_version<span class="op">.</span>to_string()<span class="op">,</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span>)<span class="op">;</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Ok</span>(())</span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Una build pre-release (es. <code>0.1.5-rc.1</code>) viene trattata come la sua linea di rilascio (<code>0.1.5</code>) tramite <code>release_of</code>, così le RC/dev build dello stesso ciclo restano in range. Una pre-release della linea <em>successiva</em> (<code>0.2.0-rc.1</code>), invece, resta fuori range e fallisce.</p>
+<h3 id="risoluzione-e-ordinamento-topologico">Risoluzione e ordinamento topologico</h3>
+<p><code>resolve_module_set</code> prende uno slice di manifest più la versione del framework e restituisce i moduli in <strong>ordine di dipendenza (topologico)</strong> — le dipendenze prima dei dipendenti. Lungo il percorso verifica:</p>
+<ul>
+<li>compatibilità con il framework di ogni modulo (<code>check_compat</code>);</li>
+<li>che ogni dipendenza esista nel catalogo, altrimenti <code>MissingDependency</code>;</li>
+<li>che la versione della dipendenza soddisfi il range richiesto, altrimenti <code>DependencyConflict</code>;</li>
+<li>assenza di nomi duplicati (<code>DuplicateModule</code>) e di auto-dipendenze (<code>SelfDependency</code>);</li>
+<li>assenza di cicli — un ordinamento topologico alla Kahn; in caso di ciclo, <code>DependencyCycle</code> riporta <strong>solo</strong> i moduli effettivamente sul ciclo (la coda a valle viene rimossa).</li>
+</ul>
+<p>L'ordinamento è deterministico: a parità di disponibilità (più moduli pronti contemporaneamente) i nomi sono processati in ordine alfabetico, perché la risoluzione li indicizza in una <code>BTreeMap</code>. È per questo che <code>account</code> precede <code>sales</code> nell'ordine finale (entrambi diventano pronti dopo <code>mail</code>).</p>
+<p>Le possibili condizioni di errore sono enumerate da <code>ResolutionError</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Variante</th>
+<th>Quando</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BadVersion</code> / <code>BadRequirement</code></td>
+<td>Versione o range SemVer non parsabili.</td>
+</tr>
+<tr>
+<td><code>Incompatible</code></td>
+<td>Il modulo non è compatibile con la versione del framework.</td>
+</tr>
+<tr>
+<td><code>MissingDependency</code></td>
+<td>Una dipendenza dichiarata non è presente nel catalogo.</td>
+</tr>
+<tr>
+<td><code>DependencyConflict</code></td>
+<td>La dipendenza esiste ma la sua versione non soddisfa il range.</td>
+</tr>
+<tr>
+<td><code>DuplicateModule</code></td>
+<td>Due moduli dichiarano lo stesso <code>name</code>.</td>
+</tr>
+<tr>
+<td><code>SelfDependency</code></td>
+<td>Un modulo elenca se stesso tra le dipendenze.</td>
+</tr>
+<tr>
+<td><code>DependencyCycle</code></td>
+<td>Il grafo delle dipendenze contiene un ciclo.</td>
+</tr>
+</tbody>
+</table>
+<p>Il wrapper <code>resolve_modules</code> (in <code>crates/meshble-core/src/registry.rs</code>) alimenta <code>resolve_module_set</code> con tutti i manifest registrati nel catalogo e con <code>FRAMEWORK_VERSION</code>.</p>
+<h2 id="la-chiusura-delle-dipendenze">La chiusura delle dipendenze</h2>
+<p>Quando installi un modulo non ne installi solo quello: installi la sua <strong>chiusura transitiva</strong>. La funzione <code>module_closure(name)</code> (in <code>crates/meshble-core/src/registry.rs</code>) restituisce il modulo più tutte le sue dipendenze transitive, in ordine di dipendenza (dipendenze prima):</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> module_closure(name<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span><span class="dt">Vec</span><span class="op">&lt;&amp;</span><span class="ot">&#39;static</span> <span class="dt">str</span><span class="op">&gt;,</span> <span class="dt">String</span><span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> mods <span class="op">=</span> resolve_modules()<span class="op">?;</span> <span class="co">// validated + topo-sorted</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ... raccoglie name + dipendenze transitive ...</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Return in the validated dependency order (dependencies before dependents).</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Per esempio, <code>module_closure("sales")</code> restituisce <code>["base", "mail", "sales"]</code>, mentre <code>module_closure("base")</code> restituisce <code>["base"]</code>. Un nome sconosciuto produce un errore. Poiché il risultato viene riordinato secondo l'ordine validato dei moduli, la chiusura non contiene mai un dipendente prima delle sue dipendenze.</p>
+<h2 id="install-e-uninstall">Install e uninstall</h2>
+<p>I moduli si gestiscono dalla CLI (<code>apps/meshble-cli/src/main.rs</code>), sottocomando <code>module</code>:</p>
+<pre class="text"><code>meshble module list              # elenca i moduli linkati e se ciascuno è installato
+meshble module install &lt;name&gt;    # installa un modulo + la sua chiusura, poi migra le tabelle
+meshble module uninstall &lt;name&gt;  # disinstalla un modulo (tabelle e dati KEPT)</code></pre>
+<p><code>meshble module list</code> stampa una riga per modulo con nome, versione, stato (<code>installed</code> / <code>available</code>) e summary:</p>
+<pre class="text"><code>  base       1.0.0    [installed]  Foundational models: currency, partner, company
+  mail       1.0.0    [available]  Headless chatter: messages, tracking, followers, activities
+  ...</code></pre>
+<h3 id="install">Install</h3>
+<p><code>meshble module install &lt;name&gt;</code> calcola la chiusura con <code>module_closure(&amp;name)</code>, marca come installati i moduli non ancora presenti e poi richiama <code>migrate_installed</code>, che crea (idempotentemente) le tabelle dei moduli appena installati:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="pp">ModuleCmd::</span>Install <span class="op">{</span> name <span class="op">}</span> <span class="op">=&gt;</span> <span class="op">{</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> want <span class="op">=</span> module_closure(<span class="op">&amp;</span>name)<span class="op">?;</span> <span class="co">// name + transitive dependencies, deps first</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="kw">mut</span> any <span class="op">=</span> <span class="cn">false</span><span class="op">;</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> m <span class="kw">in</span> mods<span class="op">.</span>iter()<span class="op">.</span>filter(<span class="op">|</span>m<span class="op">|</span> want<span class="op">.</span>contains(<span class="op">&amp;</span>m<span class="op">.</span>name)) <span class="op">{</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> <span class="op">!</span>db<span class="op">.</span>is_module_installed(m<span class="op">.</span>name)<span class="op">.</span><span class="kw">await</span><span class="op">?</span> <span class="op">{</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>            db<span class="op">.</span>mark_module_installed(m<span class="op">.</span>name<span class="op">,</span> m<span class="op">.</span>version)<span class="op">.</span><span class="kw">await</span><span class="op">?;</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>            <span class="pp">println!</span>(<span class="st">&quot;installing {} {}&quot;</span><span class="op">,</span> m<span class="op">.</span>name<span class="op">,</span> m<span class="op">.</span>version)<span class="op">;</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>            any <span class="op">=</span> <span class="cn">true</span><span class="op">;</span></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">!</span>any <span class="op">{</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>        <span class="pp">println!</span>(<span class="st">&quot;&#39;{name}&#39; and its dependencies are already installed&quot;</span>)<span class="op">;</span></span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>    migrate_installed(db)<span class="op">.</span><span class="kw">await</span><span class="op">?;</span> <span class="co">// create the newly-installed modules&#39; tables (idempotent)</span></span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h3 id="uninstall--i-dati-restano">Uninstall — i dati restano</h3>
+<p><code>meshble module uninstall &lt;name&gt;</code> ha due guardie e una semantica non distruttiva:</p>
+<ol type="1">
+<li><strong><code>base</code> non è disinstallabile</strong> (è il modulo fondante): <code>cannot uninstall 'base' (the foundational module)</code>.</li>
+<li><strong>Guardia a valle</strong>: se un modulo installato dipende ancora da quello richiesto, l'uninstall è rifiutato finché non si disinstallano prima i dipendenti.</li>
+<li><strong>I dati vengono conservati</strong>: l'uninstall si limita a cancellare la riga dal registro di installazione (<code>mark_module_uninstalled</code>). Il modulo smette di essere migrato e servito, <strong>ma le sue tabelle e i suoi dati restano intatti</strong>; re-installandolo si recupera tutto.</li>
+</ol>
+<div class="sourceCode" id="cb10"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="pp">ModuleCmd::</span>Uninstall <span class="op">{</span> name <span class="op">}</span> <span class="op">=&gt;</span> <span class="op">{</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> name <span class="op">==</span> <span class="st">&quot;base&quot;</span> <span class="op">{</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="cn">Err</span>(<span class="st">&quot;cannot uninstall &#39;base&#39; (the foundational module)&quot;</span><span class="op">.</span>into())<span class="op">;</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ... guardia a valle sui dipendenti ...</span></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>    db<span class="op">.</span>mark_module_uninstalled(<span class="op">&amp;</span>name)<span class="op">.</span><span class="kw">await</span><span class="op">?;</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>    <span class="pp">println!</span>(<span class="st">&quot;uninstalled &#39;{name}&#39; (its tables and data are kept; re-install to restore)&quot;</span>)<span class="op">;</span></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Questo è deliberatamente non distruttivo e reversibile: l'uninstall è un <em>disable</em>, non un <em>drop</em>.</p>
+<h2 id="il-registro-di-installazione-per-modulo">Il registro di installazione per modulo</h2>
+<p>Lo stato "installato" vive in una tabella dedicata, <code>installed_module</code>, gestita da <code>crates/meshble-db/src/module_store.rs</code>:</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> installed_module</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  (name text <span class="kw">PRIMARY</span> <span class="kw">KEY</span>,</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>   installed_version text <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>   installed_at timestamptz <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="kw">DEFAULT</span> now())</span></code></pre></div>
+<p>Un modulo è <strong>disponibile</strong> quando la sua crate è linkata (compile time); è <strong>installato</strong> quando ha una riga qui. Le operazioni sul registro sono <code>installed_modules()</code>, <code>is_module_installed(name)</code>, <code>mark_module_installed(name, version)</code> e <code>mark_module_uninstalled(name)</code>.</p>
+<p>Esiste una seconda tabella, <code>meshble_module</code> (in <code>crates/meshble-db/src/migration.rs</code>), che è il <strong>ledger di migrazione per modello</strong>: traccia la versione fino a cui le tabelle di ciascun modulo sono state migrate, usata da <code>install_or_upgrade</code> (con un <code>pg_advisory_xact_lock</code> per serializzare install/upgrade concorrenti dello stesso modulo). Il metodo <code>has_prior_migration</code> distingue un DB davvero nuovo da uno aggiornato prima che esistesse la selezione dei moduli.</p>
+<h3 id="migrazione-guidata-dallinstallato">Migrazione guidata dall'installato</h3>
+<p>Su un database nuovo non è installato nulla, quindi <code>migrate</code> installa per primo <code>base</code> (e la sua chiusura); il resto è opt-in. Su un DB che aveva già migrazioni <em>prima</em> dell'introduzione della selezione per modulo, vengono mantenuti <strong>tutti</strong> i moduli già presenti, così l'upgrade non nasconde silenziosamente modelli prima disponibili:</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> db<span class="op">.</span>installed_modules()<span class="op">.</span><span class="kw">await</span><span class="op">?.</span>is_empty() <span class="op">{</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> mods <span class="op">=</span> resolve_modules()<span class="op">?;</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> want<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;&amp;</span><span class="dt">str</span><span class="op">&gt;</span> <span class="op">=</span> <span class="cf">if</span> db<span class="op">.</span>has_prior_migration()<span class="op">.</span><span class="kw">await</span><span class="op">?</span> <span class="op">{</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>        mods<span class="op">.</span>iter()<span class="op">.</span>map(<span class="op">|</span>m<span class="op">|</span> m<span class="op">.</span>name)<span class="op">.</span>collect()</span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>        module_closure(<span class="st">&quot;base&quot;</span>)<span class="op">?</span></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>    <span class="op">};</span></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ... mark_module_installed per ogni modulo in `want` ...</span></span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p><code>migrate_installed</code> poi migra solo i modelli dei moduli installati, <strong>in ordine di dipendenza degli FK</strong>, crea le tabelle di giunzione Many2many in un secondo passaggio (quando entrambi gli estremi esistono) e infine effettua il seeding dei dati di base per i moduli installati (<code>base</code> → valuta + azienda di default + sequenze; <code>account</code> → piano dei conti + giornali; <code>stock</code> → magazzino + ubicazioni di default). Allo <code>Serve</code>, il router espone <strong>solo</strong> i modelli dei moduli installati: un modello il cui modulo proprietario non è installato viene omesso dal catalogo servito.</p>
+<h2 id="catalogo-dei-moduli-inclusi">Catalogo dei moduli inclusi</h2>
+<p>Cinque moduli sono inclusi e linkati nel binario <code>meshble</code>. Tutti dichiarano <code>version = "1.0.0"</code> e <code>framework = "&gt;=0.1, &lt;0.2"</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Modulo</th>
+<th>Crate</th>
+<th>Dipende da (verificato dal MANIFEST)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base</code></td>
+<td><code>meshble-mod-base</code></td>
+<td><em>(nessuna)</em></td>
+</tr>
+<tr>
+<td><code>mail</code></td>
+<td><code>meshble-mod-mail</code></td>
+<td><code>base ^1.0</code></td>
+</tr>
+<tr>
+<td><code>sales</code></td>
+<td><code>meshble-mod-sales</code></td>
+<td><code>base ^1.0</code>, <code>mail ^1.0</code></td>
+</tr>
+<tr>
+<td><code>account</code></td>
+<td><code>meshble-mod-account</code></td>
+<td><code>base ^1.0</code>, <code>mail ^1.0</code></td>
+</tr>
+<tr>
+<td><code>stock</code></td>
+<td><code>meshble-mod-stock</code></td>
+<td><code>base ^1.0</code>, <code>sales ^1.0</code>, <code>mail ^1.0</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="base"><code>base</code></h3>
+<p>La radice del grafo: nessuna dipendenza, sempre installato per primo. Spedisce i modelli fondamentali su cui costruiscono gli altri moduli.</p>
+<p><code>depends: &amp;[]</code> (<code>modules/base/src/lib.rs</code>).</p>
+<p>Modelli:</p>
+<table>
+<thead>
+<tr>
+<th>Modello</th>
+<th>Tabella</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>res.currency</code></td>
+<td><code>res_currency</code></td>
+<td>Valuta dei campi monetari, condivisa fra le aziende.</td>
+</tr>
+<tr>
+<td><code>res.partner</code></td>
+<td><code>res_partner</code></td>
+<td>Anagrafica: aziende e persone (clienti, fornitori, contatti); gerarchia <code>parent_id</code> auto-referenziale.</td>
+</tr>
+<tr>
+<td><code>res.company</code></td>
+<td><code>res_company</code></td>
+<td>Unità di isolamento dati in multi-azienda; ha valuta (<code>currency_id</code>, richiesta) e partner (<code>partner_id</code>) collegati.</td>
+</tr>
+<tr>
+<td><code>res.groups</code></td>
+<td><code>res_groups</code></td>
+<td>Lista (read-only) dei gruppi referenziati da ACL/rule; serve all'UI per picker e filtri.</td>
+</tr>
+<tr>
+<td><code>res.users</code></td>
+<td><code>meshble_user</code></td>
+<td>Proiezione read-only del sottosistema di autenticazione; tabella <strong>esterna</strong> (mai migrata dal metamodello), via <code>register_external!("res.users")</code>.</td>
+</tr>
+<tr>
+<td><code>ir.attachment</code></td>
+<td><code>meshble_attachment</code></td>
+<td>File allegato a qualunque record via link polimorfico <code>(res_model, res_id)</code>; i byte vivono nel blob store content-addressed indicizzato per <code>checksum</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Feature principali:</p>
+<ul>
+<li><strong>Sequenze</strong> per la numerazione dei documenti: <code>base</code> effettua il seeding delle sequenze <code>SO</code> e <code>PO</code> (es. <code>SO/00001</code>, <code>PO/00001</code>) usate dalle azioni di conferma di sale/purchase.</li>
+<li><strong>Settings runtime</strong> (chiave/valore tipato) gestiti via <code>meshble config set/get/print</code>; il seeding install-time imposta <code>base_url</code> (vuoto) e <code>mode</code> (<code>production</code>) senza mai sovrascrivere una modifica dell'operatore.</li>
+<li><strong>Multi-azienda</strong>: <code>res.company</code> è l'unità di isolamento; i modelli transazionali portano un <code>company_id</code> proprio (es. <code>sale.order</code>), mentre i partner sono condivisi.</li>
+<li><strong>Seeding di base</strong>: su un'istanza nuova viene creata una valuta (<code>Euro</code>/<code>EUR</code>) e un'azienda (<code>Main Company</code>); <code>res.groups</code> viene popolato dai gruppi referenziati dalle ACL/rule registrate.</li>
+<li>ACL: il gruppo <code>user</code> legge i dati di riferimento e la lista gruppi (e può creare/modificare i partner); <code>res.users</code> e <code>ir.attachment</code> (CRUD generico) sono <code>admin</code>-only — gli utenti raggiungono i file tramite gli endpoint dedicati <code>/api/:name/:id/attachments</code> (più <code>/api/attachment/:aid/content</code> per il download e <code>/api/attachment/:aid</code> per la cancellazione), gated sull'accesso al record host.</li>
+</ul>
+<h3 id="mail"><code>mail</code></h3>
+<p>Sottosistema di chatter headless. Un modello aderisce con <strong>una riga</strong> (<code>meshble::register_mailed!("sale.order")</code>), senza mixin: guadagna un thread di messaggi indirizzato dal link polimorfico <code>(res_model, res_id)</code>, e il framework ripulisce quel thread alla cancellazione del record.</p>
+<p><code>depends: &amp;[ModuleDep { name: "base", req: "^1.0" }]</code> (<code>modules/mail/src/lib.rs</code>). Dipende da <code>base</code> perché <code>res.users</code> è l'autore del messaggio / assegnatario dell'attività.</p>
+<p>Modelli:</p>
+<table>
+<thead>
+<tr>
+<th>Modello</th>
+<th>Tabella</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mail.message</code></td>
+<td><code>mail_message</code></td>
+<td>Messaggio del thread (commento o nota di sistema); append-only, ordinato per <code>id</code>; <code>parent_id</code> per le risposte annidate.</td>
+</tr>
+<tr>
+<td><code>mail.tracking</code></td>
+<td><code>mail_tracking</code></td>
+<td>Riga di audit di un cambio campo: una coppia <code>old_value</code> / <code>new_value</code> tipizzata, portata da un messaggio <code>notification</code>.</td>
+</tr>
+<tr>
+<td><code>mail.activity</code></td>
+<td><code>mail_activity</code></td>
+<td>To-do schedulato su un record (<code>date_deadline</code> + <code>user_id</code> assegnatario); lo <code>state</code> (overdue/today/planned) è <strong>derivato</strong> da <code>date_deadline</code> in lettura, mai memorizzato.</td>
+</tr>
+<tr>
+<td><code>mail.follower</code></td>
+<td><code>mail_follower</code></td>
+<td>Sottoscrizione al thread di un record; unicità di <code>(res_model, res_id, user_id)</code> via indice composito (<code>ensure_mail_indexes</code>).</td>
+</tr>
+</tbody>
+</table>
+<p>Feature principali:</p>
+<ul>
+<li><strong>Chatter</strong> via gli endpoint dedicati <code>/api/:name/:id/messages</code> (GET) e <code>/api/:name/:id/message</code> (POST), gated sull'accesso in lettura al record host: un utente posta/legge i thread solo dei record che può già vedere.</li>
+<li><strong>Tracking</strong> dei campi marcati <code>tracked</code> nei modelli (es. <code>state</code> su <code>sale.order</code>).</li>
+<li><strong>Followers</strong> e <strong>activities</strong> sullo stesso link polimorfico (endpoint <code>/api/:name/:id/followers</code>, <code>/follow</code>, <code>/unfollow</code>, <code>/activities</code>, <code>/activity</code>, <code>/activities/:aid/done</code>).</li>
+<li><strong>Opt-in via <code>register_mailed!</code></strong>: oltre ai modelli di altri moduli, <code>mail</code> retrofitta <code>res.partner</code> (<code>register_mailed!("res.partner")</code>), così <code>base</code> non ha bisogno di dipendere da <code>mail</code> (la freccia va sempre <code>mail → base</code>).</li>
+<li>ACL: i modelli del thread sono <code>admin</code>-only sulle route CRUD generiche (moderazione/debug); l'accesso normale passa per gli endpoint chatter, che agiscono in modo elevato dopo il controllo sull'host.</li>
+</ul>
+<h3 id="sales"><code>sales</code></h3>
+<p>Gestione delle vendite e degli acquisti, con catalogo prodotti, varianti, listini e tasse.</p>
+<p><code>depends: &amp;[ModuleDep { name: "base", req: "^1.0" }, ModuleDep { name: "mail", req: "^1.0" }]</code> (<code>modules/sales/src/lib.rs</code>). <code>sale.order</code> e <code>product.template</code> aderiscono al chatter (<code>register_mailed!</code>), da cui la dipendenza da <code>mail</code>.</p>
+<p>Modelli:</p>
+<table>
+<thead>
+<tr>
+<th>Modello</th>
+<th>Tabella</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>product.category</code></td>
+<td><code>product_category</code></td>
+<td>Categoria gerarchica di prodotti.</td>
+</tr>
+<tr>
+<td><code>uom.uom</code></td>
+<td><code>uom_uom</code></td>
+<td>Unità di misura con rapporto (<code>factor</code>) rispetto al riferimento di categoria.</td>
+</tr>
+<tr>
+<td><code>product.template</code></td>
+<td><code>product_template</code></td>
+<td>Definizione condivisa del prodotto (campi comuni a tutte le varianti); aderisce al chatter.</td>
+</tr>
+<tr>
+<td><code>product.product</code></td>
+<td><code>product_product</code></td>
+<td>Variante vendibile; <code>inherits = "product.template"</code> via <code>product_tmpl_id</code>; porta riferimento interno (<code>default_code</code>), barcode, tag, prezzo extra (<code>price_extra</code>) e giacenza (<code>qty_available</code>).</td>
+</tr>
+<tr>
+<td><code>product.tag</code></td>
+<td><code>product_tag</code></td>
+<td>Etichetta/tag di variante (comodel del Many2many <code>tag_ids</code>).</td>
+</tr>
+<tr>
+<td><code>product.attribute</code></td>
+<td><code>product_attribute</code></td>
+<td>Dimensione configurabile (es. "Color").</td>
+</tr>
+<tr>
+<td><code>product.attribute.value</code></td>
+<td><code>product_attribute_value</code></td>
+<td>Valore possibile di un attributo (es. "Red").</td>
+</tr>
+<tr>
+<td><code>product.template.attribute.line</code></td>
+<td><code>product_template_attribute_line</code></td>
+<td>Riga d'attributo su un template: quali valori sono selezionati.</td>
+</tr>
+<tr>
+<td><code>product.template.attribute.value</code></td>
+<td><code>product_template_attribute_value</code></td>
+<td>Cella per-template di un valore scelto; gli FK strutturali sono engine-locked (<code>groups = "base.system"</code>), il solo <code>price_extra</code> è editabile da un manager.</td>
+</tr>
+<tr>
+<td><code>product.pricelist</code></td>
+<td><code>product_pricelist</code></td>
+<td>Listino in una valuta.</td>
+</tr>
+<tr>
+<td><code>product.pricelist.item</code></td>
+<td><code>product_pricelist_item</code></td>
+<td>Regola di listino con scope (<code>applied_on</code>: variante &gt; prodotto &gt; categoria &gt; globale) e <code>compute_price</code> (fisso o sconto %).</td>
+</tr>
+<tr>
+<td><code>account.tax</code></td>
+<td><code>account_tax</code></td>
+<td>Tassa (sottoinsieme minimale, percentuale per riga); è prevista una sua estensione da parte del modulo <code>account</code> via <code>#[extend]</code>.</td>
+</tr>
+<tr>
+<td><code>sale.order</code></td>
+<td><code>sale_order</code></td>
+<td>Ordine di vendita; <code>state</code> e <code>invoice_status</code> tracciati; aggregati <code>amount_untaxed</code>/<code>amount_tax</code>/<code>amount_total</code> calcolati dalle righe; l'estensione <code>sale_margin</code> aggiunge <code>margin</code> via <code>#[extend]</code>.</td>
+</tr>
+<tr>
+<td><code>sale.order.line</code></td>
+<td><code>sale_order_line</code></td>
+<td>Riga ordine: prodotto, quantità, prezzo, sconto, tassa; <code>price_subtotal</code>/<code>price_tax</code>/<code>price_total</code>/<code>margin</code> come compute store.</td>
+</tr>
+<tr>
+<td><code>purchase.order</code></td>
+<td><code>purchase_order</code></td>
+<td>Mirror buy-side di <code>sale.order</code>.</td>
+</tr>
+<tr>
+<td><code>purchase.order.line</code></td>
+<td><code>purchase_order_line</code></td>
+<td>Riga d'acquisto (stessa forma della riga vendita, riusa gli stessi compute).</td>
+</tr>
+<tr>
+<td><code>sale.order.discount</code></td>
+<td><code>sale_order_discount</code></td>
+<td>Wizard transient (<code>register_transient!</code>) per applicare uno sconto % a tutte le righe di un ordine.</td>
+</tr>
+</tbody>
+</table>
+<p>Azioni e metodi di servizio:</p>
+<ul>
+<li><strong>Azioni di stato</strong>: <code>confirm</code> e <code>done</code> su <code>sale.order</code> (<code>confirm</code> assegna il numero SO dalla sequenza e imposta <code>invoice_status = to_invoice</code>); <code>confirm</code> e <code>done</code> su <code>purchase.order</code> (<code>confirm</code> assegna il numero PO). Esposte come <code>POST /api/:name/:id/action/:action</code>.</li>
+<li><strong><code>generate_variants</code></strong> — materializza le combinazioni di attributi di un <code>product.template</code> in varianti <code>product.product</code>. <code>POST /api/:name/:id/generate_variants</code> (valido solo su <code>product.template</code>).</li>
+<li><strong><code>apply_pricelist</code></strong> — ri-prezza le righe di un <code>sale.order</code> a partire dal suo listino (stessa valuta). <code>POST /api/:name/:id/apply_pricelist</code> (valido solo su <code>sale.order</code>).</li>
+<li><strong>Wizard sconto</strong> — <code>POST /api/:name/open</code> apre il wizard transient (seeding via <code>default_get</code>), e <code>POST /api/:name/:id/apply_discount</code> scrive lo sconto sulle righe dell'ordine target (valido solo su <code>sale.order.discount</code>).</li>
+<li><strong><code>create_invoice</code></strong> — genera una fattura cliente postata (<code>account.move</code>) da un <code>sale.order</code> confermato; richiede il modulo <code>account</code> installato (altrimenti l'errore <code>install the account module to invoice</code>) e flippa <code>invoice_status</code> a <code>invoiced</code>. <code>POST /api/:name/:id/create_invoice</code> (valido solo su <code>sale.order</code>).</li>
+<li><strong><code>create_delivery</code></strong> — crea un trasferimento di consegna dalle righe di un <code>sale.order</code>; richiede il modulo <code>stock</code> (altrimenti <code>install the stock module to create transfers</code>). <code>POST /api/:name/:id/create_delivery</code> (valido solo su <code>sale.order</code>).</li>
+<li><strong><code>create_receipt</code></strong> — crea un trasferimento di ricezione dalle righe di un <code>purchase.order</code>; richiede il modulo <code>stock</code>. <code>POST /api/:name/:id/create_receipt</code> (valido solo su <code>purchase.order</code>).</li>
+<li><strong>Report</strong> <code>quotation</code> su <code>sale.order</code> (HTML, con escaping del contenuto memorizzato). <code>GET /api/:name/:id/report/:report</code>.</li>
+<li>ACL: i gruppi <code>sales.user</code> (operatività ordini/righe) e <code>sales.manager</code> (manutenzione del catalogo); le purchase order sono gestite pragmaticamente dagli stessi gruppi. Le record rule limitano la visibilità agli ordini non "done" (e ai soli ordini piccoli, sotto 10.000, per <code>sales.user</code>).</li>
+</ul>
+<h3 id="account"><code>account</code></h3>
+<p>Partita doppia headless: un libro mastro generale.</p>
+<p><code>depends: &amp;[ModuleDep { name: "base", req: "^1.0" }, ModuleDep { name: "mail", req: "^1.0" }]</code> (<code>modules/account/src/lib.rs</code>). <code>account.move</code> aderisce al chatter (audit trail), da cui la dipendenza da <code>mail</code>.</p>
+<p>Modelli:</p>
+<table>
+<thead>
+<tr>
+<th>Modello</th>
+<th>Tabella</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>account.account</code></td>
+<td><code>account_account</code></td>
+<td>Conto del piano dei conti; <code>account_type</code> guida il comportamento (receivable/payable/income/expense/tax…).</td>
+</tr>
+<tr>
+<td><code>account.journal</code></td>
+<td><code>account_journal</code></td>
+<td>Giornale; <code>code</code>/<code>sequence_code</code> guidano la numerazione delle registrazioni postate.</td>
+</tr>
+<tr>
+<td><code>account.move</code></td>
+<td><code>account_move</code></td>
+<td>Registrazione/fattura: raggruppa le righe dare/avere; mailed; numerata <code>/</code> finché non postata; <code>amount_total</code> è un aggregato store.</td>
+</tr>
+<tr>
+<td><code>account.move.line</code></td>
+<td><code>account_move_line</code></td>
+<td>Riga di registrazione: una scrittura su un conto GL; dare XOR avere (due colonne <code>Decimal</code>); <code>balance = debit − credit</code> derivato in lettura.</td>
+</tr>
+</tbody>
+</table>
+<p>Feature principali:</p>
+<ul>
+<li><strong>Posting in partita doppia</strong>: <code>POST /api/:name/:id/post</code> posta una registrazione in bozza (ri-controllo del bilanciamento + numerazione per giornale + <code>state → posted</code>); valido solo su <code>account.move</code>.</li>
+<li><strong>Vincolo di entry bilanciata</strong> (<code>check_balanced</code>, <code>register_constraint!</code>): il totale dare di una registrazione deve uguagliare il totale avere — un vincolo cross-record che un CHECK SQL a singola riga non può esprimere. Una registrazione vuota (Σ = 0) è bilanciata. Un secondo vincolo (<code>check_line_companies</code>) impedisce di mischiare aziende in una stessa entry.</li>
+<li><strong>Immutabilità del postato</strong>: record rule freezano le righe di una <code>account.move</code> postata (no write/create/delete) — è ciò che garantisce l'invariante "posted ⇒ balanced". Le azioni <code>button_draft</code> e <code>button_cancel</code> gestiscono i ritorni di stato.</li>
+<li><strong>Fatturazione vendite</strong>: è l'altro estremo del <code>create_invoice</code> di <code>sales</code> — <code>Db::create_sale_invoice</code> genera e posta una <code>account.move</code> cliente da un ordine confermato.</li>
+<li><strong>Seeding</strong>: quando <code>account</code> è installato, <code>migrate_installed</code> effettua il seeding di un piano dei conti minimale + giornali (Customer Invoices/Vendor Bills/Bank/Miscellaneous) per l'azienda di default.</li>
+<li>ACL: <code>account.user</code> (contabile) e <code>account.manager</code> (configurazione: creazione conti, manutenzione giornali, cancellazione registrazioni).</li>
+</ul>
+<h3 id="stock"><code>stock</code></h3>
+<p>Libro di magazzino headless: ubicazioni, magazzini, giacenze, trasferimenti e movimenti.</p>
+<p><code>depends: &amp;[ModuleDep { name: "base", req: "^1.0" }, ModuleDep { name: "sales", req: "^1.0" }, ModuleDep { name: "mail", req: "^1.0" }]</code> (<code>modules/stock/src/lib.rs</code>). Dipende da <code>base</code> (azienda), <code>sales</code> (<code>product.product</code>) e <code>mail</code> (i trasferimenti portano un thread di chatter).</p>
+<p>Modelli:</p>
+<table>
+<thead>
+<tr>
+<th>Modello</th>
+<th>Tabella</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stock.location</code></td>
+<td><code>stock_location</code></td>
+<td>Ubicazione; <code>usage</code> guida il comportamento — solo <code>internal</code> conta come giacenza reale, supplier/customer/inventory/transit sono virtuali.</td>
+</tr>
+<tr>
+<td><code>stock.warehouse</code></td>
+<td><code>stock_warehouse</code></td>
+<td>Magazzino: un'ubicazione interna con un codice breve.</td>
+</tr>
+<tr>
+<td><code>stock.quant</code></td>
+<td><code>stock_quant</code></td>
+<td>Giacenza di un prodotto in un'ubicazione (materializzata); unica su <code>(product_id, location_id)</code> via <code>ensure_stock_indexes</code>.</td>
+</tr>
+<tr>
+<td><code>stock.picking</code></td>
+<td><code>stock_picking</code></td>
+<td>Trasferimento (receipt/delivery/internal): documento che raggruppa i movimenti da una sorgente a una destinazione; mailed; <code>state</code> tracciato.</td>
+</tr>
+<tr>
+<td><code>stock.move</code></td>
+<td><code>stock_move</code></td>
+<td>Movimento di un prodotto all'interno di un trasferimento; done quando il trasferimento è validato.</td>
+</tr>
+</tbody>
+</table>
+<p>Feature principali:</p>
+<ul>
+<li><strong>Meccanismo <code>validate</code></strong>: <code>POST /api/:name/:id/validate</code> (<code>Db::validate_picking</code>) valida un trasferimento in bozza — assegna il numero dalla sequenza per tipo (<code>receipt</code>→<code>IN</code>, <code>delivery</code>→<code>OUT</code>, altrimenti <code>INT</code>), porta i movimenti a <code>done</code> con un compare-and-set (<code>FOR UPDATE</code> + ri-asserzione di <code>draft</code>) per impedire doppie validazioni concorrenti, e aggiorna le giacenze (<code>stock.quant</code>). Valido solo su <code>stock.picking</code>.</li>
+<li><strong>Integrazione con gli ordini</strong>: i metodi <code>create_delivery</code> (da <code>sale.order</code>) e <code>create_receipt</code> (da <code>purchase.order</code>) del modulo <code>sales</code> generano i <code>stock.picking</code> corrispondenti; la giacenza materializzata <code>product.product.qty_available</code> viene aggiornata dal meccanismo di move-done.</li>
+<li><strong>Immutabilità del done</strong>: record rule freezano i movimenti di un trasferimento <code>done</code> (no write/create/delete) — l'analogo stock di una registrazione contabile postata.</li>
+<li><strong>Seeding</strong>: quando <code>stock</code> è installato, <code>migrate_installed</code> effettua il seeding di un magazzino di default + le ubicazioni standard (Stock / Vendors / Customers / Inventory adjustment) per l'azienda di default.</li>
+<li>ACL: <code>stock.user</code> (operatività trasferimenti/movimenti) e <code>stock.manager</code> (configurazione: ubicazioni, magazzini, modifica diretta delle giacenze).</li>
+</ul>
+<h2 id="grafo-delle-dipendenze-e-ordine-di-installazione">Grafo delle dipendenze e ordine di installazione</h2>
+<p>Le dipendenze dichiarate nei manifest formano questo grafo aciclico. In forma di archi (<code>modulo → dipendenze</code>):</p>
+<ul>
+<li><code>base</code> → <em>(nessuna)</em></li>
+<li><code>mail</code> → <code>base</code></li>
+<li><code>sales</code> → <code>base</code>, <code>mail</code></li>
+<li><code>account</code> → <code>base</code>, <code>mail</code></li>
+<li><code>stock</code> → <code>base</code>, <code>sales</code>, <code>mail</code></li>
+</ul>
+<p>Rappresentato come grafo (le frecce vanno dal dipendente alle sue dipendenze; <code>base</code> è la radice in basso):</p>
+<pre class="text"><code>   stock
+   ├──► sales ──► mail ──► base
+   ├──► mail ──────────────► base
+   └──► base
+
+   account
+   ├──► mail ──► base
+   └──► base</code></pre>
+<p><code>base</code> non dipende da nulla; <code>mail</code> dipende solo da <code>base</code>; <code>sales</code> e <code>account</code> dipendono entrambi da <code>base</code> e <code>mail</code>; <code>stock</code> dipende da <code>base</code>, <code>sales</code> e <code>mail</code>.</p>
+<p><code>resolve_module_set</code> ordina topologicamente questo grafo (Kahn, con tiebreak alfabetico). L'ordine di installazione risultante (dipendenze prima dei dipendenti), confermato da <code>meshble version</code>, è:</p>
+<ol type="1">
+<li><code>base</code></li>
+<li><code>mail</code></li>
+<li><code>account</code></li>
+<li><code>sales</code></li>
+<li><code>stock</code></li>
+</ol>
+<p><code>account</code> precede <code>sales</code> perché entrambi diventano "pronti" appena installato <code>mail</code>, e a parità di disponibilità il tiebreak è alfabetico (<code>account</code> &lt; <code>sales</code>).</p>
+<p>Concretamente, <code>module_closure</code> produce le chiusure attese (sempre nell'ordine validato, dipendenze prima):</p>
+<ul>
+<li><code>module_closure("base")</code> → <code>["base"]</code></li>
+<li><code>module_closure("sales")</code> → <code>["base", "mail", "sales"]</code></li>
+<li><code>module_closure("stock")</code> → <code>["base", "mail", "sales", "stock"]</code></li>
+</ul>
+<p><code>base</code> è sempre installato per primo su un database nuovo; gli altri moduli sono opt-in via <code>meshble module install &lt;name&gt;</code>.</p>
+<h2 id="vedi-anche">Vedi anche</h2>
+<ul>
+<li><a href="moduli-custom.html">moduli-custom.md</a> — come scrivere un modulo proprio (manifest, modelli, ACL, azioni).</li>
+<li><a href="architettura.html">architettura.md</a> — il registro a compile time e il metamodello.</li>
+<li><a href="sicurezza.html">sicurezza.md</a> — ACL, record rule e sicurezza a livello di campo.</li>
+<li><a href="api.html">api.md</a> — il contratto-UI e gli endpoint REST.</li>
+<li><a href="installazione.html">installazione.md</a> e <a href="configurazione.html">configurazione.md</a> — bootstrap e configurazione dell'istanza.</li>
+</ul>
+
+      </article>
+      <footer class="mt-16 border-t border-border pt-6 text-[13px] text-muted">
+        <span class="font-mono">meshble · documentazione</span>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="it" class="scroll-smooth">
+<head>
+  <title>Meshble · API e contratto-UI · IT</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: {
+      bg: '#0D1014', surface: '#14181D', surface2: '#1B2026', border: '#272D34',
+      text: '#E5E9ED', muted: '#8B949E', accent: '#22B8CF', accentfg: '#06181C',
+      accenthover: '#46C8DB', success: '#3DD68C', violet: '#7B8CFF',
+    }, fontFamily: {
+      display: ['Space Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      body: ['Hanken Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+    } } } }
+  </script>
+  <style>
+    :root { color-scheme: dark; }
+    body { background:#0d1014; color:#e5e9ed; font-family:'Hanken Grotesk',ui-sans-serif,system-ui,sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+    .scanline { position:relative; }
+    .scanline::before { content:''; position:absolute; left:0; top:.15em; bottom:.15em; width:2px; border-radius:999px; background:#22b8cf; }
+    .pulse { animation:pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    @media (prefers-reduced-motion: reduce){ .pulse{animation:none} }
+    .markdown { font-size:15.5px; line-height:1.7; color:#c8cfd6; }
+    .markdown > :first-child { margin-top:0; }
+    .markdown h1,.markdown h2,.markdown h3,.markdown h4 { font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif; color:#e5e9ed; font-weight:600; letter-spacing:-.01em; line-height:1.25; }
+    .markdown h1 { font-size:2rem; margin:0 0 .75rem; letter-spacing:-.02em; }
+    .markdown h2 { font-size:1.5rem; margin:2.6rem 0 1rem; padding-top:1.4rem; border-top:1px solid #272d34; }
+    .markdown h3 { font-size:1.18rem; margin:2rem 0 .7rem; }
+    .markdown h4 { font-size:1rem; margin:1.6rem 0 .5rem; color:#cdd4db; }
+    .markdown p { margin:0 0 1.05rem; }
+    .markdown a { color:#46c8db; text-decoration:none; border-bottom:1px solid rgba(70,200,219,.3); }
+    .markdown a:hover { color:#22b8cf; border-bottom-color:#22b8cf; }
+    .markdown strong { color:#e5e9ed; font-weight:600; }
+    .markdown ul,.markdown ol { margin:0 0 1.05rem; padding-left:1.35rem; }
+    .markdown li { margin:.3rem 0; }
+    .markdown li::marker { color:#5b636c; }
+    .markdown code { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:.86em; background:#1b2026; border:1px solid #272d34; border-radius:5px; padding:.1em .38em; color:#cdd4db; }
+    .markdown pre { background:#0f1216; border:1px solid #272d34; border-radius:8px; padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.2rem; }
+    .markdown pre code { font-size:12.8px; line-height:1.65; background:none; border:0; padding:0; color:#d7dde3; }
+    .markdown blockquote { margin:0 0 1.2rem; padding:.2rem 0 .2rem 1rem; border-left:2px solid #22b8cf; color:#9aa3ac; }
+    .markdown hr { border:0; border-top:1px solid #272d34; margin:2rem 0; }
+    .markdown table { width:100%; border-collapse:collapse; margin:0 0 1.3rem; font-size:14px; display:block; overflow-x:auto; }
+    .markdown th,.markdown td { border:1px solid #272d34; padding:.5rem .7rem; text-align:left; }
+    .markdown th { background:#1b2026; color:#e5e9ed; font-weight:600; }
+    .markdown td code { white-space:nowrap; }
+    a,button { transition:color .16s ease,background-color .16s ease,border-color .16s ease; }
+    .docnav::-webkit-scrollbar { height:6px; width:6px; }
+    .docnav::-webkit-scrollbar-thumb { background:#272d34; border-radius:999px; }
+  </style>
+</head>
+<body class="font-body antialiased">
+  <header class="sticky top-0 z-40 border-b border-border/80 bg-bg/85 backdrop-blur">
+    <div class="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-6 px-5 sm:px-8">
+      <a href="../../it/index.html" class="flex items-center gap-2">
+        <span class="pulse h-2 w-2 rounded-full bg-accent"></span>
+        <span class="font-display text-[17px] font-semibold text-text">meshble</span>
+        <span class="font-mono text-[12px] text-muted">/ docs</span>
+      </a>
+      <div class="flex items-center gap-5 text-[14px] text-muted">
+        <a class="hover:text-text" href="../../it/index.html">← Landing</a>
+        <div class="flex items-center gap-1 font-mono text-[12px]">
+          <span class="rounded bg-surface px-1.5 py-0.5 text-text">IT</span>
+          <a class="rounded px-1.5 py-0.5 hover:text-text" href="../en/api.html">EN</a>
+        </div>
+        <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </header>
+  <div class="mx-auto max-w-[1180px] px-5 sm:px-8 lg:grid lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10">
+    <aside class="lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:overflow-y-auto py-6 lg:py-9">
+      <div class="mb-3 hidden font-mono text-[11px] uppercase tracking-[0.16em] text-muted lg:block">Documentazione</div>
+      <nav class="docnav flex gap-2 overflow-x-auto pb-2 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:pb-0">
+        <a href="README.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Panoramica</a>
+        <a href="architettura.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Architettura</a>
+        <a href="installazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Installazione</a>
+        <a href="configurazione.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Configurazione</a>
+        <a href="moduli.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Moduli</a>
+        <a href="moduli-custom.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Moduli custom</a>
+        <a href="api.html" class="scanline shrink-0 whitespace-nowrap rounded-md bg-surface px-3 py-1.5 text-[14px] text-text lg:whitespace-normal">API e contratto-UI</a>
+        <a href="sicurezza.html" class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-[14px] text-muted hover:bg-surface hover:text-text lg:whitespace-normal">Sicurezza</a>
+      </nav>
+    </aside>
+    <main class="min-w-0 py-8 lg:py-9">
+      <article class="markdown max-w-[760px]">
+<h1 id="api-rest-e-contratto-ui">API REST e contratto-UI</h1>
+<p>Meshble è un framework ERP headless: l'unica superficie di integrazione è un'API HTTP generata dal catalogo dei modelli installati. Questa pagina documenta l'intera API esposta dal crate <code>meshble-server</code> (router axum in <code>crates/meshble-server/src/lib.rs</code>): il flusso di autenticazione JWT, le route dati CRUD con il loro envelope di risposta, gli endpoint dei metodi di servizio (variant, pricelist, wizard, sconto, report, posting, fatturazione, validazione trasferimenti), gli endpoint di allegati e chatter (messaggi, attività, follower), la forma del contratto-UI emesso per modello, il documento OpenAPI, il formato degli errori con i relativi status code e gli endpoint di health. Per il contesto su come questi pezzi si compongono vedi <a href="architettura.html">architettura.md</a>; per l'avvio del server vedi <a href="installazione.html">installazione.md</a> e <a href="README.html">README.md</a>; per ACL, record rule e scope multi-azienda vedi <a href="sicurezza.html">sicurezza.md</a>.</p>
+<h2 id="come-è-montato-il-router">Come è montato il router</h2>
+<p>Il server espone due livelli a seconda di come l'host (la CLI <code>meshble serve</code>) lo costruisce:</p>
+<ul>
+<li><strong>Router solo-metadati</strong> — <code>router(models)</code>: monta unicamente <code>GET /openapi.json</code>, <code>GET /api/models</code> e <code>GET /api/:name/view</code>. Nessun database, nessuna autenticazione.</li>
+<li><strong>Router completo</strong> — <code>router_with_data(...)</code> (o <code>router_with_data_rasterized(...)</code> per attaccare un rasterizzatore PDF): aggiunge il blocco <code>/auth/*</code>, gli endpoint di health, e tutte le route dati CRUD + metodi di servizio + allegati + chatter, con un <code>DataBackend</code> che porta database, ACL, record rule, <code>Authenticator</code> e blob store.</li>
+</ul>
+<p>La base condivisa da entrambi è:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> base_router() <span class="op">-&gt;</span> Router<span class="op">&lt;</span>AppState<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="pp">Router::</span>new()</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>route(<span class="st">&quot;/openapi.json&quot;</span><span class="op">,</span> get(openapi_handler))</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>route(<span class="st">&quot;/api/models&quot;</span><span class="op">,</span> get(models_handler))</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>route(<span class="st">&quot;/api/:name/view&quot;</span><span class="op">,</span> get(view_handler))</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Il segmento <code>:name</code> è il <strong>nome puntato del modello</strong> (es. <code>sale.order</code>, <code>res.partner</code>, <code>product.template</code>), non il nome di tabella. La CLI passa il segreto di firma come <code>s.secrets.jwt_secret</code>, cioè la env var <strong><code>MESHBLE_JWT_SECRET</code></strong> (vedi <a href="configurazione.html">configurazione.md</a>). Il limite massimo del corpo richiesta è 25 MiB (<code>DefaultBodyLimit::max(MAX_BODY_BYTES)</code>, con <code>MAX_BODY_BYTES = 25 * 1024 * 1024</code>).</p>
+<h2 id="autenticazione">Autenticazione</h2>
+<p>L'autenticazione è basata su token JWT HS256 firmati con <code>MESHBLE_JWT_SECRET</code>. La logica di emissione e verifica vive nel crate <code>meshble-auth</code> (<code>Authenticator</code>). Esistono due <strong>tipi</strong> di token, distinti dal claim <code>kind</code>:</p>
+<ul>
+<li><strong>access token</strong> — breve durata (<code>ACCESS_TTL = 900</code> secondi, 15 minuti). Si verifica in un <code>Ctx</code> (uid, gruppi, scope multi-azienda) per ogni richiesta dati. Porta dentro di sé i gruppi e lo scope, così ogni richiesta è verificabile senza round-trip al database.</li>
+<li><strong>refresh token</strong> — lunga durata (<code>REFRESH_TTL = 2_592_000</code> secondi, 30 giorni), tracciato server-side da un <code>jti</code> e revocabile/ruotabile.</li>
+</ul>
+<p>I due tipi sono separati a livello crittografico: un refresh token <strong>non</strong> può mai essere usato come bearer per accedere ai dati, e viceversa (il claim <code>kind</code> viene controllato in <code>decode_kind</code>). L'algoritmo è fissato a HS256 (<code>Validation::new(Algorithm::HS256)</code>, che rifiuta <code>alg=none</code> e la confusione di algoritmo) e l'expiry è validato senza finestra di tolleranza (<code>validation.leeway = 0</code>).</p>
+<h3 id="post-authlogin"><code>POST /auth/login</code></h3>
+<p>Corpo: <code>{ "login": "...", "password": "..." }</code>. Le credenziali mancanti danno <code>400 login and password required</code>. La password è verificata con argon2 contro l'hash memorizzato; il login esegue <strong>sempre</strong> argon2 (contro un hash fittizio se l'utente non esiste, tramite <code>dummy_hash</code>), così tempi e corpo del <code>401</code> sono identici per utente sconosciuto e password errata (nessuna user enumeration). In caso di successo risponde <code>200</code> con la coppia di token:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;access_token&quot;</span><span class="fu">:</span> <span class="st">&quot;&lt;jwt&gt;&quot;</span><span class="fu">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;refresh_token&quot;</span><span class="fu">:</span> <span class="st">&quot;&lt;jwt&gt;&quot;</span><span class="fu">,</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;token_type&quot;</span><span class="fu">:</span> <span class="st">&quot;Bearer&quot;</span><span class="fu">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;expires_in&quot;</span><span class="fu">:</span> <span class="dv">900</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Credenziali non valide → <code>401 invalid credentials</code>.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="va">TOKEN</span><span class="op">=</span><span class="va">$(</span><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-X</span> POST http://127.0.0.1:8099/auth/login <span class="dt">\</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="dt">\</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{&quot;login&quot;:&quot;admin&quot;,&quot;password&quot;:&quot;&#39;&quot;</span><span class="va">$MESHBLE_ADMIN_PASSWORD</span><span class="st">&quot;&#39;&quot;}&#39;</span> <span class="dt">\</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="ex">python3</span> <span class="at">-c</span> <span class="st">&#39;import sys,json; print(json.load(sys.stdin)[&quot;access_token&quot;])&#39;</span><span class="va">)</span></span></code></pre></div>
+<blockquote>
+<p>L'utente <code>admin</code> viene creato al primo <code>meshble serve</code> a partire da <code>MESHBLE_ADMIN_PASSWORD</code> (se nessun admin esiste ancora); vedi <a href="installazione.html">installazione.md</a>.</p>
+</blockquote>
+<h3 id="header-authorization-bearer">Header <code>Authorization: Bearer</code></h3>
+<p>Ogni route dati richiede l'header <code>Authorization: Bearer &lt;access_token&gt;</code>. La verifica avviene nel wrapper <code>authenticate</code> del server, che delega all'<code>Authenticator::verify_bearer</code> di <code>meshble-auth</code>: l'header deve iniziare con il prefisso letterale <code>Bearer </code> e il token deve essere un access token valido. Il fallimento produce <code>401 unauthorized</code>. Il <code>Ctx</code> derivato è l'unica identità di cui si fida il server: un client non può dichiarare un gruppo senza un token firmato dal segreto.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://127.0.0.1:8099/api/res.partner <span class="dt">\</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span></span></code></pre></div>
+<h3 id="post-authrefresh"><code>POST /auth/refresh</code></h3>
+<p>Corpo: <code>{ "refresh_token": "..." }</code> (mancante → <code>400 refresh_token required</code>). Il token presentato viene verificato; poi il server lo <strong>rivendica atomicamente</strong> (<code>claim_refresh</code>), revocandolo: un replay concorrente rivendica zero righe ed è respinto (<code>401 invalid refresh token</code>), quindi niente double-spend. Sul refresh i gruppi (<code>user_groups</code>) e lo scope di company (<code>user_scope</code>) vengono <strong>riletti</strong> dal database, così riassegnazioni di gruppo o di company hanno effetto. La risposta è una <strong>nuova</strong> coppia <code>access_token</code>/<code>refresh_token</code> (rotazione del refresh token) con la stessa forma del login.</p>
+<h3 id="post-authlogout"><code>POST /auth/logout</code></h3>
+<p>Corpo: <code>{ "refresh_token": "..." }</code>. Risponde <strong>sempre</strong> <code>204 No Content</code>, senza rivelare se il token fosse valido. Se il token è verificabile, il suo <code>jti</code> viene revocato server-side (<code>revoke_refresh</code>).</p>
+<h3 id="get-authme"><code>GET /auth/me</code></h3>
+<p>Restituisce l'identità del chiamante autenticato, cioè il <code>Ctx</code> derivato dal bearer. Richiede un access token valido.</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;uid&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;groups&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;user&quot;</span><span class="ot">,</span> <span class="st">&quot;admin&quot;</span><span class="ot">,</span> <span class="st">&quot;sales.user&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;company_id&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;allowed_company_ids&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="dv">1</span><span class="ot">,</span> <span class="dv">2</span><span class="ot">]</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<h2 id="endpoint-dati-crud">Endpoint dati (CRUD)</h2>
+<p>Tutte le route sotto <code>/api/:name</code> richiedono un access token e applicano il motore ACL + record rule + scope multi-azienda nello strato <code>meshble-db</code> (i metodi <code>*_secured</code>). L'autorizzazione <strong>non</strong> è nel server: l'handler autentica, modella la risposta e mappa gli errori.</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Metodo</th>
+<th>Cosa fa</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/api/models</code></td>
+<td>GET</td>
+<td>array JSON dei nomi dei modelli serviti</td>
+</tr>
+<tr>
+<td><code>/api/:name/view</code></td>
+<td>GET</td>
+<td>contratto-UI del modello (vedi sotto)</td>
+</tr>
+<tr>
+<td><code>/api/:name</code></td>
+<td>GET</td>
+<td>lista paginata (envelope <code>data/total/limit/offset</code>)</td>
+</tr>
+<tr>
+<td><code>/api/:name</code></td>
+<td>POST</td>
+<td>crea un record, ritorna <code>{ "id": &lt;n&gt; }</code> con <code>201</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id</code></td>
+<td>GET</td>
+<td>legge un record</td>
+</tr>
+<tr>
+<td><code>/api/:name/:id</code></td>
+<td>PATCH</td>
+<td>aggiorna un record, ritorna <code>{ "updated": &lt;n&gt; }</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id</code></td>
+<td>DELETE</td>
+<td>elimina un record, ritorna <code>{ "deleted": &lt;n&gt; }</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/action/:action</code></td>
+<td>POST</td>
+<td>esegue un'azione di transizione di stato</td>
+</tr>
+</tbody>
+</table>
+<h3 id="get-apimodels"><code>GET /api/models</code></h3>
+<p>Array JSON dei nomi (puntati) dei modelli serviti, es. <code>["res.partner", "sale.order", ...]</code>.</p>
+<h3 id="get-apiname--lista-paginata"><code>GET /api/:name</code> — lista paginata</h3>
+<p>Risponde con un envelope a quattro campi:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;data&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="er">/*</span> <span class="er">record</span> <span class="er">*/</span> <span class="ot">]</span><span class="fu">,</span> <span class="dt">&quot;total&quot;</span><span class="fu">:</span> <span class="dv">123</span><span class="fu">,</span> <span class="dt">&quot;limit&quot;</span><span class="fu">:</span> <span class="dv">80</span><span class="fu">,</span> <span class="dt">&quot;offset&quot;</span><span class="fu">:</span> <span class="dv">0</span> <span class="fu">}</span></span></code></pre></div>
+<ul>
+<li><code>data</code> — la pagina di record (la <code>ListPage.data</code> dello strato db).</li>
+<li><code>total</code> — il conteggio totale sotto lo <strong>stesso</strong> filtro sicuro (non solo la pagina).</li>
+<li><code>limit</code> / <code>offset</code> — i valori effettivamente applicati (riecheggiati).</li>
+</ul>
+<h4 id="parametri-di-paginazione-ordinamento-e-filtro">Parametri di paginazione, ordinamento e filtro</h4>
+<table>
+<thead>
+<tr>
+<th>Parametro</th>
+<th>Significato</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>limit</code></td>
+<td>dimensione pagina</td>
+<td>default <code>80</code> (<code>DEFAULT_LIMIT</code>); clampato in <code>[1, 500]</code> (<code>MAX_LIMIT</code>); non intero → <code>400 limit must be an integer</code></td>
+</tr>
+<tr>
+<td><code>offset</code></td>
+<td>scostamento</td>
+<td>default <code>0</code>; valori negativi portati a <code>0</code>; non intero → <code>400 offset must be an integer</code></td>
+</tr>
+<tr>
+<td><code>order</code></td>
+<td>ordinamento</td>
+<td>lista separata da virgola; prefisso <code>-</code> = discendente, es. <code>-id</code> o <code>name,-amount_total</code></td>
+</tr>
+<tr>
+<td><code>domain</code></td>
+<td>AST di dominio JSON</td>
+<td>escape per AND/OR/NOT arbitrari (vedi sotto)</td>
+</tr>
+<tr>
+<td><code>&lt;field&gt;__&lt;op&gt;=&lt;value&gt;</code></td>
+<td>filtro a operatore-suffisso</td>
+<td>il filtro di default, condizioni AND-ate</td>
+</tr>
+</tbody>
+</table>
+<p>Esistono <strong>due forme di filtro</strong> (decisione D5), combinabili (AND-ate quando entrambe presenti):</p>
+<ol type="1">
+<li><p><strong>Operatore-suffisso</strong> <code>field__op=value</code> (gestito da <code>split_suffix</code> + <code>build_leaf</code>). Un <code>field</code> nudo senza suffisso usa l'operatore <code>eq</code>. Operatori riconosciuti:</p>
+<table>
+<thead>
+<tr>
+<th>Suffisso</th>
+<th>Operatore</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>eq</code></td>
+<td><code>=</code></td>
+</tr>
+<tr>
+<td><code>ne</code></td>
+<td><code>!=</code></td>
+</tr>
+<tr>
+<td><code>gt</code></td>
+<td><code>&gt;</code></td>
+</tr>
+<tr>
+<td><code>gte</code></td>
+<td><code>&gt;=</code></td>
+</tr>
+<tr>
+<td><code>lt</code></td>
+<td><code>&lt;</code></td>
+</tr>
+<tr>
+<td><code>lte</code></td>
+<td><code>&lt;=</code></td>
+</tr>
+<tr>
+<td><code>like</code></td>
+<td><code>LIKE</code></td>
+</tr>
+<tr>
+<td><code>ilike</code></td>
+<td><code>ILIKE</code></td>
+</tr>
+<tr>
+<td><code>in</code></td>
+<td><code>IN</code> (valore = lista separata da virgola)</td>
+</tr>
+</tbody>
+</table>
+<p>Il valore è coercito al tipo del campo (<code>coerce</code>): un suffisso ignoto, un campo ignoto, o un valore non coercibile (es. <code>'nope'</code> su un campo intero) danno <code>400</code>. Non si può filtrare direttamente su un campo <code>One2many</code>/<code>Many2many</code>. Il campo <code>id</code> è sempre filtrabile (trattato come intero).</p></li>
+<li><p><strong>AST di dominio</strong> <code>?domain=&lt;json&gt;</code> (parsato da <code>Domain::from_json</code>). JSON-encoded; respinto con <code>400 invalid domain JSON</code> se malformato. La forma è la stessa che il server compila in SQL e che il frontend valuta client-side (vedi <a href="#contratto-ui">Contratto-UI</a>). Nodi:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;state&quot;</span><span class="fu">,</span> <span class="dt">&quot;op&quot;</span><span class="fu">:</span> <span class="st">&quot;=&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="st">&quot;draft&quot;</span> <span class="fu">}</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;and&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="fu">{</span><span class="dt">&quot;field&quot;</span><span class="fu">:</span><span class="st">&quot;state&quot;</span><span class="fu">,</span><span class="dt">&quot;op&quot;</span><span class="fu">:</span><span class="st">&quot;=&quot;</span><span class="fu">,</span><span class="dt">&quot;value&quot;</span><span class="fu">:</span><span class="st">&quot;draft&quot;</span><span class="fu">}</span><span class="ot">,</span> <span class="fu">{</span><span class="dt">&quot;field&quot;</span><span class="fu">:</span><span class="st">&quot;amount&quot;</span><span class="fu">,</span><span class="dt">&quot;op&quot;</span><span class="fu">:</span><span class="st">&quot;&gt;=&quot;</span><span class="fu">,</span><span class="dt">&quot;value&quot;</span><span class="fu">:</span><span class="dv">100</span><span class="fu">}</span> <span class="ot">]</span> <span class="fu">}</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;or&quot;</span><span class="fu">:</span>  <span class="ot">[</span> <span class="er">/*</span> <span class="er">...</span> <span class="er">*/</span> <span class="ot">]</span> <span class="fu">}</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;not&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="er">/*</span> <span class="er">...</span> <span class="er">*/</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;const&quot;</span><span class="fu">:</span> <span class="kw">true</span> <span class="fu">}</span></span></code></pre></div>
+<p>I token di <code>op</code> ammessi nell'AST (<code>op_from_str</code>) sono: <code>=</code>, <code>!=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>in</code>, <code>not in</code>, <code>like</code>, <code>ilike</code>, <code>is null</code>, <code>is not null</code> (per <code>is null</code>/<code>is not null</code> il <code>value</code> è omesso).</p></li>
+</ol>
+<p>Esempi:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co"># operatore-suffisso + ordinamento + paginazione</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="st">&quot;http://127.0.0.1:8099/api/sale.order?state=draft&amp;amount_total__gte=100&amp;order=-id&amp;limit=20&quot;</span> <span class="dt">\</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="co"># AST di dominio</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-G</span> <span class="st">&quot;http://127.0.0.1:8099/api/sale.order&quot;</span> <span class="dt">\</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-urlencode</span> <span class="st">&#39;domain={&quot;or&quot;:[{&quot;field&quot;:&quot;state&quot;,&quot;op&quot;:&quot;=&quot;,&quot;value&quot;:&quot;draft&quot;},{&quot;field&quot;:&quot;state&quot;,&quot;op&quot;:&quot;=&quot;,&quot;value&quot;:&quot;sent&quot;}]}&#39;</span> <span class="dt">\</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span></span></code></pre></div>
+<h3 id="post-apiname--crea"><code>POST /api/:name</code> — crea</h3>
+<p>Corpo: un oggetto JSON (un corpo non-oggetto → <code>400 body must be a JSON object</code>). In caso di successo <code>201 Created</code> con <code>{ "id": &lt;nuovo id&gt; }</code>.</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-X</span> POST http://127.0.0.1:8099/api/res.partner <span class="dt">\</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="dt">\</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{&quot;name&quot;:&quot;ACME Spa&quot;}&#39;</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 201 → {&quot;id&quot;: 42}</span></span></code></pre></div>
+<h3 id="get-apinameid--leggi"><code>GET /api/:name/:id</code> — leggi</h3>
+<p>Restituisce il record come oggetto JSON (<code>find_one_secured</code>). I figli <code>One2many</code> sono <strong>inlined</strong> come oggetti figlio completi nel get-one. Se il record non esiste o non è permesso dal motore di sicurezza → <code>404 not found or not permitted</code> (la non-esistenza e la non-visibilità sono indistinguibili, per non rivelare l'esistenza di record non accessibili).</p>
+<h3 id="patch-apinameid--aggiorna"><code>PATCH /api/:name/:id</code> — aggiorna</h3>
+<p>Corpo: oggetto JSON con i campi da scrivere. <code>0</code> righe aggiornate (record assente o non permesso) → <code>404 not found or not permitted</code>; altrimenti <code>200</code> con <code>{ "updated": &lt;n&gt; }</code>.</p>
+<h3 id="delete-apinameid--elimina"><code>DELETE /api/:name/:id</code> — elimina</h3>
+<p><code>0</code> righe → <code>404 not found or not permitted</code>; altrimenti <code>200</code> con <code>{ "deleted": &lt;n&gt; }</code>.</p>
+<h3 id="post-apinameidactionaction--azione-di-transizione-di-stato"><code>POST /api/:name/:id/action/:action</code> — azione di transizione di stato</h3>
+<p>Esegue un'azione registrata (<code>run_action</code>, es. confermare un ordine in bozza). In caso di successo:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;ok&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span> <span class="dt">&quot;action&quot;</span><span class="fu">:</span> <span class="st">&quot;confirm&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<p>Gli errori (azione sconosciuta, accesso negato, transizione non valida) seguono <code>write_error</code> (vedi <a href="#formato-degli-errori-e-status-code">Formato degli errori</a>).</p>
+<h2 id="endpoint-dei-metodi-di-servizio">Endpoint dei metodi di servizio</h2>
+<p>Questi sono metodi di business specifici per modello. L'handler verifica il <strong>pin</strong> del modello (un nome diverso → <code>400</code>), autentica e modella la risposta; l'autorizzazione e la logica transazionale vivono nello strato <code>meshble-db</code>. Se il modello non è servito (modulo non installato) → <code>404</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Metodo</th>
+<th>Modello richiesto</th>
+<th>Risultato JSON</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/api/:name/:id/generate_variants</code></td>
+<td>POST</td>
+<td><code>product.template</code></td>
+<td><code>{ "created": [...], "archived": [...], "kept": [...] }</code></td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/apply_pricelist</code></td>
+<td>POST</td>
+<td><code>sale.order</code></td>
+<td><code>{ "priced": &lt;n&gt; }</code></td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/open</code></td>
+<td>POST</td>
+<td>qualsiasi wizard</td>
+<td>il record transiente creato</td>
+<td><code>201</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/apply_discount</code></td>
+<td>POST</td>
+<td><code>sale.order.discount</code></td>
+<td><code>{ "discounted": &lt;n&gt; }</code></td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/report/:report</code></td>
+<td>GET</td>
+<td>qualsiasi (con report registrato)</td>
+<td>HTML, o PDF con <code>?format=pdf</code></td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/post</code></td>
+<td>POST</td>
+<td><code>account.move</code></td>
+<td><code>{ "posted": "&lt;numero&gt;" }</code></td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/create_invoice</code></td>
+<td>POST</td>
+<td><code>sale.order</code></td>
+<td><code>{ "invoice": &lt;move_id&gt; }</code></td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/validate</code></td>
+<td>POST</td>
+<td><code>stock.picking</code></td>
+<td><code>{ "validated": "&lt;numero&gt;" }</code></td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/create_delivery</code></td>
+<td>POST</td>
+<td><code>sale.order</code></td>
+<td><code>{ "picking": &lt;id&gt; }</code></td>
+<td><code>201</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/create_receipt</code></td>
+<td>POST</td>
+<td><code>purchase.order</code></td>
+<td><code>{ "picking": &lt;id&gt; }</code></td>
+<td><code>201</code></td>
+</tr>
+</tbody>
+</table>
+<p>Note di dettaglio:</p>
+<ul>
+<li><strong><code>generate_variants</code></strong> — materializza il prodotto cartesiano delle attribute line di un <code>product.template</code> in <code>product.product</code>; il risultato distingue gli id creati, archiviati (una combinazione non più selezionata) e mantenuti.</li>
+<li><strong><code>apply_pricelist</code></strong> — ri-prezza le righe di un <code>sale.order</code> dalla sua pricelist; <code>priced</code> è il numero di righe ri-prezzate.</li>
+<li><strong><code>open</code> (wizard)</strong> — apre un modello transiente: calcola i suoi default server-side (<code>default_get</code>) dal contesto di apertura (<code>active_model</code> / <code>active_id</code> / <code>active_ids</code>, tutti opzionali nel corpo), crea la riga scratchpad sotto il chiamante e la restituisce per il render via contratto. Il modello deve essere bound con <code>register_wizard!</code> (altrimenti <code>400 not a wizard model</code>).</li>
+<li><strong><code>report</code></strong> — la sicurezza è l'accesso in lettura al record (<code>find_one_secured</code>): poter leggere il record è esattamente ciò che permette di stamparlo. Un nome di report sconosciuto → <code>404 unknown report</code>. Senza <code>?format=pdf</code> risponde HTML (<code>text/html</code>); con <code>?format=pdf</code> rasterizza lo stesso HTML in PDF — ma solo se è configurato un rasterizzatore, altrimenti <code>501 PDF rendering is not configured</code>.</li>
+<li><strong><code>post</code></strong> — posta una <code>account.move</code> in bozza (ricontrollo del bilancio + numerazione per giornale + stato → <code>posted</code>); ritorna il numero assegnato.</li>
+<li><strong><code>validate</code></strong> — valida un <code>stock.picking</code> in bozza (movimenti <code>done</code> + aggiornamento giacenze + numerazione, in una transazione).</li>
+<li><strong><code>create_delivery</code> / <code>create_receipt</code></strong> — creano un trasferimento in bozza (<code>Stock → Customers</code> da un <code>sale.order</code> confermato; <code>Vendors → Stock</code> da un <code>purchase.order</code> confermato) e ritornano <code>201</code> con l'id del trasferimento.</li>
+</ul>
+<p>Dal client web questi metodi record-scoped passano per un singolo helper:</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode ts"><code class="sourceCode typescript"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="co">// web/src/api.ts</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="im">export</span> <span class="kw">async</span> <span class="kw">function</span> <span class="fu">callEndpoint</span><span class="op">&lt;</span>T <span class="op">=</span> <span class="bu">Record</span><span class="op">&lt;</span><span class="dt">string</span><span class="op">,</span> <span class="dt">unknown</span><span class="op">&gt;&gt;</span>(</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>  model<span class="op">:</span> <span class="dt">string</span><span class="op">,</span></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>  id<span class="op">:</span> <span class="dt">number</span><span class="op">,</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>  path<span class="op">:</span> <span class="dt">string</span><span class="op">,</span></span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>)<span class="op">:</span> <span class="bu">Promise</span><span class="op">&lt;</span>T<span class="op">&gt;</span> {</span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> <span class="fu">asJson</span><span class="op">&lt;</span>T<span class="op">&gt;</span>(<span class="cf">await</span> <span class="fu">request</span>(<span class="vs">`/api/</span><span class="sc">${</span>model<span class="sc">}</span><span class="vs">/</span><span class="sc">${</span>id<span class="sc">}</span><span class="vs">/</span><span class="sc">${</span>path<span class="sc">}</span><span class="vs">`</span><span class="op">,</span> { method<span class="op">:</span> <span class="st">&#39;POST&#39;</span> }))</span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<h2 id="allegati">Allegati</h2>
+<p>Gli allegati sono righe <code>ir.attachment</code>: i metadati stanno nel record, i byte in un blob store content-addressed (deduplicato per checksum SHA-256). Le route ancorate al record host sono gated dall'accesso al record host: list/download richiedono <strong>read</strong> sul host, upload/delete richiedono <strong>write</strong> sul host.</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Metodo</th>
+<th>Gate</th>
+<th>Risultato</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/api/:name/:id/attachments</code></td>
+<td>GET</td>
+<td>read host</td>
+<td><code>{ "data": [ /* metadati, niente byte */ ] }</code></td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/attachments</code></td>
+<td>POST</td>
+<td>write host</td>
+<td><code>201</code> + <code>{ "id", "name", "mimetype", "file_size", "checksum" }</code></td>
+</tr>
+<tr>
+<td><code>/api/attachment/:aid/content</code></td>
+<td>GET</td>
+<td>read del record host a cui è allegato</td>
+<td>i byte (stream)</td>
+</tr>
+<tr>
+<td><code>/api/attachment/:aid</code></td>
+<td>DELETE</td>
+<td>write del record host</td>
+<td><code>{ "deleted": 1 }</code></td>
+</tr>
+</tbody>
+</table>
+<p>L'upload manda i <strong>byte grezzi</strong> nel corpo; il nome file viaggia nell'header <code>X-Filename</code> e il mimetype nel <code>Content-Type</code>. Un upload vuoto → <code>400 empty upload</code>. In download, solo un allowlist sicuro (<code>image/png</code>, <code>image/jpeg</code>, <code>image/gif</code>, <code>image/webp</code>, <code>application/pdf</code>) è servito <code>inline</code>; tutto il resto è forzato a <code>attachment</code> con <code>X-Content-Type-Options: nosniff</code>, così un blob caricato dall'utente non può mai eseguire come script nell'origin dell'app.</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode ts"><code class="sourceCode typescript"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="co">// web/src/api.ts</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="im">export</span> <span class="kw">async</span> <span class="kw">function</span> <span class="fu">uploadAttachment</span>(model<span class="op">:</span> <span class="dt">string</span><span class="op">,</span> id<span class="op">:</span> <span class="dt">number</span><span class="op">,</span> file<span class="op">:</span> <span class="bu">File</span>)<span class="op">:</span> <span class="bu">Promise</span><span class="op">&lt;</span><span class="dt">number</span><span class="op">&gt;</span> {</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>  <span class="kw">const</span> res <span class="op">=</span> <span class="cf">await</span> <span class="fu">request</span>(<span class="vs">`/api/</span><span class="sc">${</span>model<span class="sc">}</span><span class="vs">/</span><span class="sc">${</span>id<span class="sc">}</span><span class="vs">/attachments`</span><span class="op">,</span> {</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>    method<span class="op">:</span> <span class="st">&#39;POST&#39;</span><span class="op">,</span></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>    headers<span class="op">:</span> { <span class="st">&#39;content-type&#39;</span><span class="op">:</span> file<span class="op">.</span><span class="at">type</span> <span class="op">||</span> <span class="st">&#39;application/octet-stream&#39;</span><span class="op">,</span> <span class="st">&#39;x-filename&#39;</span><span class="op">:</span> file<span class="op">.</span><span class="at">name</span> }<span class="op">,</span></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>    body<span class="op">:</span> file<span class="op">,</span></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>  })</span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> (<span class="cf">await</span> <span class="fu">asJson</span><span class="op">&lt;</span>{ id<span class="op">:</span> <span class="dt">number</span> }<span class="op">&gt;</span>(res))<span class="op">.</span><span class="at">id</span></span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<h2 id="chatter-messaggi-attività-follower">Chatter: messaggi, attività, follower</h2>
+<p>Il sottosistema mail aggiunge a un modello che vi aderisce (<code>mailed = true</code> nel contratto) un thread di messaggi, attività (to-do) e follower. Tutti questi endpoint sono gated da <strong>read</strong> sul record host: non si può vedere o scrivere nel thread di un record che non si può leggere. Il modello host deve aver aderito a mail (altrimenti <code>400 model '&lt;name&gt;' has no mail thread</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Metodo</th>
+<th>Cosa fa</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/api/:name/:id/messages</code></td>
+<td>GET</td>
+<td>thread del record, dal più vecchio; ogni messaggio porta i suoi diff di tracking</td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/message</code></td>
+<td>POST</td>
+<td>posta un commento o una nota</td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/activities</code></td>
+<td>GET</td>
+<td>to-do aperte, ciascuna con uno <code>state</code> derivato</td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/activity</code></td>
+<td>POST</td>
+<td>pianifica una to-do</td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/activities/:aid/done</code></td>
+<td>POST</td>
+<td>segna una to-do come fatta</td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/followers</code></td>
+<td>GET</td>
+<td>utenti iscritti al thread</td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/follow</code></td>
+<td>POST</td>
+<td>iscrive un utente (idempotente)</td>
+</tr>
+<tr>
+<td><code>/api/:name/:id/unfollow</code></td>
+<td>POST</td>
+<td>disiscrive un utente (idempotente)</td>
+</tr>
+</tbody>
+</table>
+<p>Dettagli:</p>
+<ul>
+<li><strong>Messaggi</strong> — <code>GET .../messages</code> risponde <code>{ "data": [...] }</code>; ogni messaggio è arricchito con un array <code>tracking</code> dei suoi cambi di campo (<code>old_value</code>/<code>new_value</code>). I cambi su campi che il chiamante non può leggere sono <strong>redatti</strong> (sicurezza a livello di campo, D6, via <code>field_accessible</code>), così l'audit trail non diventa un secondo canale di lettura non protetto.</li>
+<li><strong>Postare</strong> — <code>POST .../message</code> richiede un <code>body</code> non vuoto (altrimenti <code>400 message body is required</code>). <code>message_type</code> ammette <code>comment</code> (default) o <code>note</code>; un altro valore → <code>400 invalid message_type '&lt;other&gt;'</code>. L'autore è il chiamante autenticato (<code>ctx.uid</code>), il timestamp è il clock del DB.</li>
+<li><strong>Attività</strong> — lo <code>state</code> (<code>overdue</code> / <code>today</code> / <code>planned</code>) è <strong>derivato</strong> (<code>activity_state</code>) dalla deadline confrontata con la data corrente del DB (le stringhe ISO si confrontano lessicograficamente). <code>POST .../activity</code> richiede un <code>summary</code> non vuoto; <code>date_deadline</code> è opzionale (vuoto = nessuna deadline); <code>user_id</code> opzionale defaulta al chiamante.</li>
+<li><strong>Done</strong> — <code>POST .../activities/:aid/done</code> mette <code>active</code> a false; l'attività deve appartenere a quel record host, altrimenti <code>404 activity not found on this record</code>.</li>
+<li><strong>Follow/unfollow</strong> — entrambi idempotenti: ri-seguire un record già seguito è un successo (<code>{ "ok": true, "already": true }</code>), disiscriversi quando non si è follower è un successo. Solo il gruppo <code>admin</code> può (dis)iscrivere un <code>user_id</code> diverso dal proprio (anti-IDOR, via <code>ensure_self_or_admin</code>), altrimenti <code>403 cannot manage another user's subscription</code>.</li>
+</ul>
+<h2 id="contratto-ui">Contratto-UI</h2>
+<p><code>GET /api/:name/view</code> restituisce il <strong>contratto-UI</strong> del modello: un JSON agnostico consumabile da qualunque frontend, prodotto da <code>to_ui_contract</code> in <code>crates/meshble-schema/src/lib.rs</code>. È la stessa fonte di verità del DDL e dell'OpenAPI, proiettata per il rendering del form e della tabella. Un nome di modello sconosciuto → <code>404 unknown model: &lt;name&gt;</code>.</p>
+<p>Forma generale:</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;model&quot;</span><span class="fu">:</span> <span class="st">&quot;sale.order&quot;</span><span class="fu">,</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;form&quot;</span><span class="fu">,</span></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mailed&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;fields&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="er">/*</span> <span class="er">FieldMeta</span> <span class="er">*/</span> <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;list&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;columns&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="er">/*</span> <span class="er">ColumnMeta</span> <span class="er">*/</span> <span class="ot">]</span> <span class="fu">},</span></span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;actions&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="er">/*</span> <span class="er">ActionMeta</span> <span class="er">*/</span> <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;reports&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="er">/*</span> <span class="er">ReportMeta</span> <span class="er">*/</span> <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;view&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;groups&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="er">/*</span> <span class="er">...</span> <span class="er">*/</span> <span class="ot">]</span><span class="fu">,</span> <span class="dt">&quot;pages&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="er">/*</span> <span class="er">...</span> <span class="er">*/</span> <span class="ot">]</span> <span class="fu">}</span></span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<h3 id="campi-fields">Campi (<code>fields</code>)</h3>
+<p>Ogni campo porta <code>name</code>, <code>label</code>, un <code>widget</code> suggerito dal tipo, <code>required</code> e <code>readonly</code>. I campi computed e i campi <code>related</code> sono <code>readonly: true</code> (sono specchi risolti server-side); i campi propri e i campi delegati (<code>_inherits</code>) sono editabili. Il <code>widget</code> è mappato dal tipo del campo:</p>
+<table>
+<thead>
+<tr>
+<th>Tipo campo</th>
+<th><code>widget</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Text</td>
+<td><code>char</code></td>
+</tr>
+<tr>
+<td>Html</td>
+<td><code>html</code></td>
+</tr>
+<tr>
+<td>Image</td>
+<td><code>image</code></td>
+</tr>
+<tr>
+<td>Integer</td>
+<td><code>integer</code></td>
+</tr>
+<tr>
+<td>Float</td>
+<td><code>float</code></td>
+</tr>
+<tr>
+<td>Decimal con currency</td>
+<td><code>monetary</code></td>
+</tr>
+<tr>
+<td>Decimal senza currency</td>
+<td><code>float</code></td>
+</tr>
+<tr>
+<td>Bool</td>
+<td><code>boolean</code></td>
+</tr>
+<tr>
+<td>Date</td>
+<td><code>date</code></td>
+</tr>
+<tr>
+<td>Datetime</td>
+<td><code>datetime</code></td>
+</tr>
+<tr>
+<td>Selection</td>
+<td><code>selection</code></td>
+</tr>
+<tr>
+<td>Many2one</td>
+<td><code>many2one</code></td>
+</tr>
+<tr>
+<td>One2many</td>
+<td><code>one2many</code></td>
+</tr>
+<tr>
+<td>Many2many</td>
+<td><code>many2many</code></td>
+</tr>
+</tbody>
+</table>
+<p>Attributi aggiuntivi opzionali per campo:</p>
+<ul>
+<li><code>options</code> — per i <code>selection</code>, l'array <code>{ "value", "label" }</code> delle opzioni.</li>
+<li><code>relation</code> — per <code>many2one</code>/<code>one2many</code>, il modello target; <code>inverse</code> per <code>one2many</code> (il campo FK inverso).</li>
+<li><code>default</code> — il valore di default dichiarato.</li>
+<li><code>invisible_when</code> / <code>readonly_when</code> — un <strong>AST di dominio</strong> (vedi sotto) che, quando vale per il record, rende il campo invisibile/readonly.</li>
+</ul>
+<p>Le regole <code>invisible_when</code> / <code>readonly_when</code> sono emesse come AST di dominio portabili, identici a quelli accettati da <code>?domain=</code> e compilati in SQL dal server. Il frontend le valuta client-side <strong>dai dati del record</strong>, mai con una stringa eval'd. Esempio di campo emesso:</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;confirm_date&quot;</span><span class="fu">,</span> <span class="dt">&quot;label&quot;</span><span class="fu">:</span> <span class="st">&quot;Confirm Date&quot;</span><span class="fu">,</span> <span class="dt">&quot;widget&quot;</span><span class="fu">:</span> <span class="st">&quot;date&quot;</span><span class="fu">,</span> <span class="dt">&quot;required&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;readonly&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;invisible_when&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;state&quot;</span><span class="fu">,</span> <span class="dt">&quot;op&quot;</span><span class="fu">:</span> <span class="st">&quot;=&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="st">&quot;draft&quot;</span> <span class="fu">}</span> <span class="fu">}</span></span></code></pre></div>
+<p>Le regole sono <strong>validate</strong> alla costruzione del contratto: una regola che referenzia un campo sconosciuto o di tipo errato fa fallire <code>to_ui_contract</code> (le regole UI rotte sono rifiutate, non scoperte in produzione).</p>
+<h3 id="tabella-listcolumns">Tabella (<code>list.columns</code>)</h3>
+<p>L'array delle colonne che una tabella generica renderizza (D7): i campi scalari (con colonna) più i computed on-read, gli specchi related e i campi delegati, in ordine di dichiarazione. Un <code>One2many</code> non è una colonna. Ogni colonna è <code>{ "name", "label", "widget" }</code>.</p>
+<h3 id="azioni-actions">Azioni (<code>actions</code>)</h3>
+<p>Le azioni di transizione di stato che un form può offrire come bottoni, ciascuna con i gruppi autorizzati a eseguirla (<code>groups</code> vuoto = tutti). Forma: <code>{ "name", "groups": [...] }</code>. Il frontend nasconde quelle che i gruppi del chiamante non concedono:</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode ts"><code class="sourceCode typescript"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="co">// web/src/api.ts</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="im">export</span> <span class="kw">function</span> <span class="fu">canRun</span>(action<span class="op">:</span> ActionMeta<span class="op">,</span> identity<span class="op">:</span> Identity <span class="op">|</span> <span class="dt">null</span>)<span class="op">:</span> <span class="dt">boolean</span> {</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (action<span class="op">.</span><span class="at">groups</span><span class="op">.</span><span class="at">length</span> <span class="op">===</span> <span class="dv">0</span>) <span class="cf">return</span> <span class="kw">true</span></span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="op">!</span>identity) <span class="cf">return</span> <span class="kw">false</span></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> action<span class="op">.</span><span class="at">groups</span><span class="op">.</span><span class="fu">some</span>((g) <span class="kw">=&gt;</span> identity<span class="op">.</span><span class="at">groups</span><span class="op">.</span><span class="fu">includes</span>(g))</span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<h3 id="report-reports">Report (<code>reports</code>)</h3>
+<p>I documenti stampabili per un record, ognuno <code>{ "name", "title" }</code>. Il <code>name</code> è il segmento URL (<code>GET /api/:name/:id/report/&lt;name&gt;</code>), il <code>title</code> è l'etichetta umana usata anche per il filename del download PDF.</p>
+<h3 id="vista-view">Vista (<code>view</code>)</h3>
+<p>Il layout del form dichiarato dal modello (<code>view_for</code>), oppure <code>null</code> quando il modello non dichiara una vista (il frontend applica allora un layout di default intelligente). Quando presente:</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;groups&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Identità&quot;</span><span class="fu">,</span> <span class="dt">&quot;fields&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;name&quot;</span><span class="fu">,</span> <span class="dt">&quot;full&quot;</span><span class="fu">:</span> <span class="kw">true</span> <span class="fu">}</span><span class="ot">,</span> <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;ref&quot;</span><span class="fu">,</span> <span class="dt">&quot;full&quot;</span><span class="fu">:</span> <span class="kw">false</span> <span class="fu">}</span> <span class="ot">]</span> <span class="fu">}</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;pages&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Righe&quot;</span><span class="fu">,</span> <span class="dt">&quot;fields&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;line_ids&quot;</span><span class="ot">]</span> <span class="fu">}</span></span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<ul>
+<li><code>groups</code> — gruppi titolati di campi scalari (layout a due colonne nel "sheet"); <code>title</code> può essere <code>null</code> (un gruppo di testa senza intestazione); <code>full: true</code> fa estendere il campo su entrambe le colonne (relazioni, testo lungo, immagini, nome primario).</li>
+<li><code>pages</code> — le pagine del notebook (tab) sotto lo sheet, di solito una relazione <code>One2many</code> o dettagli secondari; ogni pagina è <code>{ "title", "fields": [...] }</code>.</li>
+</ul>
+<h2 id="documento-openapi">Documento OpenAPI</h2>
+<p><code>GET /openapi.json</code> restituisce un documento <strong>OpenAPI 3.1.0</strong> generato dal catalogo dei modelli (<code>openapi</code> in <code>crates/meshble-schema/src/openapi.rs</code>). È pretty-printed, con <code>info.title = "Meshble API"</code> e <code>info.version = "0.1.0"</code>. È pensato per generare SDK tipizzati (TS/Python/Go) con tooling standard (openapi-generator), senza client scritti a mano.</p>
+<p>Per ogni modello emette:</p>
+<ul>
+<li>in <code>components.schemas</code>, uno schema oggetto chiave-nome-modello (es. <code>sale.order</code>) con <code>id</code> (<code>int64</code>, <code>readOnly</code>) e una proprietà per campo. I decimali sono <code>string</code> con <code>format: decimal</code> (per preservare la precisione NUMERIC), le date sono <code>format: date</code>/<code>date-time</code>, i <code>One2many</code> sono array di oggetti figlio (<code>$ref</code> al modello child), i <code>Many2many</code> array di id <code>int64</code>, i campi computed sono <code>readOnly</code>.</li>
+<li>in <code>paths</code>, <code>GET /api/&lt;table&gt;</code> (lista) e <code>GET /api/&lt;table&gt;/{id}</code> (get-one), con <code>operationId</code> <code>list_&lt;table&gt;</code> e <code>get_&lt;table&gt;</code>.</li>
+</ul>
+<blockquote>
+<p><strong>Attenzione — divergenza tra spec e route reali:</strong> l'OpenAPI usa il <strong>nome di tabella</strong> sottolineato (<code>m.table</code>, es. <code>/api/sale_order</code>), mentre le route dati realmente montate dal server usano il <strong>nome puntato</strong> del modello (<code>m.name</code>, es. <code>/api/sale.order</code>). Inoltre l'OpenAPI 3.1 generato in questa versione documenta solo <code>GET</code> list e <code>GET</code> get-one; non descrive ancora gli endpoint di create/update/delete, auth, metodi di servizio, allegati o chatter. Per la lista completa fai riferimento a questa pagina, non solo allo spec.</p>
+</blockquote>
+<div class="sourceCode" id="cb17"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://127.0.0.1:8099/openapi.json <span class="kw">|</span> <span class="fu">head</span> <span class="at">-40</span></span></code></pre></div>
+<h2 id="formato-degli-errori-e-status-code">Formato degli errori e status code</h2>
+<p>Gli errori sono restituiti come testo semplice nel corpo della risposta, con uno status code che ne indica la classe. Il dettaglio interno (schema, SQL, testo errore Postgres) <strong>non</strong> raggiunge mai il client: gli errori non mappati sono loggati server-side e restituiti come <code>500 internal error</code> opaco (<code>internal_error</code>). La mappatura dei <code>DbError</code> di scrittura è centralizzata in <code>write_error</code>:</p>
+<div class="sourceCode" id="cb18"><pre class="sourceCode rust"><code class="sourceCode rust"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> write_error(context<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span><span class="op">,</span> e<span class="op">:</span> DbError) <span class="op">-&gt;</span> Response <span class="op">{</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">match</span> e <span class="op">{</span></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>        <span class="pp">DbError::</span>AccessDenied <span class="op">{</span> <span class="op">..</span> <span class="op">}</span> <span class="op">=&gt;</span> (<span class="pp">StatusCode::</span>FORBIDDEN<span class="op">,</span> <span class="st">&quot;access denied&quot;</span>)<span class="op">.</span>into_response()<span class="op">,</span></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>        <span class="pp">DbError::</span>BadInput(msg) <span class="op">=&gt;</span> (<span class="pp">StatusCode::</span>BAD_REQUEST<span class="op">,</span> msg)<span class="op">.</span>into_response()<span class="op">,</span></span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>        <span class="pp">DbError::</span>Conflict(msg) <span class="op">=&gt;</span> (<span class="pp">StatusCode::</span>CONFLICT<span class="op">,</span> msg)<span class="op">.</span>into_response()<span class="op">,</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>        other <span class="op">=&gt;</span> internal_error(context<span class="op">,</span> other)<span class="op">,</span></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Quando</th>
+<th>Esempio di corpo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>400 Bad Request</code></td>
+<td>input non valido: body non-oggetto, campo/operatore/dominio di filtro non valido, valore non coercibile, modello sbagliato per un metodo pinnato, <code>message_type</code> non valido, body messaggio/summary mancante, <code>user_id</code>/<code>limit</code>/<code>offset</code> non interi</td>
+<td><code>body must be a JSON object</code>, <code>invalid domain JSON: ...</code></td>
+</tr>
+<tr>
+<td><code>401 Unauthorized</code></td>
+<td>nessun token o token non valido/scaduto; credenziali di login errate; refresh token non valido/già speso</td>
+<td><code>unauthorized</code>, <code>invalid credentials</code>, <code>invalid refresh token</code></td>
+</tr>
+<tr>
+<td><code>403 Forbidden</code></td>
+<td>accesso negato dall'ACL / record rule; tentativo di gestire l'iscrizione di un altro utente senza essere admin</td>
+<td><code>access denied</code>, <code>cannot manage another user's subscription</code></td>
+</tr>
+<tr>
+<td><code>404 Not Found</code></td>
+<td>modello sconosciuto; record assente o non permesso; report/allegato/attività non trovati</td>
+<td><code>unknown model: &lt;name&gt;</code>, <code>not found or not permitted</code>, <code>unknown report</code></td>
+</tr>
+<tr>
+<td><code>409 Conflict</code></td>
+<td>violazione di vincolo (es. unique) su una scrittura</td>
+<td>testo del conflitto</td>
+</tr>
+</tbody>
+</table>
+<p>Status aggiuntivi non-errore o di servizio: <code>201 Created</code> (create, upload, open wizard, create_delivery/receipt, follow), <code>204 No Content</code> (logout), <code>501 Not Implemented</code> (report PDF senza rasterizzatore configurato), <code>503 Service Unavailable</code> (readiness, vedi sotto).</p>
+<p>Il client web modella questa convenzione con un'<code>ApiError</code> che porta lo <code>status</code> e il corpo testuale, e ritenta <strong>una sola volta</strong> in modo trasparente su un <code>401</code> rinfrescando il token:</p>
+<div class="sourceCode" id="cb19"><pre class="sourceCode ts"><code class="sourceCode typescript"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="co">// web/src/api.ts</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="kw">async</span> <span class="kw">function</span> <span class="fu">request</span>(path<span class="op">:</span> <span class="dt">string</span><span class="op">,</span> init<span class="op">?:</span> RequestInit<span class="op">,</span> allowRetry <span class="op">=</span> <span class="kw">true</span>)<span class="op">:</span> <span class="bu">Promise</span><span class="op">&lt;</span>Response<span class="op">&gt;</span> {</span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>  <span class="kw">const</span> tokens <span class="op">=</span> <span class="fu">loadTokens</span>()</span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>  <span class="kw">const</span> headers <span class="op">=</span> <span class="kw">new</span> <span class="fu">Headers</span>(init<span class="op">?.</span><span class="at">headers</span>)</span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (tokens) headers<span class="op">.</span><span class="fu">set</span>(<span class="st">&#39;authorization&#39;</span><span class="op">,</span> <span class="vs">`Bearer </span><span class="sc">${</span>tokens<span class="op">.</span><span class="at">access</span><span class="sc">}</span><span class="vs">`</span>)</span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a>  <span class="kw">const</span> res <span class="op">=</span> <span class="cf">await</span> <span class="fu">fetch</span>(path<span class="op">,</span> { <span class="op">...</span>init<span class="op">,</span> headers })</span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (res<span class="op">.</span><span class="at">status</span> <span class="op">===</span> <span class="dv">401</span> <span class="op">&amp;&amp;</span> allowRetry <span class="op">&amp;&amp;</span> tokens <span class="op">&amp;&amp;</span> (<span class="cf">await</span> <span class="fu">tryRefresh</span>())) {</span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="fu">request</span>(path<span class="op">,</span> init<span class="op">,</span> <span class="kw">false</span>)</span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> res</span>
+<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<h2 id="endpoint-di-health">Endpoint di health</h2>
+<p>Due endpoint per le probe del container, montati solo dal router completo:</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Metodo</th>
+<th>Cosa fa</th>
+<th>Risposta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/health</code></td>
+<td>GET</td>
+<td><strong>liveness</strong>: il processo è su. Nessun accesso al DB (probe veloce).</td>
+<td><code>200</code> <code>{"status":"ok"}</code></td>
+</tr>
+<tr>
+<td><code>/ready</code></td>
+<td>GET</td>
+<td><strong>readiness</strong>: il processo può servire traffico (database raggiungibile via <code>db.ping()</code>).</td>
+<td><code>200</code> <code>{"status":"ready"}</code> oppure <code>503</code> <code>{"status":"not_ready"}</code></td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb20"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://127.0.0.1:8099/health   <span class="co"># {&quot;status&quot;:&quot;ok&quot;}</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://127.0.0.1:8099/ready    <span class="co"># {&quot;status&quot;:&quot;ready&quot;} oppure 503</span></span></code></pre></div>
+<h2 id="riferimenti">Riferimenti</h2>
+<ul>
+<li>Router e handler, envelope, status code, <code>write_error</code>: <code>crates/meshble-server/src/lib.rs</code></li>
+<li>Contratto-UI e OpenAPI: <code>crates/meshble-schema/src/lib.rs</code>, <code>crates/meshble-schema/src/openapi.rs</code></li>
+<li>Emissione/verifica dei token: <code>crates/meshble-auth/src/lib.rs</code></li>
+<li>AST di dominio (filtri, <code>invisible_when</code>/<code>readonly_when</code>): <code>crates/meshble-core/src/domain.rs</code></li>
+<li>Vista del form (gruppi e pagine): <code>crates/meshble-core/src/view.rs</code></li>
+<li>Client TypeScript della stessa API: <code>web/src/api.ts</code></li>
+</ul>
+<p>Vedi anche <a href="moduli.html">moduli.md</a> e <a href="moduli-custom.html">moduli-custom.md</a> per come i modelli, le azioni, i report, le viste e i wizard vengono dichiarati e registrati a compile time.</p>
+
+      </article>
+      <footer class="mt-16 border-t border-border pt-6 text-[13px] text-muted">
+        <span class="font-mono">meshble · documentazione</span>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>
