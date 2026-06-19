@@ -8,8 +8,10 @@ import type { Column } from '../ui'
 import { Button, Card, confirm, cx, DataTable, ErrorState, focusRing, Loading, PageHeader, useToast } from '../ui'
 import { displayValue, modelTitle } from '../format'
 import { SERVICE_ACTIONS, type ServiceAction } from '../registries/serviceActions'
-import { ContractFields, editableScalar, useRelOptions } from './ContractFields'
+import { ContractFields, isWritable, useRelOptions } from './ContractFields'
 import { ReportViewer } from './ReportViewer'
+import { WizardModal } from './WizardModal'
+import { WIZARDS, type WizardSpec } from '../registries/wizards'
 import { Chatter } from './Chatter'
 
 type FormValues = Record<string, unknown>
@@ -51,6 +53,7 @@ export function ModelForm() {
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [report, setReport] = useState<api.ReportMeta | null>(null)
+  const [wizard, setWizard] = useState<WizardSpec | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     setError(null)
@@ -93,7 +96,7 @@ export function ModelForm() {
     try {
       const payload: FormValues = {}
       for (const f of contract.fields) {
-        if (editableScalar(f) && values[f.name] !== undefined) payload[f.name] = values[f.name]
+        if (isWritable(f, values) && values[f.name] !== undefined) payload[f.name] = values[f.name]
       }
       if (isNew) {
         const newId = await api.create(model, payload)
@@ -144,6 +147,7 @@ export function ModelForm() {
 
   const actions = isNew ? [] : contract.actions.filter((a) => canRun(a, identity))
   const services = isNew ? [] : SERVICE_ACTIONS[model] ?? []
+  const wizards = isNew ? [] : WIZARDS[model] ?? []
   const reports = isNew ? [] : contract.reports ?? []
   const relationFields = contract.fields.filter((f) => f.widget === 'one2many' && f.relation)
 
@@ -171,6 +175,11 @@ export function ModelForm() {
                 {s.label}
               </Button>
             ))}
+            {wizards.map((w) => (
+              <Button key={w.wizardModel} variant="secondary" onClick={() => setWizard(w)} disabled={busy}>
+                {w.label}
+              </Button>
+            ))}
             {reports.length > 0 && <PrintMenu reports={reports} onPick={setReport} />}
             <Button variant="primary" icon={<Save size={16} />} onClick={save} disabled={busy}>
               {busy ? 'Saving…' : 'Save'}
@@ -194,6 +203,7 @@ export function ModelForm() {
       {!isNew && contract.mailed && <Chatter model={model} id={Number(id)} />}
 
       {report && <ReportViewer model={model} id={Number(id)} report={report} onClose={() => setReport(null)} />}
+      {wizard && <WizardModal spec={wizard} hostModel={model} hostId={Number(id)} onClose={() => setWizard(null)} onApplied={load} />}
     </div>
   )
 }

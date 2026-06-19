@@ -2,14 +2,21 @@
 // the per-widget FieldInput, and a hook that loads the selectable records for Many2one/Many2many pickers.
 // Kept presentation-only so both the form and a wizard render fields identically.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as api from '../api'
-import { displayValue, relLabel } from '../format'
+import { Combobox } from '../ui'
+import { evalDomain } from '../domain'
+import { buildResolver, displayValue, modelTitle, relLabel } from '../format'
 
 export type RelOption = { id: number; label: string }
 
 /** A field that can be edited and submitted (not readonly, not a One2many relation). */
 export const editableScalar = (f: api.FieldMeta): boolean => !f.readonly && f.widget !== 'one2many'
+
+/** Whether a field should be written on save — editable AND not dynamically readonly/invisible. */
+export function isWritable(f: api.FieldMeta, values: Record<string, unknown>): boolean {
+  return editableScalar(f) && !evalDomain(f.readonly_when, values) && !evalDomain(f.invisible_when, values)
+}
 
 /** Loads up to 200 records for each Many2one/Many2many relation so the field becomes a name picker. */
 export function useRelOptions(contract: api.Contract | null): Record<string, RelOption[]> {
@@ -40,7 +47,8 @@ export function useRelOptions(contract: api.Contract | null): Record<string, Rel
   return opts
 }
 
-/** The scalar-field grid: a labelled input per editable field, the read-only display otherwise. */
+/** The scalar-field grid: a labelled input per editable field, the read-only display otherwise.
+ * Applies invisible_when/readonly_when live and resolves Many2one ids to names in the read-only view. */
 export function ContractFields({
   contract,
   values,
@@ -52,22 +60,34 @@ export function ContractFields({
   relOptions: Record<string, RelOption[]>
   onChange: (name: string, value: unknown) => void
 }) {
+  const resolve = useMemo(() => {
+    const byModel: Record<string, RelOption[]> = {}
+    for (const f of contract.fields) {
+      if ((f.widget === 'many2one' || f.widget === 'many2many') && f.relation) byModel[f.relation] = relOptions[f.name] ?? []
+    }
+    return buildResolver(byModel)
+  }, [contract, relOptions])
+
   const scalarFields = contract.fields.filter((f) => f.widget !== 'one2many')
   return (
     <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-      {scalarFields.map((f) => (
-        <div key={f.name}>
-          <div className="t-label text-muted mb-1.5">
-            {f.label}
-            {f.required && <span className="text-danger"> *</span>}
+      {scalarFields.map((f) => {
+        if (evalDomain(f.invisible_when, values)) return null
+        const readonly = f.readonly || evalDomain(f.readonly_when, values)
+        return (
+          <div key={f.name}>
+            <div className="t-label text-muted mb-1.5">
+              {f.label}
+              {f.required && <span className="text-danger"> *</span>}
+            </div>
+            {readonly ? (
+              <div className="t-body text-text py-1.5">{displayValue(values[f.name], f.widget, f, resolve)}</div>
+            ) : (
+              <FieldInput field={f} value={values[f.name]} options={relOptions[f.name]} onChange={(v) => onChange(f.name, v)} />
+            )}
           </div>
-          {f.readonly ? (
-            <div className="t-body text-text py-1.5">{displayValue(values[f.name], f.widget, f)}</div>
-          ) : (
-            <FieldInput field={f} value={values[f.name]} options={relOptions[f.name]} onChange={(v) => onChange(f.name, v)} />
-          )}
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -161,22 +181,15 @@ export function FieldInput({
       )
     }
     case 'many2one':
-      // A name picker when we have the related records; raw id input only as a fallback.
+      // A searchable name picker when we have the related records; raw id input only as a fallback.
       if (options) {
         return (
-          <select
-            value={value == null ? '' : String(value)}
-            onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-            className={cls}
-            style={style}
-          >
-            <option value="">—</option>
-            {options.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <Combobox
+            value={typeof value === 'number' ? value : value == null ? null : Number(value)}
+            onChange={(v) => onChange(v)}
+            options={options.map((o) => ({ value: o.id, label: o.label }))}
+            placeholder={field.relation ? `Select ${modelTitle(field.relation)}…` : 'Select…'}
+          />
         )
       }
       return (

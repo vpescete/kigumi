@@ -4,7 +4,9 @@ import { Plus } from 'lucide-react'
 import * as api from '../api'
 import type { Column } from '../ui'
 import { Button, DataTable, ErrorState, Loading, PageHeader } from '../ui'
-import { displayValue, modelTitle } from '../format'
+import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
+
+const noResolve: Resolver = () => undefined
 
 // A list view rendered entirely from the model's contract (columns from list.columns), with no
 // per-model code — the same component serves sale.order, res.partner, product.product, …
@@ -13,20 +15,35 @@ export function ModelList() {
   const nav = useNavigate()
   const [contract, setContract] = useState<api.Contract | null>(null)
   const [page, setPage] = useState<api.Page | null>(null)
+  const [resolve, setResolve] = useState<Resolver>(() => noResolve)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
     setContract(null)
     setPage(null)
+    setResolve(() => noResolve)
     setError(null)
     async function load(): Promise<void> {
       try {
         const [c, p] = await Promise.all([api.contract(model), api.list(model, { limit: 80 })])
-        if (active) {
-          setContract(c)
-          setPage(p)
-        }
+        if (!active) return
+        setContract(c)
+        setPage(p)
+        // Resolve Many2one ids shown in columns to names (best-effort, one fetch per related model).
+        const cols = c.fields.filter((f) => f.widget === 'many2one' && f.relation && c.list.columns.some((col) => col.name === f.name))
+        const byModel: Record<string, { id: number; label: string }[]> = {}
+        await Promise.all(
+          cols.map(async (f) => {
+            try {
+              const rel = await api.list(f.relation as string, { limit: 200 })
+              byModel[f.relation as string] = rel.data.map((r) => ({ id: r.id, label: relLabel(r) }))
+            } catch {
+              /* best-effort — the column falls back to #id */
+            }
+          }),
+        )
+        if (active) setResolve(() => buildResolver(byModel))
       } catch (err: unknown) {
         if (active) setError(err instanceof Error ? err.message : 'Failed to load')
       }
@@ -47,7 +64,7 @@ export function ModelList() {
       header: col.label,
       align: numeric ? 'right' : 'left',
       mono: numeric,
-      render: (row: api.Row) => displayValue(row[col.name], col.widget, field),
+      render: (row: api.Row) => displayValue(row[col.name], col.widget, field, resolve),
     }
   })
 
