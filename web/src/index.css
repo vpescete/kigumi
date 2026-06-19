@@ -141,6 +141,20 @@ body * {
   }
 }
 
+/* Live indicator pulse (reduced-motion → steady dot). */
+.msh-pulse {
+  animation: msh-pulse 2s ease-in-out infinite;
+}
+@keyframes msh-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
 /* Loading skeleton shimmer (reduced-motion kills the animation → a static surface2 block). */
 .msh-skeleton {
   background: linear-gradient(90deg, var(--color-surface2), var(--color-border), var(--color-surface2));
