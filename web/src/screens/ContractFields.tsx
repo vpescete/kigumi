@@ -3,8 +3,9 @@
 // Kept presentation-only so both the form and a wizard render fields identically.
 
 import { useEffect, useMemo, useState } from 'react'
+import { X } from 'lucide-react'
 import * as api from '../api'
-import { Combobox } from '../ui'
+import { Combobox, cx, focusRing } from '../ui'
 import { evalDomain } from '../domain'
 import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
 
@@ -187,15 +188,20 @@ export function FieldInput({
   const style = { height: 'var(--control-h)' }
 
   switch (field.widget) {
-    case 'boolean':
+    case 'boolean': {
+      const on = Boolean(value)
       return (
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          onChange={(e) => onChange(e.target.checked)}
-          className="h-4 w-4 mt-1.5 accent-[var(--color-accent)]"
-        />
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          onClick={() => onChange(!on)}
+          className={cx('relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors', on ? 'border-accent bg-accent' : 'border-border bg-surface2', focusRing)}
+        >
+          <span className={cx('inline-block h-4 w-4 rounded-full transition-transform', on ? 'translate-x-6 bg-accent-fg' : 'translate-x-1 bg-muted')} />
+        </button>
       )
+    }
     case 'selection':
       return (
         <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)} className={cls} style={style}>
@@ -241,24 +247,15 @@ export function FieldInput({
           style={style}
         />
       )
-    case 'many2many': {
-      // SET semantics: the value is the full array of selected target ids.
-      const selected = Array.isArray(value) ? (value as number[]).map(String) : []
+    case 'many2many':
       return (
-        <select
-          multiple
-          value={selected}
-          onChange={(e) => onChange(Array.from(e.target.selectedOptions).map((o) => Number(o.value)))}
-          className={`${cls} min-h-[5rem] py-1.5`}
-        >
-          {(options ?? []).map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        <MultiPicker
+          value={Array.isArray(value) ? (value as number[]) : []}
+          onChange={(ids) => onChange(ids)}
+          options={options ?? []}
+          placeholder={field.relation ? `Add ${modelTitle(field.relation)}…` : 'Add…'}
+        />
       )
-    }
     case 'many2one':
       // A searchable name picker when we have the related records; raw id input only as a fallback.
       if (options) {
@@ -292,4 +289,46 @@ export function FieldInput({
         />
       )
   }
+}
+
+/** A Many2many editor: selected targets as removable chips + a searchable picker to add more.
+ * SET semantics — `value` is the full array of selected ids. */
+function MultiPicker({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: number[]
+  onChange: (ids: number[]) => void
+  options: RelOption[]
+  placeholder?: string
+}) {
+  const byId = new Map(options.map((o) => [o.id, o.label]))
+  const available = options.filter((o) => !value.includes(o.id)).map((o) => ({ value: o.id, label: o.label }))
+  return (
+    <div className="rounded-md border border-border bg-surface2 p-1.5">
+      {value.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap gap-1.5">
+          {value.map((id) => (
+            <span key={id} className="inline-flex items-center gap-1 rounded-sm bg-accent-soft px-2 py-0.5 text-[12px] text-accent">
+              {byId.get(id) ?? `#${id}`}
+              <button type="button" aria-label="Remove" onClick={() => onChange(value.filter((v) => v !== id))} className={cx('hover:text-text', focusRing)}>
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <Combobox
+        value={null}
+        onChange={(id) => {
+          if (id != null) onChange([...value, Number(id)])
+        }}
+        options={available}
+        placeholder={value.length ? 'Add another…' : placeholder}
+        allowClear={false}
+      />
+    </div>
+  )
 }
