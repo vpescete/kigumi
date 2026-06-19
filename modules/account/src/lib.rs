@@ -204,7 +204,43 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "account.move.line", group: "account.user", read: true, write: true, create: true, delete: true },
     Acl { model: "account.move.line", group: "account.manager", read: true, write: true, create: true, delete: true },
 ];
+
+/// `button_draft`: reset a posted or cancelled entry to draft (for correction). Posting is the
+/// cross-record `Db::post_move` (it reads the journal sequence), but un-posting is a pure state flip.
+fn reset_to_draft(i: &ActionInput) -> Result<ActionOutcome, String> {
+    match i.str("state") {
+        "posted" | "cancel" => Ok(ActionOutcome::new().set("state", Value::Str("draft".to_string()))),
+        s => Err(format!("only a posted or cancelled entry can be reset to draft (state is '{s}')")),
+    }
+}
+meshble::register_action!("account.move", "button_draft", reset_to_draft, &["account.user"]);
+
+/// `button_cancel`: cancel a draft or posted entry.
+fn cancel_move(i: &ActionInput) -> Result<ActionOutcome, String> {
+    match i.str("state") {
+        "draft" | "posted" => Ok(ActionOutcome::new().set("state", Value::Str("cancel".to_string()))),
+        s => Err(format!("cannot cancel an entry in state '{s}'")),
+    }
+}
+meshble::register_action!("account.move", "button_cancel", cancel_move, &["account.user"]);
+
+/// Posted-entry immutability: a posted move's journal items are frozen — no write, create or delete
+/// (only sudo, or un-posting first, can touch them). This is what guarantees the GL invariant
+/// "posted ⇒ balanced": a balanced posted entry cannot be silently unbalanced afterwards. Read stays
+/// unrestricted (posted entries must remain visible). Reaching `move_id.state` covers BOTH the direct
+/// line path and the nested `line_ids` path (child writes re-check the child's record rules).
+fn line_move_not_posted() -> Domain {
+    Domain::field("move_id.state").ne("posted")
+}
+
+pub static RECORD_RULES: &[RecordRule] = &[
+    RecordRule { model: "account.move.line", groups: &[], ops: &[Operation::Write], domain: RuleDomain::Static(line_move_not_posted) },
+    RecordRule { model: "account.move.line", groups: &[], ops: &[Operation::Create], domain: RuleDomain::Static(line_move_not_posted) },
+    RecordRule { model: "account.move.line", groups: &[], ops: &[Operation::Delete], domain: RuleDomain::Static(line_move_not_posted) },
+];
+
 meshble::register_acls!(ACLS);
+meshble::register_rules!(RECORD_RULES);
 
 #[cfg(test)]
 mod tests {

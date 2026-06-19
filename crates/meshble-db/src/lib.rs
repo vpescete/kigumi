@@ -1597,6 +1597,78 @@ impl Db {
         Ok(applied)
     }
 
+    /// Posts an `account.move` (draft → posted): re-checks the balanced-entry invariant, numbers the
+    /// entry from its journal's sequence (`sequence_code`, falling back to the journal `code`), and
+    /// flips state to posted. Cross-record (reads the journal), so a service method — not a pure action.
+    /// Runs under the caller ctx; returns the assigned entry number.
+    pub async fn post_move(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        move_id: i64,
+    ) -> Result<String, DbError> {
+        let move_model = resolve_registered("account.move").map_err(DbError::BadInput)?;
+        let journal_model = resolve_registered("account.journal").map_err(DbError::BadInput)?;
+        let line_model = resolve_registered("account.move.line").map_err(DbError::BadInput)?;
+
+        if !check_access(Operation::Write, move_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: move_model.name.to_string(), operation: "post" });
+        }
+        let mv = self
+            .find_one_secured(&move_model, ctx, acls, rules, move_id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("move not found or not permitted".to_string()))?;
+        let state = mv.get("state").and_then(|v| v.as_str()).unwrap_or("");
+        if state != "draft" {
+            return Err(DbError::BadInput(format!("only a draft entry can be posted (state is '{state}')")));
+        }
+
+        // Re-check the balance at post time (defense in depth — create already enforced it).
+        let lines = self
+            .find_secured(&line_model, ctx, acls, rules, Some(&Domain::field("move_id").eq(move_id)))
+            .await?;
+        if lines.is_empty() {
+            return Err(DbError::BadInput("cannot post an entry with no lines".to_string()));
+        }
+        let (mut debit, mut credit) = (rust_decimal::Decimal::ZERO, rust_decimal::Decimal::ZERO);
+        let parse = |l: &Json, f: &str| -> rust_decimal::Decimal {
+            l.get(f).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or_default()
+        };
+        for l in &lines {
+            debit += parse(l, "debit");
+            credit += parse(l, "credit");
+        }
+        if debit != credit {
+            return Err(DbError::BadInput(format!("cannot post an unbalanced entry: debit {debit} != credit {credit}")));
+        }
+
+        // Number the entry from its journal's sequence (sequence_code, else the journal code).
+        let journal_id = mv
+            .get("journal_id")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| DbError::BadInput("the move has no journal".to_string()))?;
+        let journal = self
+            .find_one_secured(&journal_model, ctx, acls, rules, journal_id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("journal not found or not permitted".to_string()))?;
+        let sc = journal.get("sequence_code").and_then(|v| v.as_str()).unwrap_or("");
+        let code = journal.get("code").and_then(|v| v.as_str()).unwrap_or("");
+        let seq = if !sc.is_empty() {
+            sc
+        } else if !code.is_empty() {
+            code
+        } else {
+            return Err(DbError::BadInput("the journal has no sequence code".to_string()));
+        };
+        self.ensure_sequence(seq, &format!("{seq}/"), "", 5).await?;
+        let number = self.next_value(seq).await?;
+
+        let payload = serde_json::json!({ "state": "posted", "name": number });
+        self.update_secured(&move_model, ctx, acls, rules, move_id, payload.as_object().unwrap()).await?;
+        Ok(number)
+    }
+
     /// Sets a variant's own `active` flag inside `tx` (archive / reactivate during reconciliation). A
     /// direct UPDATE on the variant's own column — never the delegated template field — so it touches
     /// only this variant, not the shared template or its siblings.
