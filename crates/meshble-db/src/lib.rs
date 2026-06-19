@@ -1669,6 +1669,139 @@ impl Db {
         Ok(number)
     }
 
+    /// First ACTIVE id of `model` whose `field` equals `value` and whose company matches the invoicing
+    /// company exactly — `company_id = c` when a company is given, else `company_id IS NULL` (shared).
+    /// Used to resolve the receivable / income / tax account and the sale journal. Pinning the company
+    /// (rather than "any company") keeps the lookup company-deterministic even though it runs elevated,
+    /// so a shared order can only book to shared accounts — never another company's ledger.
+    async fn first_match(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        field: &str,
+        value: &str,
+        company: Option<i64>,
+    ) -> Result<Option<i64>, DbError> {
+        let mut dom = Domain::field(field).eq(value).and(Domain::field("active").eq(true));
+        dom = match company {
+            Some(c) => dom.and(Domain::field("company_id").eq(c)),
+            None => dom.and(Domain::field("company_id").is_null()),
+        };
+        Ok(self.find_ids_secured(model, ctx, &[], &[], Some(&dom)).await?.into_iter().next())
+    }
+
+    /// Generates a posted customer invoice (`account.move`, out_invoice) from a confirmed sale order:
+    /// one income credit (untaxed), one tax credit (if any) and a receivable debit (total) — a balanced
+    /// entry, posted (numbered + frozen) — then flips the order's `invoice_status` to invoiced. Gated on
+    /// the caller's WRITE of the order; the GL posting runs elevated, so a salesperson need not also hold
+    /// account groups. Returns the new move id. (v1: a single income line for the untaxed total, not one
+    /// per order line; the vendor-bill mirror for purchase.order is a follow-up.)
+    ///
+    /// Ordering: the order is CLAIMED first (the `to_invoice → invoiced` flip under the caller, which
+    /// enforces the order's WRITE ACL **and** WRITE record rule + company, requiring exactly one row),
+    /// and only then is the move created and posted. So the elevated GL effect never runs unless the
+    /// caller is actually authorized to write the order, and a denied claim leaves no orphan move.
+    /// KNOWN LIMITATION (deferred): the claim and the move are not one transaction, and the flip is by
+    /// id (not a compare-and-set on the status), so a DB failure between the claim and the posted move,
+    /// or two simultaneous claims racing before either commits, can still desync (an order invoiced
+    /// without a move, recoverable by reset). A fully transactional / FOR UPDATE invoicing path closes it.
+    pub async fn create_sale_invoice(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        order_id: i64,
+    ) -> Result<i64, DbError> {
+        let order_model = resolve_registered("sale.order").map_err(DbError::BadInput)?;
+        let account_model = resolve_registered("account.account")
+            .map_err(|_| DbError::BadInput("install the account module to invoice".to_string()))?;
+        let journal_model = resolve_registered("account.journal").map_err(DbError::BadInput)?;
+        let move_model = resolve_registered("account.move").map_err(DbError::BadInput)?;
+
+        if !check_access(Operation::Write, order_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "create_invoice" });
+        }
+        let order = self
+            .find_one_secured(&order_model, ctx, acls, rules, order_id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
+        let status = order.get("invoice_status").and_then(|v| v.as_str()).unwrap_or("");
+        if status != "to_invoice" {
+            return Err(DbError::BadInput(format!("order is not ready to invoice (invoice status '{status}')")));
+        }
+        let partner = order.get("partner_id").and_then(|v| v.as_i64());
+        let currency = order.get("currency_id").and_then(|v| v.as_i64());
+        // Pin the invoicing company: the order's, else the caller's active company. The chart lookup is
+        // then company-deterministic (never another company's ledger), and it is stamped on the move.
+        let company = order.get("company_id").and_then(|v| v.as_i64()).or(ctx.company_id);
+        let amount = |k: &str| -> rust_decimal::Decimal {
+            order.get(k).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or_default()
+        };
+        let (untaxed, tax, total) = (amount("amount_untaxed"), amount("amount_tax"), amount("amount_total"));
+        // No degenerate invoices: a non-positive total is a credit-note / data-error case, not an invoice.
+        if total <= rust_decimal::Decimal::ZERO {
+            return Err(DbError::BadInput("cannot invoice an order with a non-positive total".to_string()));
+        }
+
+        // Resolve the chart BEFORE claiming the order, so a misconfiguration fails before any side effect.
+        let elevated = ctx.sudo();
+        let receivable = self
+            .first_match(&account_model, &elevated, "account_type", "receivable", company)
+            .await?
+            .ok_or_else(|| DbError::BadInput("no receivable account configured".to_string()))?;
+        let income = self
+            .first_match(&account_model, &elevated, "account_type", "income", company)
+            .await?
+            .ok_or_else(|| DbError::BadInput("no income account configured".to_string()))?;
+        let journal = self
+            .first_match(&journal_model, &elevated, "journal_type", "sale", company)
+            .await?
+            .ok_or_else(|| DbError::BadInput("no sale journal configured".to_string()))?;
+        // The tax credit is written whenever there is any tax (incl. a negative one) so the move always
+        // balances; `> 0` would silently drop a negative tax and unbalance the entry.
+        let tax_account = if tax != rust_decimal::Decimal::ZERO {
+            Some(
+                self.first_match(&account_model, &elevated, "account_type", "tax", company)
+                    .await?
+                    .ok_or_else(|| DbError::BadInput("no tax account configured".to_string()))?,
+            )
+        } else {
+            None
+        };
+
+        // CLAIM the order under the caller — this enforces the WRITE record rule + company on the order,
+        // and exactly-one-row means we are authorized; abort (no GL effect) otherwise.
+        let claim = serde_json::json!({ "invoice_status": "invoiced" });
+        if self.update_secured(&order_model, ctx, acls, rules, order_id, claim.as_object().unwrap()).await? != 1 {
+            return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "create_invoice" });
+        }
+
+        // Balanced invoice: income credit (untaxed) + tax credit (if any) + receivable debit (total).
+        let mut lines = vec![serde_json::json!({
+            "account_id": income, "name": "Untaxed Amount", "debit": "0", "credit": untaxed.to_string(),
+            "partner_id": partner, "company_id": company
+        })];
+        if let Some(tax_account) = tax_account {
+            lines.push(serde_json::json!({
+                "account_id": tax_account, "name": "Taxes", "debit": "0", "credit": tax.to_string(),
+                "partner_id": partner, "company_id": company
+            }));
+        }
+        lines.push(serde_json::json!({
+            "account_id": receivable, "name": "Receivable", "debit": total.to_string(), "credit": "0",
+            "partner_id": partner, "company_id": company
+        }));
+
+        let move_payload = serde_json::json!({
+            "move_type": "out_invoice", "journal_id": journal, "partner_id": partner,
+            "currency_id": currency, "company_id": company, "line_ids": lines
+        });
+        let move_id =
+            self.insert_secured(&move_model, &elevated, &[], &[], move_payload.as_object().unwrap()).await?;
+        self.post_move(&elevated, &[], &[], move_id).await?;
+        Ok(move_id)
+    }
+
     /// Sets a variant's own `active` flag inside `tx` (archive / reactivate during reconciliation). A
     /// direct UPDATE on the variant's own column — never the delegated template field — so it touches
     /// only this variant, not the shared template or its siblings.

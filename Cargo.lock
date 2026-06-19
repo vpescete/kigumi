@@ -1303,6 +1303,7 @@ version = "1.0.0"
 dependencies = [
  "meshble",
  "meshble-db",
+ "meshble-mod-account",
  "meshble-mod-base",
  "meshble-mod-mail",
  "rust_decimal",

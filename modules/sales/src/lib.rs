@@ -596,15 +596,10 @@ fn confirm_order(i: &ActionInput) -> Result<ActionOutcome, String> {
 }
 meshble::register_action!("sale.order", "confirm", confirm_order, &["sales.user"]);
 
-/// `create_invoice`: the invoicing seam — flips a confirmed order from To Invoice to Invoiced. v1 has
-/// no `account.move`; the full account module later posts the real invoice behind this same action.
-fn create_invoice(i: &ActionInput) -> Result<ActionOutcome, String> {
-    match i.str("invoice_status") {
-        "to_invoice" => Ok(ActionOutcome::new().set("invoice_status", Value::Str("invoiced".to_string()))),
-        s => Err(format!("nothing to invoice (invoice status is '{s}')")),
-    }
-}
-meshble::register_action!("sale.order", "create_invoice", create_invoice, &["sales.user"]);
+// Invoicing is now a cross-record service method that posts a real account.move (see
+// `Db::create_sale_invoice` + `POST /api/sale.order/:id/create_invoice`), not a pure state action —
+// `confirm` still flips invoice_status to "to_invoice", and create_invoice flips it to "invoiced" as a
+// side effect of generating the move.
 
 /// `done`: a confirmed sale is locked as done (its total then becomes read-only via the UI rule).
 fn set_done(i: &ActionInput) -> Result<ActionOutcome, String> {

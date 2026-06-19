@@ -124,6 +124,8 @@ pub fn router_with_data_rasterized(
         .route("/api/:name/:id/report/:report", get(report_handler))
         // Post a draft journal entry: balance re-check + per-journal numbering + state -> posted.
         .route("/api/:name/:id/post", post(post_move_handler))
+        // Generate a posted customer invoice (account.move) from a confirmed sale order.
+        .route("/api/:name/:id/create_invoice", post(create_invoice_handler))
         // Attachments (ir.attachment): files on a record. List/download need host read; upload/delete
         // need host write. Bytes live in the content-addressed blob store; the row is metadata.
         .route("/api/:name/:id/attachments", get(list_attachments_handler).post(upload_attachment_handler))
@@ -562,6 +564,30 @@ fn value_to_json(v: &Value) -> Json2 {
         Value::Bool(b) => Json2::Bool(*b),
         Value::Null => Json2::Null,
         Value::List(xs) => Json2::Array(xs.iter().map(value_to_json).collect()),
+    }
+}
+
+/// Generates a posted customer invoice (account.move) from a confirmed sale order. v1: pinned to
+/// sale.order. Authorization (WRITE on the order) + the GL posting live in the db layer.
+async fn create_invoice_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    if name != "sale.order" {
+        return (StatusCode::BAD_REQUEST, "create_invoice is only valid on sale.order").into_response();
+    }
+    if let Err(r) = resolve_model(&state, &name) {
+        return r;
+    }
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.create_sale_invoice(&ctx, backend.acls, backend.rules, id).await {
+        Ok(move_id) => json_response(serde_json::json!({ "invoice": move_id }).to_string()),
+        Err(e) => write_error("create_invoice", e),
     }
 }
 
