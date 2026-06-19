@@ -23,6 +23,7 @@ pub mod prelude {
         RuleDomain, Sql, TrackedFieldRegistration, TransientRegistration, Value, FRAMEWORK_VERSION,
         wizard_for, WizardContext, WizardDefaultGet, WizardRegistration,
         report_for, reports_for, ReportFn, ReportRegistration,
+        view_for, FieldGroup, FieldSlot, FormView, NotebookPage,
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
@@ -170,6 +171,19 @@ macro_rules! register_report {
     ($model:expr, $name:expr, $title:expr, $func:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::ReportRegistration { model: $model, name: $name, title: $title, func: $func }
+        }
+    };
+}
+
+/// Registers a model's form layout (Odoo's form arch, minimal): titled groups of scalar fields plus a
+/// notebook of tabbed pages. Emitted in the model's UI contract so the frontend renders a real view
+/// instead of dumping fields in declaration order. Use at module top level:
+/// `meshble::register_view!("product.product", &[ FieldGroup { .. } ], &[ NotebookPage { .. } ]);`
+#[macro_export]
+macro_rules! register_view {
+    ($model:expr, $groups:expr, $pages:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::FormView { model: $model, groups: $groups, pages: $pages }
         }
     };
 }

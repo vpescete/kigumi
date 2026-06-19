@@ -165,6 +165,37 @@ pub static ACLS: &[Acl] = &[
 ];
 meshble::register_acls!(ACLS);
 
+// Form layout: a partner with contact, address and accounting groups.
+meshble::register_view!(
+    "res.partner",
+    &[
+        FieldGroup {
+            title: None,
+            fields: &[
+                FieldSlot { name: "name", full: true },
+                FieldSlot { name: "is_company", full: false },
+                FieldSlot { name: "parent_id", full: false },
+                FieldSlot { name: "active", full: false },
+            ],
+        },
+        FieldGroup {
+            title: Some("Contact"),
+            fields: &[FieldSlot { name: "email", full: false }, FieldSlot { name: "phone", full: false }],
+        },
+        FieldGroup {
+            title: Some("Address"),
+            fields: &[
+                FieldSlot { name: "street", full: true },
+                FieldSlot { name: "city", full: false },
+                FieldSlot { name: "zip", full: false },
+                FieldSlot { name: "country_code", full: false },
+            ],
+        },
+        FieldGroup { title: Some("Accounting"), fields: &[FieldSlot { name: "currency_id", full: false }] },
+    ],
+    &[]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

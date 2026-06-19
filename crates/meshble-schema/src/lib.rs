@@ -7,7 +7,7 @@
 mod openapi;
 pub use openapi::openapi;
 
-use meshble_core::{actions_for, delegated_fields, is_mailed, json_string, related_path, reports_for, Domain, DomainError, FieldDef, FieldKind, ResolvedModel};
+use meshble_core::{actions_for, delegated_fields, is_mailed, json_string, related_path, reports_for, view_for, Domain, DomainError, FieldDef, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
 fn pg_type(kind: &FieldKind) -> &'static str {
@@ -207,14 +207,45 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
         .map(|r| format!("    {{ \"name\": {}, \"title\": {} }}", json_string(r.name), json_string(r.title)))
         .collect();
 
+    // Form view (D-layout): the model's declared layout — groups of scalar fields + notebook pages.
+    // `null` when the model declares no view (the frontend applies a smart default layout).
+    let view = match view_for(m.name) {
+        None => "null".to_string(),
+        Some(v) => {
+            let groups: Vec<String> = v
+                .groups
+                .iter()
+                .map(|g| {
+                    let slots: Vec<String> = g
+                        .fields
+                        .iter()
+                        .map(|f| format!("{{ \"name\": {}, \"full\": {} }}", json_string(f.name), f.full))
+                        .collect();
+                    let title = g.title.map(json_string).unwrap_or_else(|| "null".to_string());
+                    format!("{{ \"title\": {}, \"fields\": [{}] }}", title, slots.join(", "))
+                })
+                .collect();
+            let pages: Vec<String> = v
+                .pages
+                .iter()
+                .map(|p| {
+                    let pf: Vec<String> = p.fields.iter().map(|f| json_string(f)).collect();
+                    format!("{{ \"title\": {}, \"fields\": [{}] }}", json_string(p.title), pf.join(", "))
+                })
+                .collect();
+            format!("{{ \"groups\": [{}], \"pages\": [{}] }}", groups.join(", "), pages.join(", "))
+        }
+    };
+
     Ok(format!(
-        "{{\n  \"model\": {},\n  \"type\": \"form\",\n  \"mailed\": {},\n  \"fields\": [\n{}\n  ],\n  \"list\": {{ \"columns\": [\n{}\n  ] }},\n  \"actions\": [\n{}\n  ],\n  \"reports\": [\n{}\n  ]\n}}",
+        "{{\n  \"model\": {},\n  \"type\": \"form\",\n  \"mailed\": {},\n  \"fields\": [\n{}\n  ],\n  \"list\": {{ \"columns\": [\n{}\n  ] }},\n  \"actions\": [\n{}\n  ],\n  \"reports\": [\n{}\n  ],\n  \"view\": {}\n}}",
         json_string(m.name),
         is_mailed(m.name),
         fields.join(",\n"),
         columns.join(",\n"),
         actions.join(",\n"),
-        reports.join(",\n")
+        reports.join(",\n"),
+        view
     ))
 }
 

@@ -242,6 +242,27 @@ pub static RECORD_RULES: &[RecordRule] = &[
 meshble::register_acls!(ACLS);
 meshble::register_rules!(RECORD_RULES);
 
+// Form layout: the journal entry header in one group, its lines in a notebook page.
+meshble::register_view!(
+    "account.move",
+    &[FieldGroup {
+        title: None,
+        fields: &[
+            FieldSlot { name: "name", full: true },
+            FieldSlot { name: "move_type", full: false },
+            FieldSlot { name: "state", full: false },
+            FieldSlot { name: "journal_id", full: false },
+            FieldSlot { name: "date", full: false },
+            FieldSlot { name: "reference", full: false },
+            FieldSlot { name: "partner_id", full: false },
+            FieldSlot { name: "currency_id", full: false },
+            FieldSlot { name: "company_id", full: false },
+            FieldSlot { name: "amount_total", full: false },
+        ],
+    }],
+    &[NotebookPage { title: "Journal items", fields: &["line_ids"] }]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -791,6 +791,75 @@ fn render_quotation(rec: &serde_json::Value) -> String {
 }
 meshble::register_report!("sale.order", "quotation", "Quotation", render_quotation);
 
+// Form layouts: a product variant and a sales order, grouped and tabbed instead of dumped in
+// declaration order.
+meshble::register_view!(
+    "product.product",
+    &[
+        FieldGroup {
+            title: None,
+            fields: &[
+                FieldSlot { name: "name", full: true },
+                FieldSlot { name: "product_tmpl_id", full: false },
+                FieldSlot { name: "default_code", full: false },
+                FieldSlot { name: "barcode", full: false },
+                FieldSlot { name: "active", full: false },
+            ],
+        },
+        FieldGroup {
+            title: Some("Pricing"),
+            fields: &[
+                FieldSlot { name: "list_price", full: false },
+                FieldSlot { name: "standard_price", full: false },
+                FieldSlot { name: "price_extra", full: false },
+                FieldSlot { name: "lst_price", full: false },
+            ],
+        },
+        FieldGroup {
+            title: Some("Classification"),
+            fields: &[
+                FieldSlot { name: "categ_id", full: false },
+                FieldSlot { name: "uom_id", full: false },
+                FieldSlot { name: "product_type", full: false },
+                FieldSlot { name: "tag_ids", full: true },
+            ],
+        },
+        FieldGroup {
+            title: Some("Description"),
+            fields: &[FieldSlot { name: "image", full: true }, FieldSlot { name: "description", full: true }],
+        },
+    ],
+    &[NotebookPage { title: "Attributes", fields: &["product_template_attribute_value_ids"] }]
+);
+
+meshble::register_view!(
+    "sale.order",
+    &[
+        FieldGroup {
+            title: None,
+            fields: &[
+                FieldSlot { name: "name", full: true },
+                FieldSlot { name: "partner_id", full: false },
+                FieldSlot { name: "currency_id", full: false },
+                FieldSlot { name: "pricelist_id", full: false },
+                FieldSlot { name: "company_id", full: false },
+                FieldSlot { name: "state", full: false },
+                FieldSlot { name: "invoice_status", full: false },
+            ],
+        },
+        FieldGroup {
+            title: Some("Amounts"),
+            fields: &[
+                FieldSlot { name: "amount_untaxed", full: false },
+                FieldSlot { name: "amount_tax", full: false },
+                FieldSlot { name: "amount_total", full: false },
+                FieldSlot { name: "margin", full: false },
+            ],
+        },
+    ],
+    &[NotebookPage { title: "Order lines", fields: &["line_ids"] }]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
