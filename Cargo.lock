@@ -1208,6 +1208,7 @@ dependencies = [
  "meshble-auth",
  "meshble-config",
  "meshble-db",
+ "meshble-mod-account",
  "meshble-mod-base",
  "meshble-mod-mail",
  "meshble-mod-sales",
@@ -1258,6 +1259,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "meshble-mod-account"
+version = "1.0.0"
+dependencies = [
+ "meshble",
+ "meshble-db",
+ "meshble-mod-base",
+ "meshble-mod-mail",
+ "rust_decimal",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

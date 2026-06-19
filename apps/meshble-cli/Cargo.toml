@@ -21,6 +21,7 @@ meshble-storage = { workspace = true }
 meshble-mod-base = { path = "../../modules/base" }
 meshble-mod-mail = { path = "../../modules/mail" }
 meshble-mod-sales = { path = "../../modules/sales" }
+meshble-mod-account = { path = "../../modules/account" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 axum = "0.7"
 clap = { version = "4", features = ["derive"] }

@@ -23,7 +23,12 @@ const CRON_TICK_SECS: u64 = 60;
 
 /// Forces the module crates to link so their `inventory` registrations are present in this binary.
 fn link_modules() {
-    let _ = (&meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST, &meshble_mod_sales::MANIFEST);
+    let _ = (
+        &meshble_mod_base::MANIFEST,
+        &meshble_mod_mail::MANIFEST,
+        &meshble_mod_sales::MANIFEST,
+        &meshble_mod_account::MANIFEST,
+    );
 }
 
 #[derive(Parser)]
@@ -380,8 +385,17 @@ async fn bootstrap_admin(db: &Db) -> Fallible {
     }
     match std::env::var("MESHBLE_ADMIN_PASSWORD") {
         Ok(p) if !p.is_empty() => {
-            db.upsert_user("admin", &hash_password(&p)?, &["user", "sales.user", "sales.manager", "admin"])
-                .await?;
+            // The admin holds every group any linked module declares (via ACLs/rules) plus the base
+            // `user`/`admin`, so a freshly bootstrapped instance can operate every module — no per-module
+            // edit here when a new module (e.g. account) introduces its own groups.
+            let mut groups = registered_group_names();
+            for g in ["user", "admin"] {
+                if !groups.iter().any(|x| x == g) {
+                    groups.push(g.to_string());
+                }
+            }
+            let group_refs: Vec<&str> = groups.iter().map(String::as_str).collect();
+            db.upsert_user("admin", &hash_password(&p)?, &group_refs).await?;
             // M7 default-deny: a user with no company sees only shared rows. Assign the admin to every
             // existing company so it can operate. (Companies created later must be granted explicitly —
             // Odoo behaves the same; only the superuser bypasses company scoping.)
