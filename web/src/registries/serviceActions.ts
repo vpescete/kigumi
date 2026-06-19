@@ -25,6 +25,18 @@ export const SERVICE_ACTIONS: Record<string, ServiceAction[]> = {
       label: 'Apply pricelist',
       resultToast: (r) => `Repriced ${r.priced} line${r.priced === 1 ? '' : 's'}`,
     },
+    {
+      endpoint: 'create_delivery',
+      label: 'Create delivery',
+      resultToast: (r) => `Delivery created (draft transfer #${r.picking})`,
+    },
+  ],
+  'purchase.order': [
+    {
+      endpoint: 'create_receipt',
+      label: 'Create receipt',
+      resultToast: (r) => `Receipt created (draft transfer #${r.picking})`,
+    },
   ],
   'account.move': [
     {
