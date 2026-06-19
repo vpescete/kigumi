@@ -90,11 +90,53 @@ export function SelectionBadge({ value, field }: { value: string; field?: FieldM
   )
 }
 
-// "sale.order.line" → "Sale Order Lines" (a friendly title from a model name, last segment pluralized-ish).
-export function modelTitle(model: string): string {
-  const seg = model.split('.').pop() ?? model
-  return seg
-    .split('_')
+// Curated, human labels per model. The contract-driven fallback (below) can't tell that sale.order and
+// purchase.order both end in "order", so the colliding / important models are named explicitly here.
+const MODEL_LABELS: Record<string, string> = {
+  'sale.order': 'Sales Orders',
+  'sale.order.line': 'Order Lines',
+  'sale.order.discount': 'Discount',
+  'purchase.order': 'Purchase Orders',
+  'purchase.order.line': 'Purchase Lines',
+  'product.product': 'Products',
+  'product.template': 'Product Templates',
+  'product.category': 'Categories',
+  'product.pricelist': 'Pricelists',
+  'product.pricelist.item': 'Pricelist Items',
+  'product.attribute': 'Attributes',
+  'product.attribute.value': 'Attribute Values',
+  'product.template.attribute.line': 'Attribute Lines',
+  'product.template.attribute.value': 'Template Attribute Values',
+  'product.tag': 'Tags',
+  'uom.uom': 'Units of Measure',
+  'account.account': 'Chart of Accounts',
+  'account.journal': 'Journals',
+  'account.move': 'Journal Entries',
+  'account.move.line': 'Journal Items',
+  'account.tax': 'Taxes',
+  'res.partner': 'Partners',
+  'res.company': 'Companies',
+  'res.currency': 'Currencies',
+  'res.users': 'Users',
+  'res.groups': 'Groups',
+  'mail.message': 'Messages',
+  'mail.activity': 'Activities',
+  'ir.attachment': 'Attachments',
+}
+
+const titleCase = (s: string): string =>
+  s
+    .split(/[_.\s]+/)
+    .filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ')
+
+// "sale.order" → "Sales Orders" (curated), else a title-cased name that includes the module when the
+// last two segments differ, so colliding tails ("…​.order") don't all collapse to the same word.
+export function modelTitle(model: string): string {
+  if (MODEL_LABELS[model]) return MODEL_LABELS[model]
+  const segs = model.split('.')
+  const tail =
+    segs.length >= 2 && segs[segs.length - 2] !== segs[segs.length - 1] ? segs.slice(-2).join(' ') : segs[segs.length - 1]
+  return titleCase(tail)
 }
