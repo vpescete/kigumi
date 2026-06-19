@@ -8,6 +8,7 @@ import type { Column } from '../ui'
 import { Button, Card, confirm, cx, DataTable, ErrorState, focusRing, PageHeader, Skeleton, Tabs, useToast } from '../ui'
 import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
 import { SERVICE_ACTIONS, type ServiceAction } from '../registries/serviceActions'
+import { EditableRelation, editableChildFields, toCommands, toLines, type Line } from './EditableRelation'
 import { ContractFields, FieldCell, isWritable, notebookPages, useRelOptions, useResolver } from './ContractFields'
 import { ReportViewer } from './ReportViewer'
 import { WizardModal } from './WizardModal'
@@ -27,10 +28,14 @@ const actionLabel = (name: string): string =>
   ACTION_LABELS[name] ?? name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
 
 function initialValues(contract: api.Contract, record: api.Row | null): FormValues {
-  if (record) return { ...record }
-  const values: FormValues = {}
+  const values: FormValues = record ? { ...record } : {}
   for (const f of contract.fields) {
-    if (f.default !== undefined) values[f.name] = f.widget === 'boolean' ? f.default === 'true' : f.default
+    if (f.widget === 'one2many') {
+      // One2many fields are held as editable lines (stable keys), not raw rows.
+      values[f.name] = toLines(record?.[f.name])
+    } else if (!record && f.default !== undefined) {
+      values[f.name] = f.widget === 'boolean' ? f.default === 'true' : f.default
+    }
   }
   return values
 }
@@ -96,7 +101,18 @@ export function ModelForm() {
     try {
       const payload: FormValues = {}
       for (const f of contract.fields) {
-        if (isWritable(f, values) && values[f.name] !== undefined) payload[f.name] = values[f.name]
+        if (f.widget === 'one2many' && f.relation) {
+          const child = childContracts[f.name]
+          if (!child) continue
+          const cmds = toCommands(
+            (values[f.name] as Line[]) ?? [],
+            isNew ? [] : record?.[f.name],
+            editableChildFields(child, f.inverse),
+          )
+          if (cmds.length) payload[f.name] = cmds
+        } else if (isWritable(f, values) && values[f.name] !== undefined) {
+          payload[f.name] = values[f.name]
+        }
       }
       if (isNew) {
         const newId = await api.create(model, payload)
@@ -305,7 +321,19 @@ function PageContent({
         const f = contract.fields.find((ff) => ff.name === name)
         if (!f) return null
         if (f.widget === 'one2many') {
-          return <InlineRelation key={name} field={f} rows={(record?.[name] as api.Row[]) ?? []} child={childContracts[name]} resolve={resolve} />
+          // Editable grid (add/edit/remove lines) unless the relation is read-only.
+          return f.readonly ? (
+            <InlineRelation key={name} field={f} rows={(record?.[name] as api.Row[]) ?? []} child={childContracts[name]} resolve={resolve} />
+          ) : (
+            <EditableRelation
+              key={name}
+              field={f}
+              child={childContracts[name]}
+              lines={(values[name] as Line[]) ?? []}
+              onChange={(lines) => onChange(name, lines)}
+              resolve={resolve}
+            />
+          )
         }
         return (
           <div key={name} className="grid grid-cols-1 md:grid-cols-2">
