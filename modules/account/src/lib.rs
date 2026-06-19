@@ -2,6 +2,7 @@
 //! Slice 1 (M16.1): the chart of accounts (`account.account`) + journals (`account.journal`).
 
 use meshble::prelude::*;
+use rust_decimal::Decimal;
 
 /// Module manifest: own version + framework compatibility range + module dependencies.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
@@ -64,13 +65,144 @@ pub struct AccountJournal {
     active: Bool,
 }
 
-/// Access control. `account.user` (accountant) reads accounts + journals and edits accounts;
-/// configuration — creating accounts, and all journal maintenance — is reserved to `account.manager`.
+// account.move opts into the mail subsystem: a journal entry carries a chatter audit trail, and its
+// state transitions are tracked.
+meshble::register_mailed!("account.move");
+
+/// A journal entry / invoice (Odoo's `account.move`): the document that groups the debit/credit lines.
+/// Mailed (audit trail); numbered "/" until posted. The balanced-entry invariant lives in `check_balanced`.
+#[model(name = "account.move", table = "account_move")]
+pub struct AccountMove {
+    #[field(label = "Number", default = "/")]
+    name: Text,
+
+    #[field(label = "Type", required, default = "entry", selection = "entry:Journal Entry,out_invoice:Customer Invoice,in_invoice:Vendor Bill,out_refund:Customer Credit Note,in_refund:Vendor Refund")]
+    move_type: Selection,
+
+    #[field(label = "Date")]
+    date: Date,
+
+    // Odoo's field is `ref`, a Rust keyword; the internal name is `reference`.
+    #[field(label = "Reference")]
+    reference: Text,
+
+    #[field(label = "Journal", required, target = "account.journal")]
+    journal_id: Many2one,
+
+    #[field(label = "Partner", target = "res.partner")]
+    partner_id: Many2one,
+
+    #[field(label = "Status", required, default = "draft", tracked, selection = "draft:Draft,posted:Posted,cancel:Cancelled")]
+    state: Selection,
+
+    #[field(label = "Currency", target = "res.currency")]
+    currency_id: Many2one,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+
+    #[field(label = "Journal Items", target = "account.move.line", inverse = "move_id")]
+    line_ids: One2many,
+
+    // Entry total = Σ debit (== Σ credit when balanced) — the invoice/document amount. Stored aggregate.
+    #[field(label = "Total", compute = "compute_move_total", depends = "line_ids.debit", currency = "currency_id", store)]
+    amount_total: Decimal,
+}
+
+/// A journal item (Odoo's `account.move.line`): one posting to a GL account. A line is a debit XOR a
+/// credit (two Decimal columns, Odoo's model); `balance` = debit − credit is derived on read.
+#[model(name = "account.move.line", table = "account_move_line")]
+pub struct AccountMoveLine {
+    #[field(label = "Journal Entry", required, target = "account.move")]
+    move_id: Many2one,
+
+    #[field(label = "Account", required, target = "account.account")]
+    account_id: Many2one,
+
+    #[field(label = "Partner", target = "res.partner")]
+    partner_id: Many2one,
+
+    #[field(label = "Label")]
+    name: Text,
+
+    #[field(label = "Debit", default = "0")]
+    debit: Decimal,
+
+    #[field(label = "Credit", default = "0")]
+    credit: Decimal,
+
+    #[field(label = "Balance", compute = "compute_line_balance", depends = "debit,credit")]
+    balance: Decimal,
+
+    #[field(label = "Date")]
+    date: Date,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+}
+
+/// A line's signed balance, derived on read: debit − credit (same-record, never stored).
+fn compute_line_balance(l: &ComputeInput) -> Value {
+    Value::Decimal(l.decimal("debit") - l.decimal("credit"))
+}
+meshble::register_compute!("compute_line_balance", compute_line_balance);
+
+/// A move's total = Σ of its lines' debit (equals Σ credit when balanced).
+fn compute_move_total(m: &ComputeInput) -> Value {
+    Value::Decimal(m.sum_decimal("line_ids", "debit"))
+}
+meshble::register_compute!("compute_move_total", compute_move_total);
+
+/// The balanced-entry invariant (Odoo's `@api.constrains`): a move's total debit must equal its total
+/// credit. Runs in-tx after the move + its lines are written; an empty move (Σ = 0) is balanced. This
+/// is the canonical cross-record constraint a single-row SQL CHECK cannot express. NOTE: enforced on
+/// move-level writes (create / nested line_ids); a posted move is additionally frozen in M16.3, which
+/// is what guarantees the GL-level invariant "posted ⇒ balanced".
+fn check_balanced(m: &ComputeInput) -> Result<(), String> {
+    let debit: Decimal = m.sum_decimal("line_ids", "debit");
+    let credit: Decimal = m.sum_decimal("line_ids", "credit");
+    if debit != credit {
+        return Err(format!("unbalanced journal entry: total debit {debit} != total credit {credit}"));
+    }
+    Ok(())
+}
+meshble::register_constraint!("account.move", &["line_ids"], check_balanced);
+
+/// Multi-company coherence (Odoo's `_check_company`): a move must not mix companies. When both the
+/// move and one of its lines carry an explicit company, they must match — so a multi-company user
+/// cannot slip a company-B line into a company-A entry via the nested `line_ids` path.
+/// KNOWN LIMITATION (deferred): a line's `account_id` pointing to a foreign-company GL account is NOT
+/// caught here — the constraint sees the account id, not the account's company (a ConstraintFn has no
+/// DB access). Closing that needs a company-aware FK validation or an account record rule.
+fn check_line_companies(m: &ComputeInput) -> Result<(), String> {
+    let Some(Value::Int(move_company)) = m.get("company_id") else {
+        return Ok(()); // a shared (company-less) move imposes no per-line company
+    };
+    for line in m.children("line_ids") {
+        if let Some(Value::Int(line_company)) = line.get("company_id") {
+            if line_company != move_company {
+                return Err(format!(
+                    "a journal item belongs to another company ({line_company}) than its entry ({move_company})"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+meshble::register_constraint!("account.move", &["line_ids"], check_line_companies);
+
+/// Access control. `account.user` (accountant) reads accounts + journals and edits accounts, and runs
+/// moves + their lines; configuration — creating accounts, all journal maintenance, deleting moves —
+/// is reserved to `account.manager`.
 pub static ACLS: &[Acl] = &[
     Acl { model: "account.account", group: "account.user", read: true, write: true, create: false, delete: false },
     Acl { model: "account.account", group: "account.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "account.journal", group: "account.user", read: true, write: false, create: false, delete: false },
     Acl { model: "account.journal", group: "account.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "account.move", group: "account.user", read: true, write: true, create: true, delete: false },
+    Acl { model: "account.move", group: "account.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "account.move.line", group: "account.user", read: true, write: true, create: true, delete: true },
+    Acl { model: "account.move.line", group: "account.manager", read: true, write: true, create: true, delete: true },
 ];
 meshble::register_acls!(ACLS);
 
