@@ -73,7 +73,62 @@ pub struct StockQuant {
     quantity: Decimal,
 }
 
-/// Access control. `stock.user` (operator) reads/writes the operational data; configuration — locations,
+// stock.picking carries a chatter thread (transfer history) and a tracked state.
+meshble::register_mailed!("stock.picking");
+
+/// A transfer (Odoo's `stock.picking`): a document grouping moves from a source to a destination
+/// location. `validate` (the cross-record service method) sets its moves done and updates the quants.
+#[model(name = "stock.picking", table = "stock_picking")]
+pub struct StockPicking {
+    #[field(label = "Reference", default = "/")]
+    name: Text,
+
+    #[field(label = "Type", required, default = "internal", selection = "receipt:Receipt,delivery:Delivery,internal:Internal Transfer")]
+    picking_type: Selection,
+
+    #[field(label = "Partner", target = "res.partner")]
+    partner_id: Many2one,
+
+    #[field(label = "Source Location", required, target = "stock.location")]
+    location_id: Many2one,
+
+    #[field(label = "Destination", required, target = "stock.location")]
+    location_dest_id: Many2one,
+
+    #[field(label = "Status", required, default = "draft", tracked, selection = "draft:Draft,done:Done,cancel:Cancelled")]
+    state: Selection,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+
+    #[field(label = "Moves", target = "stock.move", inverse = "picking_id")]
+    move_ids: One2many,
+}
+
+/// One product movement within a transfer (Odoo's `stock.move`): moves `product_uom_qty` of a product
+/// from a source to a destination location. Locations default from the picking; done when validated.
+#[model(name = "stock.move", table = "stock_move")]
+pub struct StockMove {
+    #[field(label = "Transfer", required, target = "stock.picking")]
+    picking_id: Many2one,
+
+    #[field(label = "Product", required, target = "product.product")]
+    product_id: Many2one,
+
+    #[field(label = "Quantity", required, default = "0")]
+    product_uom_qty: Decimal,
+
+    #[field(label = "Source Location", required, target = "stock.location")]
+    location_id: Many2one,
+
+    #[field(label = "Destination", required, target = "stock.location")]
+    location_dest_id: Many2one,
+
+    #[field(label = "Status", required, default = "draft", selection = "draft:Draft,done:Done")]
+    state: Selection,
+}
+
+/// Access control. `stock.user` (operator) runs transfers and their moves; configuration — locations,
 /// warehouses, and editing quants directly — is reserved to `stock.manager`. Quants are normally
 /// maintained by the move-done mechanism, not by hand.
 pub static ACLS: &[Acl] = &[
@@ -83,8 +138,26 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "stock.warehouse", group: "stock.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "stock.quant", group: "stock.user", read: true, write: false, create: false, delete: false },
     Acl { model: "stock.quant", group: "stock.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "stock.picking", group: "stock.user", read: true, write: true, create: true, delete: false },
+    Acl { model: "stock.picking", group: "stock.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "stock.move", group: "stock.user", read: true, write: true, create: true, delete: true },
+    Acl { model: "stock.move", group: "stock.manager", read: true, write: true, create: true, delete: true },
 ];
+
+/// A done transfer's moves are frozen — no write, create or delete (only sudo or reverting can touch
+/// them), the stock analogue of a posted journal entry. Covers the direct and nested move paths.
+fn move_picking_not_done() -> Domain {
+    Domain::field("picking_id.state").ne("done")
+}
+
+pub static RECORD_RULES: &[RecordRule] = &[
+    RecordRule { model: "stock.move", groups: &[], ops: &[Operation::Write], domain: RuleDomain::Static(move_picking_not_done) },
+    RecordRule { model: "stock.move", groups: &[], ops: &[Operation::Create], domain: RuleDomain::Static(move_picking_not_done) },
+    RecordRule { model: "stock.move", groups: &[], ops: &[Operation::Delete], domain: RuleDomain::Static(move_picking_not_done) },
+];
+
 meshble::register_acls!(ACLS);
+meshble::register_rules!(RECORD_RULES);
 
 #[cfg(test)]
 mod tests {

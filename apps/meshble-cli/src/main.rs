@@ -364,7 +364,7 @@ async fn seed_stock_data(db: &Db) -> Fallible {
     let loc = |name: &str, usage: &str| {
         serde_json::json!({ "name": name, "usage": usage, "company_id": comp_id, "active": true })
     };
-    let mut new_location = |v: serde_json::Value| {
+    let new_location = |v: serde_json::Value| {
         let location = &location;
         let su = &su;
         async move { db.insert_secured(location, su, &[], &[], v.as_object().unwrap()).await }

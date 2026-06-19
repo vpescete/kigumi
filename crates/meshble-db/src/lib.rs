@@ -1802,6 +1802,108 @@ impl Db {
         Ok(move_id)
     }
 
+    /// Validates a `stock.picking` (draft → done): in ONE transaction, atomically moves each line's
+    /// quantity from its source to its destination quant (`ON CONFLICT (product_id, location_id)`
+    /// upsert), marks the moves done, numbers the transfer from a per-type sequence (IN/OUT/INT), and
+    /// re-materializes `product.product.qty_available` (Σ internal quants) for the moved products. A
+    /// `FOR UPDATE` lock on the picking makes it a true compare-and-set, so two concurrent validations
+    /// cannot double-apply. v1 allows negative stock (no reservation). Gated on the caller's WRITE of
+    /// the picking; the quant mutations are a system effect run inside the transaction. Returns the
+    /// assigned transfer number.
+    pub async fn validate_picking(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        picking_id: i64,
+    ) -> Result<String, DbError> {
+        let picking_model = resolve_registered("stock.picking").map_err(DbError::BadInput)?;
+
+        if !check_access(Operation::Write, picking_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: picking_model.name.to_string(), operation: "validate" });
+        }
+        let picking = self
+            .find_one_secured(&picking_model, ctx, acls, rules, picking_id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("transfer not found or not permitted".to_string()))?;
+        let state = picking.get("state").and_then(|v| v.as_str()).unwrap_or("");
+        if state != "draft" {
+            return Err(DbError::BadInput(format!("only a draft transfer can be validated (state is '{state}')")));
+        }
+        let seq = match picking.get("picking_type").and_then(|v| v.as_str()).unwrap_or("internal") {
+            "receipt" => "IN",
+            "delivery" => "OUT",
+            _ => "INT",
+        };
+        self.ensure_sequence(seq, &format!("{seq}/"), "", 5).await?;
+        let number = self.next_value(seq).await?;
+
+        let mut tx = self.pool.begin().await?;
+        // Compare-and-set: lock the row and re-assert draft, so concurrent validations can't double-apply.
+        let live: Option<String> =
+            sqlx::query_scalar("SELECT state FROM stock_picking WHERE id = $1 FOR UPDATE").bind(picking_id).fetch_optional(&mut *tx).await?;
+        if live.as_deref() != Some("draft") {
+            return Err(DbError::Conflict("the transfer was already validated".to_string()));
+        }
+
+        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, location_id, location_dest_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
+            .bind(picking_id)
+            .fetch_all(&mut *tx)
+            .await?;
+        // An empty transfer has nothing to move — validating it would flip it to done with no effect
+        // (a phantom transfer that burns a number and locks itself). Reject it (the tx rolls back).
+        if moves.is_empty() {
+            return Err(DbError::BadInput("cannot validate a transfer with no moves".to_string()));
+        }
+        let mut products: Vec<i64> = Vec::new();
+        for m in &moves {
+            let move_id: i64 = m.try_get("id")?;
+            let product_id: i64 = m.try_get("product_id")?;
+            let qty: rust_decimal::Decimal = m.try_get("product_uom_qty")?;
+            let src: i64 = m.try_get("location_id")?;
+            let dst: i64 = m.try_get("location_dest_id")?;
+            // Source loses qty, destination gains it — one parameterized upsert per side.
+            for (loc, delta) in [(src, -qty), (dst, qty)] {
+                sqlx::query(
+                    "INSERT INTO stock_quant (product_id, location_id, quantity) VALUES ($1, $2, $3) \
+                     ON CONFLICT (product_id, location_id) DO UPDATE SET quantity = stock_quant.quantity + $3",
+                )
+                .bind(product_id)
+                .bind(loc)
+                .bind(delta)
+                .execute(&mut *tx)
+                .await?;
+            }
+            sqlx::query("UPDATE stock_move SET state = 'done' WHERE id = $1").bind(move_id).execute(&mut *tx).await?;
+            products.push(product_id);
+        }
+        // De-duplicate once (a product may appear on several moves) for the on-hand recompute below.
+        products.sort_unstable();
+        products.dedup();
+
+        sqlx::query("UPDATE stock_picking SET state = 'done', name = $2 WHERE id = $1")
+            .bind(picking_id)
+            .bind(&number)
+            .execute(&mut *tx)
+            .await?;
+
+        // Re-materialize on-hand for the moved products from the (just-updated) internal quants.
+        if !products.is_empty() {
+            sqlx::query(
+                "UPDATE product_product p SET qty_available = COALESCE( \
+                   (SELECT SUM(q.quantity) FROM stock_quant q JOIN stock_location l ON l.id = q.location_id \
+                    WHERE q.product_id = p.id AND l.usage = 'internal'), 0) \
+                 WHERE p.id = ANY($1)",
+            )
+            .bind(&products)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(number)
+    }
+
     /// Sets a variant's own `active` flag inside `tx` (archive / reactivate during reconciliation). A
     /// direct UPDATE on the variant's own column — never the delegated template field — so it touches
     /// only this variant, not the shared template or its siblings.

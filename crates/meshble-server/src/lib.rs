@@ -126,6 +126,7 @@ pub fn router_with_data_rasterized(
         .route("/api/:name/:id/post", post(post_move_handler))
         // Generate a posted customer invoice (account.move) from a confirmed sale order.
         .route("/api/:name/:id/create_invoice", post(create_invoice_handler))
+        .route("/api/:name/:id/validate", post(validate_picking_handler))
         // Attachments (ir.attachment): files on a record. List/download need host read; upload/delete
         // need host write. Bytes live in the content-addressed blob store; the row is metadata.
         .route("/api/:name/:id/attachments", get(list_attachments_handler).post(upload_attachment_handler))
@@ -612,6 +613,30 @@ async fn post_move_handler(
     match backend.db.post_move(&ctx, backend.acls, backend.rules, id).await {
         Ok(number) => json_response(serde_json::json!({ "posted": number }).to_string()),
         Err(e) => write_error("post", e),
+    }
+}
+
+/// Validates a draft `stock.picking` (moves done + quant updates + numbering, in one transaction). v1:
+/// pinned to stock.picking. Authorization (WRITE on stock.picking) lives in the db layer.
+async fn validate_picking_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    if name != "stock.picking" {
+        return (StatusCode::BAD_REQUEST, "validate is only valid on stock.picking").into_response();
+    }
+    if let Err(r) = resolve_model(&state, &name) {
+        return r;
+    }
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.validate_picking(&ctx, backend.acls, backend.rules, id).await {
+        Ok(number) => json_response(serde_json::json!({ "validated": number }).to_string()),
+        Err(e) => write_error("validate", e),
     }
 }
 

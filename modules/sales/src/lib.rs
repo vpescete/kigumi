@@ -172,6 +172,11 @@ pub struct ProductProduct {
     #[field(label = "Sales Price", compute = "variant_lst_price", depends = "list_price,price_extra")]
     lst_price: Decimal,
 
+    // On-hand quantity across internal stock locations. Materialized by the stock module's move-done
+    // mechanism (engine-only, base.system); stays 0 until stock is installed and stock is moved.
+    #[field(label = "On Hand", default = "0", groups = "base.system")]
+    qty_available: Decimal,
+
     // The variant's OWN active flag, intentionally shadowing product.template.active: archiving one
     // variant (the generator does this when a combination is no longer selected) must not touch the
     // shared template or the other variants. Read/written on product.product, never delegated.
