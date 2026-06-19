@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Inbox, Plus } from 'lucide-react'
 import * as api from '../api'
 import type { Column } from '../ui'
-import { Button, DataTable, ErrorState, Loading, PageHeader } from '../ui'
+import { Button, cx, DataTable, ErrorState, focusRing, PageHeader, SkeletonTable } from '../ui'
 import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
 
 const noResolve: Resolver = () => undefined
@@ -55,10 +55,10 @@ export function ModelList() {
   }, [model])
 
   if (error) return <ErrorState message={error} />
-  if (!contract || !page) return <Loading />
 
-  const cols: Column<api.Row>[] = contract.list.columns.map((col) => {
-    const field = contract.fields.find((f) => f.name === col.name)
+  const ready = contract != null && page != null
+  const cols: Column<api.Row>[] = (contract?.list.columns ?? []).map((col) => {
+    const field = contract?.fields.find((f) => f.name === col.name)
     const numeric = col.widget === 'monetary' || col.widget === 'integer'
     return {
       header: col.label,
@@ -72,22 +72,30 @@ export function ModelList() {
     <div>
       <PageHeader
         title={modelTitle(model)}
-        subtitle={`${page.total} record${page.total === 1 ? '' : 's'}`}
+        subtitle={ready ? `${page!.total} record${page!.total === 1 ? '' : 's'}` : ' '}
         actions={
           <Button variant="primary" icon={<Plus size={16} />} onClick={() => nav(`/m/${model}/new`)}>
             New
           </Button>
         }
       />
-      {page.data.length === 0 ? (
-        <div className="t-body text-muted py-16 text-center">No records yet.</div>
+      {!ready ? (
+        <SkeletonTable rows={8} cols={Math.min(5, cols.length || 4)} />
+      ) : page!.data.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-surface px-6 py-16 text-center">
+          <Inbox size={28} className="mx-auto text-muted" />
+          <div className="t-h2 mt-3 text-text">No {modelTitle(model).toLowerCase()} yet</div>
+          <p className="t-body mt-1.5 text-muted">Create the first one to get started.</p>
+          <button
+            onClick={() => nav(`/m/${model}/new`)}
+            className={cx('mt-5 inline-flex items-center gap-2 rounded-md bg-accent px-3.5 font-medium text-accent-fg hover:bg-accent-hover', focusRing)}
+            style={{ height: 'var(--control-h)' }}
+          >
+            <Plus size={16} /> New
+          </button>
+        </div>
       ) : (
-        <DataTable
-          columns={cols}
-          rows={page.data}
-          rowKey={(r) => r.id}
-          onRowClick={(r) => nav(`/m/${model}/${r.id}`)}
-        />
+        <DataTable columns={cols} rows={page!.data} rowKey={(r) => r.id} onRowClick={(r) => nav(`/m/${model}/${r.id}`)} />
       )}
     </div>
   )

@@ -5,7 +5,7 @@ import * as api from '../api'
 import { canRun } from '../api'
 import { useAuth } from '../auth'
 import type { Column } from '../ui'
-import { Button, Card, confirm, cx, DataTable, ErrorState, focusRing, Loading, PageHeader, useToast } from '../ui'
+import { Button, Card, confirm, cx, DataTable, ErrorState, focusRing, PageHeader, Skeleton, useToast } from '../ui'
 import { displayValue, modelTitle } from '../format'
 import { SERVICE_ACTIONS, type ServiceAction } from '../registries/serviceActions'
 import { ContractFields, isWritable, useRelOptions } from './ContractFields'
@@ -50,7 +50,6 @@ export function ModelForm() {
   const [childContracts, setChildContracts] = useState<Record<string, api.Contract>>({})
   const relOptions = useRelOptions(contract)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [report, setReport] = useState<api.ReportMeta | null>(null)
   const [wizard, setWizard] = useState<WizardSpec | null>(null)
@@ -100,14 +99,15 @@ export function ModelForm() {
       }
       if (isNew) {
         const newId = await api.create(model, payload)
+        toast.success(`${modelTitle(model)} created`)
         nav(`/m/${model}/${newId}`)
       } else {
         await api.update(model, Number(id), payload)
-        setNotice('Saved.')
+        toast.success('Changes saved')
         await load()
       }
     } catch (err: unknown) {
-      setError(err instanceof api.ApiError ? err.message : 'Save failed')
+      toast.error(err instanceof api.ApiError ? err.message : 'Save failed')
     } finally {
       setBusy(false)
     }
@@ -115,13 +115,12 @@ export function ModelForm() {
 
   async function act(action: string): Promise<void> {
     setBusy(true)
-    setError(null)
     try {
       await api.runAction(model, Number(id), action)
       await load()
-      setNotice(`Done: ${action}.`)
+      toast.success(`${actionLabel(action)} done`)
     } catch (err: unknown) {
-      setError(err instanceof api.ApiError ? err.message : 'Action failed')
+      toast.error(err instanceof api.ApiError ? err.message : `${actionLabel(action)} failed`)
     } finally {
       setBusy(false)
     }
@@ -143,7 +142,22 @@ export function ModelForm() {
   }
 
   if (error && !contract) return <ErrorState message={error} />
-  if (!contract) return <Loading />
+  if (!contract)
+    return (
+      <div>
+        <Skeleton w="14rem" h="2rem" className="mb-6" />
+        <Card className="p-5">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i}>
+                <Skeleton w="6rem" h="0.7em" className="mb-2" />
+                <Skeleton w="100%" h="var(--control-h)" />
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    )
 
   const actions = isNew ? [] : contract.actions.filter((a) => canRun(a, identity))
   const services = isNew ? [] : SERVICE_ACTIONS[model] ?? []
@@ -187,9 +201,6 @@ export function ModelForm() {
           </>
         }
       />
-
-      {error && <div className="t-body text-danger bg-danger-bg rounded-md px-3 py-2 mb-4">{error}</div>}
-      {notice && <div className="t-body text-success bg-success-bg rounded-md px-3 py-2 mb-4">{notice}</div>}
 
       <Card className="p-5 mb-5">
         <ContractFields contract={contract} values={values} relOptions={relOptions} onChange={setField} />

@@ -137,7 +137,7 @@ export function DataTable<T>({
   rowKey: (row: T) => string | number
 }) {
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-x-auto">
       <table className="w-full border-collapse text-text">
         <thead>
           <tr className="border-b border-border">
@@ -160,9 +160,21 @@ export function DataTable<T>({
             <tr
               key={rowKey(row)}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
+              tabIndex={onRowClick ? 0 : undefined}
+              role={onRowClick ? 'button' : undefined}
+              onKeyDown={
+                onRowClick
+                  ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onRowClick(row)
+                      }
+                    }
+                  : undefined
+              }
               className={cx(
                 'border-b border-border last:border-0',
-                onRowClick && 'cursor-pointer hover:bg-surface2',
+                onRowClick && 'cursor-pointer hover:bg-surface2 focus:outline-none focus-visible:bg-surface2',
               )}
               style={{ height: 'var(--density-row)' }}
             >
