@@ -330,6 +330,56 @@ async fn migrate_installed(db: &Db) -> Fallible {
     if installed.iter().any(|m| m == "base") {
         seed_base_data(db).await?;
     }
+    if installed.iter().any(|m| m == "account") {
+        seed_account_data(db).await?;
+    }
+    Ok(())
+}
+
+/// Seeds a minimal chart of accounts + journals for the default company when `account` is installed, so
+/// the invoicing path (M16.4) finds a receivable / income / tax account and a sale journal out of the
+/// box. Idempotent: only an empty chart is seeded.
+async fn seed_account_data(db: &Db) -> Fallible {
+    let account = match resolve_registered("account.account") {
+        Ok(m) => m,
+        Err(_) => return Ok(()), // account module not linked → nothing to seed
+    };
+    let journal = resolve_registered("account.journal").map_err(|e| e.to_string())?;
+    let company = resolve_registered("res.company").map_err(|e| e.to_string())?;
+    let su = Ctx::new(0, vec![]).sudo();
+
+    if db.count_secured(&account, &su, &[], &[], None).await? > 0 {
+        return Ok(()); // already has a chart
+    }
+    let Some(&comp_id) = db.find_ids_secured(&company, &su, &[], &[], None).await?.first() else {
+        return Ok(()); // no company to scope the chart to yet
+    };
+
+    let acc = |code: &str, name: &str, atype: &str, reconcile: bool| {
+        serde_json::json!({ "code": code, "name": name, "account_type": atype, "reconcile": reconcile, "company_id": comp_id, "active": true })
+    };
+    let mut new_account = |v: serde_json::Value| {
+        let account = &account;
+        let su = &su;
+        async move { db.insert_secured(account, su, &[], &[], v.as_object().unwrap()).await }
+    };
+    let income = new_account(acc("400000", "Product Sales", "income", false)).await?;
+    let expense = new_account(acc("600000", "Expenses", "expense", false)).await?;
+    let bank = new_account(acc("101000", "Bank", "bank_cash", false)).await?;
+    new_account(acc("121000", "Account Receivable", "receivable", true)).await?;
+    new_account(acc("211000", "Account Payable", "payable", true)).await?;
+    new_account(acc("251000", "Tax Received", "tax", false)).await?;
+
+    let mut new_journal = |v: serde_json::Value| {
+        let journal = &journal;
+        let su = &su;
+        async move { db.insert_secured(journal, su, &[], &[], v.as_object().unwrap()).await }
+    };
+    new_journal(serde_json::json!({ "name": "Customer Invoices", "code": "INV", "journal_type": "sale", "sequence_code": "INV", "default_account_id": income, "company_id": comp_id, "active": true })).await?;
+    new_journal(serde_json::json!({ "name": "Vendor Bills", "code": "BILL", "journal_type": "purchase", "sequence_code": "BILL", "default_account_id": expense, "company_id": comp_id, "active": true })).await?;
+    new_journal(serde_json::json!({ "name": "Bank", "code": "BNK", "journal_type": "bank", "sequence_code": "BNK", "default_account_id": bank, "company_id": comp_id, "active": true })).await?;
+    new_journal(serde_json::json!({ "name": "Miscellaneous", "code": "MISC", "journal_type": "general", "sequence_code": "MISC", "company_id": comp_id, "active": true })).await?;
+    println!("seeded chart of accounts + journals");
     Ok(())
 }
 
