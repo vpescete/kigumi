@@ -32,14 +32,25 @@ function dayKey(d: Date): string {
 }
 
 /** A real per-day activity series for `model` from chatter messages (count of messages per day). */
+// Server datetimes look like "2026-06-19 15:25:19.085181+00" — a space separator and a bare "+00"
+// offset, neither of which `new Date()` parses. Normalize to ISO (T separator, "+00" -> "+00:00").
+function parseTs(value: unknown): Date | null {
+  if (!value) return null
+  const s = String(value)
+    .trim()
+    .replace(' ', 'T')
+    .replace(/([+-]\d{2})$/, '$1:00')
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
 function seriesFor(messages: api.Row[], model: string, days = 14): number[] {
   const counts = new Map<string, number>()
   for (const m of messages) {
     if (m.res_model !== model) continue
-    const d = new Date(String(m.date ?? '').replace(' ', 'T'))
-    if (Number.isNaN(d.getTime())) continue
-    const k = dayKey(d)
-    counts.set(k, (counts.get(k) ?? 0) + 1)
+    const d = parseTs(m.date)
+    if (!d) continue
+    counts.set(dayKey(d), (counts.get(dayKey(d)) ?? 0) + 1)
   }
   const now = new Date()
   return Array.from({ length: days }, (_, i) => {
@@ -50,8 +61,8 @@ function seriesFor(messages: api.Row[], model: string, days = 14): number[] {
 }
 
 function relTime(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso.replace(' ', 'T'))
+  const d = parseTs(iso)
+  if (!d) return ''
   const s = Math.max(0, (Date.now() - d.getTime()) / 1000)
   if (s < 60) return `${Math.floor(s)}s`
   if (s < 3600) return `${Math.floor(s / 60)}m`

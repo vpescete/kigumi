@@ -7,7 +7,7 @@
 mod openapi;
 pub use openapi::openapi;
 
-use meshble_core::{actions_for, delegated_fields, field_is_readonly, is_mailed, json_string, related_path, reports_for, view_for, Domain, DomainError, FieldDef, FieldKind, ResolvedModel};
+use meshble_core::{actions_for, delegated_fields, field_is_readonly, field_required_groups, is_mailed, json_string, related_path, reports_for, view_for, Domain, DomainError, FieldDef, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
 fn pg_type(kind: &FieldKind) -> &'static str {
@@ -163,30 +163,69 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
     for d in &delegated {
         fields.push(emit(&d.def, false));
     }
-    // List view (D7): the columns a generic list renders. Default = the scalar (column-backed) fields
-    // plus on-read computes, related mirrors and delegated parent fields, in declaration order; One2many
-    // is not a column.
-    let mut columns: Vec<String> = m
-        .fields
-        .iter()
-        .filter(|f| f.has_column() || f.is_computed() || related_path(m.name, f.name).is_some())
-        .map(|f| {
-            format!(
-                "    {{ \"name\": {}, \"label\": {}, \"widget\": \"{}\" }}",
-                json_string(f.name),
-                json_string(f.label),
-                widget(&f.kind)
-            )
-        })
-        .collect();
-    for d in &delegated {
-        columns.push(format!(
+    // List view (D7): the columns a generic list (and an inline One2many table) renders. List-friendly
+    // = a scalar-ish widget (no image/html blob, no relational table). A field gated to a group is left
+    // out of the generic list (it stays available on the form). When the model declares a form view, its
+    // grouped fields ARE the curated, ordered column set (capped); otherwise the column-backed / computed
+    // / related / delegated fields are used.
+    let list_friendly = |kind: &FieldKind| {
+        !matches!(
+            kind,
+            FieldKind::Image | FieldKind::Html | FieldKind::One2many { .. } | FieldKind::Many2many { .. }
+        )
+    };
+    let col_json = |name: &str, label: &str, kind: &FieldKind| {
+        format!(
             "    {{ \"name\": {}, \"label\": {}, \"widget\": \"{}\" }}",
-            json_string(d.def.name),
-            json_string(d.def.label),
-            widget(&d.def.kind)
-        ));
-    }
+            json_string(name),
+            json_string(label),
+            widget(kind)
+        )
+    };
+    const MAX_LIST_COLUMNS: usize = 8;
+    let columns: Vec<String> = if let Some(v) = view_for(m.name) {
+        let mut cols = Vec::new();
+        for g in v.groups {
+            for s in g.fields {
+                if cols.len() >= MAX_LIST_COLUMNS {
+                    break;
+                }
+                if field_required_groups(m.name, s.name).is_some() {
+                    continue;
+                }
+                // The slot field is either the model's own or a delegated parent field; format inline so
+                // no reference into the local `delegated` vec escapes.
+                if let Some(f) = m.fields.iter().find(|f| f.name == s.name) {
+                    if list_friendly(&f.kind) {
+                        cols.push(col_json(f.name, f.label, &f.kind));
+                    }
+                } else if let Some(d) = delegated.iter().find(|d| d.def.name == s.name) {
+                    if list_friendly(&d.def.kind) {
+                        cols.push(col_json(d.def.name, d.def.label, &d.def.kind));
+                    }
+                }
+            }
+        }
+        cols
+    } else {
+        let mut cols: Vec<String> = m
+            .fields
+            .iter()
+            .filter(|f| {
+                (f.has_column() || f.is_computed() || related_path(m.name, f.name).is_some())
+                    && list_friendly(&f.kind)
+                    && field_required_groups(m.name, f.name).is_none()
+            })
+            .take(MAX_LIST_COLUMNS)
+            .map(|f| col_json(f.name, f.label, &f.kind))
+            .collect();
+        for d in &delegated {
+            if cols.len() < MAX_LIST_COLUMNS && list_friendly(&d.def.kind) {
+                cols.push(col_json(d.def.name, d.def.label, &d.def.kind));
+            }
+        }
+        cols
+    };
 
     // Actions (D7): the state-transition actions a form can offer (the buttons), with the groups
     // allowed to run each (empty = everyone). The frontend hides those the caller's groups don't grant.

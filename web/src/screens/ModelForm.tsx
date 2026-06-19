@@ -6,7 +6,7 @@ import { canRun } from '../api'
 import { useAuth } from '../auth'
 import type { Column } from '../ui'
 import { Button, Card, confirm, cx, DataTable, ErrorState, focusRing, PageHeader, Skeleton, Tabs, useToast } from '../ui'
-import { displayValue, modelTitle, type Resolver } from '../format'
+import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
 import { SERVICE_ACTIONS, type ServiceAction } from '../registries/serviceActions'
 import { ContractFields, FieldCell, isWritable, notebookPages, useRelOptions, useResolver } from './ContractFields'
 import { ReportViewer } from './ReportViewer'
@@ -328,6 +328,36 @@ function InlineRelation({
   child?: api.Contract
   resolve?: Resolver
 }) {
+  // Resolve the child's own Many2one columns to names (e.g. a line's product), independent of the
+  // parent's resolver — best-effort, one fetch per related model (mirrors the list view).
+  const [childResolve, setChildResolve] = useState<Resolver>(() => () => undefined)
+  useEffect(() => {
+    let active = true
+    async function load(): Promise<void> {
+      if (!child) return
+      const cols = child.fields.filter(
+        (f) => f.widget === 'many2one' && f.relation && f.name !== field.inverse && child.list.columns.some((c) => c.name === f.name),
+      )
+      const byModel: Record<string, { id: number; label: string }[]> = {}
+      await Promise.all(
+        cols.map(async (f) => {
+          try {
+            const rel = await api.list(f.relation as string, { limit: 200 })
+            byModel[f.relation as string] = rel.data.map((r) => ({ id: r.id, label: relLabel(r) }))
+          } catch {
+            /* best-effort — the column falls back to #id */
+          }
+        }),
+      )
+      if (active) setChildResolve(() => buildResolver(byModel))
+    }
+    void load()
+    return () => {
+      active = false
+    }
+  }, [child, field.inverse])
+  const merged: Resolver = (m, rid) => childResolve(m, rid) ?? resolve?.(m, rid)
+
   const columns: Column<api.Row>[] = (child?.list.columns ?? [])
     .filter((c) => c.name !== field.inverse) // the back-reference to this parent is implied
     .map((c) => {
@@ -337,7 +367,7 @@ function InlineRelation({
         header: c.label,
         align: numeric ? ('right' as const) : ('left' as const),
         mono: numeric,
-        render: (row: api.Row) => displayValue(row[c.name], c.widget, f, resolve),
+        render: (row: api.Row) => displayValue(row[c.name], c.widget, f, merged),
       }
     })
 

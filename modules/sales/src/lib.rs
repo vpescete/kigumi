@@ -169,7 +169,7 @@ pub struct ProductProduct {
 
     // The variant's effective sales price = template list_price (delegated) + the variant surcharge.
     // Same-record on-read compute (both inputs are on the record: list_price delegated, price_extra own).
-    #[field(label = "Sales Price", compute = "variant_lst_price", depends = "list_price,price_extra")]
+    #[field(label = "Effective Price", compute = "variant_lst_price", depends = "list_price,price_extra")]
     lst_price: Decimal,
 
     // On-hand quantity across internal stock locations. Materialized by the stock module's validate
@@ -817,7 +817,6 @@ meshble::register_view!(
             fields: &[
                 FieldSlot { name: "list_price", full: false },
                 FieldSlot { name: "standard_price", full: false },
-                FieldSlot { name: "price_extra", full: false },
                 FieldSlot { name: "lst_price", full: false },
             ],
         },
@@ -890,6 +889,44 @@ meshble::register_view!(
         },
     ],
     &[NotebookPage { title: "Order lines", fields: &["line_ids"] }]
+);
+
+// Inline-table columns for the order lines: the customer-facing fields, in order. The order/company/
+// cost/margin fields are intentionally omitted so the inline grid stays readable.
+meshble::register_view!(
+    "sale.order.line",
+    &[FieldGroup {
+        title: None,
+        fields: &[
+            FieldSlot { name: "product_id", full: false },
+            FieldSlot { name: "name", full: false },
+            FieldSlot { name: "product_uom_qty", full: false },
+            FieldSlot { name: "price_unit", full: false },
+            FieldSlot { name: "discount", full: false },
+            FieldSlot { name: "price_subtotal", full: false },
+            FieldSlot { name: "price_tax", full: false },
+            FieldSlot { name: "price_total", full: false },
+        ],
+    }],
+    &[]
+);
+
+meshble::register_view!(
+    "purchase.order.line",
+    &[FieldGroup {
+        title: None,
+        fields: &[
+            FieldSlot { name: "product_id", full: false },
+            FieldSlot { name: "name", full: false },
+            FieldSlot { name: "product_uom_qty", full: false },
+            FieldSlot { name: "price_unit", full: false },
+            FieldSlot { name: "discount", full: false },
+            FieldSlot { name: "price_subtotal", full: false },
+            FieldSlot { name: "price_tax", full: false },
+            FieldSlot { name: "price_total", full: false },
+        ],
+    }],
+    &[]
 );
 
 #[cfg(test)]
