@@ -53,6 +53,8 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
     let related_submits = related_submits(&model_name, fields)?;
     // Tracked fields: emit a TrackedFieldRegistration for every `#[field(tracked)]`.
     let tracked_submits = tracked_submits(&model_name, fields)?;
+    // Read-only fields: emit a ReadonlyFieldRegistration for every `#[field(readonly)]`.
+    let readonly_submits = readonly_submits(&model_name, fields)?;
     // Delegation inheritance: `inherits = "parent", via = "fk"` emits an InheritsRegistration.
     let inherits_submit = match (meta_str(args, "inherits"), meta_str(args, "via")) {
         (Some(parent), Some(via)) => quote! {
@@ -93,6 +95,7 @@ fn expand(args: &[Meta], input: &DeriveInput) -> syn::Result<TokenStream2> {
         #(#group_submits)*
         #(#related_submits)*
         #(#tracked_submits)*
+        #(#readonly_submits)*
         #inherits_submit
     })
 }
@@ -176,6 +179,32 @@ fn tracked_submits(
         out.push(quote! {
             ::meshble::inventory::submit! {
                 ::meshble::prelude::TrackedFieldRegistration { model: #model_name, field: #fname }
+            }
+        });
+    }
+    Ok(out)
+}
+
+/// Emits a `ReadonlyFieldRegistration` for each field carrying the `#[field(readonly)]` flag.
+fn readonly_submits(
+    model_name: &str,
+    fields: &Punctuated<syn::Field, Token![,]>,
+) -> syn::Result<Vec<TokenStream2>> {
+    let mut out = Vec::new();
+    for f in fields {
+        let fname = f.ident.as_ref().ok_or_else(|| err(f, "field without a name"))?.to_string();
+        let mut metas: Vec<Meta> = Vec::new();
+        for a in &f.attrs {
+            if a.path().is_ident("field") {
+                metas.extend(a.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?);
+            }
+        }
+        if !meta_flag(&metas, "readonly") {
+            continue;
+        }
+        out.push(quote! {
+            ::meshble::inventory::submit! {
+                ::meshble::prelude::ReadonlyFieldRegistration { model: #model_name, field: #fname }
             }
         });
     }

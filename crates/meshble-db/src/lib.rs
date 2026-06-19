@@ -20,7 +20,7 @@ pub use migration::{Migration, MigrationOutcome};
 
 use meshble_core::{
     action_for, check_access, check_constraints, compute_on_read, compute_stored, computed_fields,
-    delegated_fields, field_accessible, has_constraints, has_read_computes, inherits_of, is_mailed,
+    delegated_fields, field_accessible, field_is_readonly, has_constraints, has_read_computes, inherits_of, is_mailed,
     record_rule_domain, related_path, resolve_all_registered,
     resolve_registered, tracked_fields, Acl, ActionInput, Children, Ctx, Domain, DomainError,
     FieldDef, FieldKind, Operation, RecordRule, ResolvedModel, Value,
@@ -529,7 +529,10 @@ impl Db {
     ) -> Result<(i64, BTreeMap<String, Value>), DbError> {
         apply_company_scope(model, ctx, scalars, true)?;
         apply_defaults(model, scalars);
-        let cols = validate_write_values(model, scalars, true)?;
+        let mut cols = validate_write_values(model, scalars, true)?;
+        // Seed read-only fields' defaults (e.g. on-hand = 0) as columns — they are excluded from the
+        // user-writable path above, so the framework supplies their initial value here.
+        cols.extend(readonly_default_columns(model, &cols)?);
         if cols.is_empty() {
             return Err(DbError::BadInput("no values provided".to_string()));
         }
@@ -2384,6 +2387,9 @@ fn validate_write_values(
         if field.is_computed() {
             return Err(DbError::BadInput(format!("field '{key}' is computed and not writable")));
         }
+        if field_is_readonly(model.name, field.name) {
+            return Err(DbError::BadInput(format!("field '{key}' is read-only and not writable")));
+        }
         if jv.is_null() && field.required {
             return Err(DbError::BadInput(format!("field '{key}' is required and cannot be null")));
         }
@@ -2678,12 +2684,35 @@ fn value_to_json(v: &Value) -> Json {
 /// Fills any unset stored field that declares a `default` (applied on create, before required check).
 fn apply_defaults(model: &ResolvedModel, payload: &mut Map<String, Json>) {
     for f in &model.fields {
-        if f.has_column() && !f.is_computed() && !payload.contains_key(f.name) {
+        // Read-only fields are not user-writable, so their default is NOT injected here (that would be
+        // rejected by the writability guard); the create path seeds it as a column after validation.
+        if f.has_column() && !f.is_computed() && !field_is_readonly(model.name, f.name) && !payload.contains_key(f.name) {
             if let Some(v) = default_json(f) {
                 payload.insert(f.name.to_string(), v);
             }
         }
     }
+}
+
+/// Columns for a read-only field's declared default, to seed on create AFTER `validate_write_values`
+/// (which would reject the field as not user-writable). Only fields the user did not supply — a
+/// user-supplied read-only value stays in the payload and is correctly rejected by the guard.
+fn readonly_default_columns(
+    model: &ResolvedModel,
+    written: &[(&'static str, Value)],
+) -> Result<Vec<(&'static str, Value)>, DbError> {
+    let mut out = Vec::new();
+    for f in &model.fields {
+        if f.has_column()
+            && field_is_readonly(model.name, f.name)
+            && !written.iter().any(|(n, _)| *n == f.name)
+        {
+            if let Some(jv) = default_json(f) {
+                out.push((f.name, json_to_value(f, &jv)?));
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn json_to_value(field: &FieldDef, jv: &Json) -> Result<Value, DbError> {

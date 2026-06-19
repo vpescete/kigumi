@@ -8,8 +8,8 @@ pub use meshble_core::inventory;
 pub mod prelude {
     pub use meshble_core::{
         action_for, check_access, check_compat, compute_fn, compute_stored, computed_fields,
-        delegated_fields, external_tables, field_accessible, field_required_groups, inherits_of,
-        is_mailed, is_transient, json_string, mailed_models, migration_plan, module_closure, module_of,
+        delegated_fields, external_tables, field_accessible, field_is_readonly, field_required_groups,
+        inherits_of, is_mailed, is_transient, json_string, mailed_models, migration_plan, module_closure, module_of,
         check_constraints, has_constraints, has_read_computes, compute_on_read, transient_models,
         record_rule_domain, registered_acls, registered_group_names, registered_model_names,
         registered_rules, related_path, resolve, resolve_all_registered, resolve_module_set,
@@ -19,8 +19,9 @@ pub mod prelude {
         FieldBuilder, FieldDef, FieldExtension, FieldGroupRegistration, FieldKind,
         InheritsRegistration, MailedRegistration, MigrationTarget, Model, ModelDescriptor,
         ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
-        RecordRule, RecordRuleRegistration, RelatedRegistration, ResolutionError, ResolvedModel,
-        RuleDomain, Sql, TrackedFieldRegistration, TransientRegistration, Value, FRAMEWORK_VERSION,
+        ReadonlyFieldRegistration, RecordRule, RecordRuleRegistration, RelatedRegistration,
+        ResolutionError, ResolvedModel, RuleDomain, Sql, TrackedFieldRegistration, TransientRegistration,
+        Value, FRAMEWORK_VERSION,
         wizard_for, WizardContext, WizardDefaultGet, WizardRegistration,
         report_for, reports_for, ReportFn, ReportRegistration,
         view_for, FieldGroup, FieldSlot, FormView, NotebookPage,

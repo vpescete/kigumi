@@ -30,12 +30,12 @@ pub use manifest::{check_compat, resolve_module_set, ModuleDep, ModuleManifest, 
 pub use metamodel::{resolve, validate_depends, validate_depends_with_extra, FieldDef, FieldKind, Model, ModelDescriptor, ResolvedModel};
 pub use registry::{
     delegated_fields, external_tables, inherits_of, is_mailed, is_transient, mailed_models,
-    migration_plan, module_closure, module_of, registered_acls, registered_group_names,
-    registered_model_names, registered_rules, related_path, resolve_all_registered, resolve_modules,
-    resolve_registered, tracked_fields, transient_models, AclRegistration, DelegatedField,
-    ExternalTable, FieldExtension, InheritsRegistration, MailedRegistration, MigrationTarget,
-    ModelRegistration, ModuleRegistration, RecordRuleRegistration, RelatedRegistration,
-    TransientRegistration, TrackedFieldRegistration,
+    field_is_readonly, migration_plan, module_closure, module_of, registered_acls,
+    registered_group_names, registered_model_names, registered_rules, related_path,
+    resolve_all_registered, resolve_modules, resolve_registered, tracked_fields, transient_models,
+    AclRegistration, DelegatedField, ExternalTable, FieldExtension, InheritsRegistration,
+    MailedRegistration, MigrationTarget, ModelRegistration, ModuleRegistration, ReadonlyFieldRegistration,
+    RecordRuleRegistration, RelatedRegistration, TransientRegistration, TrackedFieldRegistration,
 };
 pub use security::{
     check_access, field_accessible, field_required_groups, record_rule_domain, Acl, Ctx,

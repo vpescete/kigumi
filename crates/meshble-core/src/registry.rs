@@ -117,6 +117,22 @@ pub fn tracked_fields(model: &str) -> Vec<&'static str> {
         .collect()
 }
 
+/// A stored field declared read-only: shown in the UI contract as `readonly` and rejected by the write
+/// path (like a computed field), even though it is not computed. Emitted by `#[field(readonly)]`. Used
+/// for materialized values a service method maintains (e.g. on-hand) — visible, never hand-edited.
+pub struct ReadonlyFieldRegistration {
+    pub model: &'static str,
+    pub field: &'static str,
+}
+inventory::collect!(ReadonlyFieldRegistration);
+
+/// Whether `model`.`field` is declared `#[field(readonly)]`.
+pub fn field_is_readonly(model: &str, field: &str) -> bool {
+    inventory::iter::<ReadonlyFieldRegistration>
+        .into_iter()
+        .any(|e| e.model == model && e.field == field)
+}
+
 /// Delegation inheritance (Odoo's `_inherits`): `model` carries a required Many2one `via` to `parent`
 /// and transparently exposes the parent's stored scalar fields (read via the FK, written through to the
 /// parent). Emitted by `#[model(inherits = "parent", via = "fk")]`. The `via` FK is an ordinary field

@@ -172,9 +172,10 @@ pub struct ProductProduct {
     #[field(label = "Sales Price", compute = "variant_lst_price", depends = "list_price,price_extra")]
     lst_price: Decimal,
 
-    // On-hand quantity across internal stock locations. Materialized by the stock module's move-done
-    // mechanism (engine-only, base.system); stays 0 until stock is installed and stock is moved.
-    #[field(label = "On Hand", default = "0", groups = "base.system")]
+    // On-hand quantity across internal stock locations. Materialized by the stock module's validate
+    // mechanism (raw SQL, which bypasses the secured-write readonly guard); visible but never
+    // hand-edited. Stays 0 until stock is installed and stock is moved.
+    #[field(label = "On Hand", default = "0", readonly)]
     qty_available: Decimal,
 
     // The variant's OWN active flag, intentionally shadowing product.template.active: archiving one
@@ -939,6 +940,15 @@ mod tests {
         assert_eq!(field_required_groups("product.product", "product_template_attribute_value_ids"), Some(&["base.system"][..]));
         assert_eq!(field_required_groups("product.product", "price_extra"), Some(&["base.system"][..]));
         assert_eq!(field_required_groups("product.product", "lst_price"), None);
+    }
+
+    #[test]
+    fn on_hand_is_readonly_and_visible() {
+        // qty_available (on-hand) is materialized by the stock validate mechanism: visible to everyone
+        // (no group gate) but read-only, so it is shown yet never hand-edited.
+        assert!(field_is_readonly("product.product", "qty_available"), "on-hand is read-only");
+        assert!(field_required_groups("product.product", "qty_available").is_none(), "on-hand is not group-gated");
+        assert!(!field_is_readonly("product.product", "lst_price"), "a normal field is writable");
     }
 
     #[test]

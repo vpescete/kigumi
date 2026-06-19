@@ -7,7 +7,7 @@
 mod openapi;
 pub use openapi::openapi;
 
-use meshble_core::{actions_for, delegated_fields, is_mailed, json_string, related_path, reports_for, view_for, Domain, DomainError, FieldDef, FieldKind, ResolvedModel};
+use meshble_core::{actions_for, delegated_fields, field_is_readonly, is_mailed, json_string, related_path, reports_for, view_for, Domain, DomainError, FieldDef, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
 fn pg_type(kind: &FieldKind) -> &'static str {
@@ -151,8 +151,9 @@ pub fn to_ui_contract(m: &ResolvedModel, rules: &[FieldRule]) -> Result<String, 
         .fields
         .iter()
         .map(|f| {
-            // Related fields are read-only mirrors (resolved server-side), like computed fields.
-            let readonly = f.is_computed() || related_path(m.name, f.name).is_some();
+            // Computed and related fields are read-only mirrors; `#[field(readonly)]` marks a stored
+            // field (e.g. a materialized on-hand) read-only too.
+            let readonly = f.is_computed() || related_path(m.name, f.name).is_some() || field_is_readonly(m.name, f.name);
             emit(f, readonly)
         })
         .collect();

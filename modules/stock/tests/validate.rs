@@ -70,6 +70,12 @@ async fn validate_moves_stock_and_is_single_shot() {
     let cur = ins(&currency, json!({ "name": "Euro", "code": "EUR", "symbol": "E", "decimal_places": 2, "rounding": 0.01, "position": "after", "active": true })).await;
     let comp = ins(&company, json!({ "name": "Main", "currency_id": cur, "active": true })).await;
     let prod = ins(&product, json!({ "name": "Widget", "list_price": 100.0 })).await;
+
+    // On-hand is read-only: an explicit write of qty_available is rejected (only the validate mechanism
+    // sets it). Even sudo is refused — this is a field-writability rule, not an access check.
+    let ro = db.insert_secured(&product, &su, &[], &[], json!({ "name": "RO", "qty_available": "5" }).as_object().unwrap()).await;
+    assert!(ro.is_err(), "writing the read-only on-hand must be rejected");
+
     let stock = ins(&location, json!({ "name": "Stock", "usage": "internal", "company_id": comp })).await;
     let vendors = ins(&location, json!({ "name": "Vendors", "usage": "supplier", "company_id": comp })).await;
     let customers = ins(&location, json!({ "name": "Customers", "usage": "customer", "company_id": comp })).await;
