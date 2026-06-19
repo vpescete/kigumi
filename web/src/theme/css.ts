@@ -2,12 +2,18 @@
 // for BOTH built-in and community themes — there is no static per-theme CSS, so a dropped-in theme
 // behaves identically to a shipped one.
 
-import { colorVar, COLOR_TOKENS, TYPE_ROLES, type Mode, type Theme } from './contract'
+import { colorVar, COLOR_TOKENS, MOTION_DEFAULTS, TYPE_ROLES, VIZ_TOKENS, vizVar, type Mode, type Palette, type Theme, type VizPalette } from './contract'
 import { isSafeFontHref } from './validate'
+
+/** A sensible data-viz palette derived from a theme's color palette, for themes that omit `viz`. */
+function derivedViz(pal: Palette): VizPalette {
+  return { viz1: pal.accent, viz2: pal.success, viz3: pal.warning, viz4: pal.textMuted, vizGrid: pal.border }
+}
 
 /** Generates the `[data-theme='id']` (+ light/dark) CSS block for one theme. */
 export function themeToCss(t: Theme): string {
   const sel = `[data-theme='${t.id}']`
+  const motion = t.motion ?? MOTION_DEFAULTS
   const lines: string[] = []
   lines.push(`${sel} {`)
   lines.push(`  --font-display: ${t.fonts.display};`)
@@ -15,6 +21,9 @@ export function themeToCss(t: Theme): string {
   lines.push(`  --font-mono: ${t.fonts.mono};`)
   lines.push(`  --radius-sm: ${t.radius.sm}; --radius-md: ${t.radius.md}; --radius-lg: ${t.radius.lg};`)
   lines.push(`  --shadow-sm: ${t.shadow.sm}; --shadow-md: ${t.shadow.md};`)
+  lines.push(`  --shadow-overlay: ${t.shadow.overlay ?? t.shadow.md};`)
+  lines.push(`  --dur-fast: ${motion.fast}; --dur-base: ${motion.base}; --dur-slow: ${motion.slow};`)
+  lines.push(`  --ease-out: ${motion.easeOut}; --ease-in-out: ${motion.easeInOut};`)
   lines.push(`  --density-row: ${t.density.row}; --control-h: ${t.density.control};`)
   lines.push(`  --fs-base: ${t.density.fsBase}; --space: ${t.density.space};`)
   for (const r of TYPE_ROLES) {
@@ -27,6 +36,8 @@ export function themeToCss(t: Theme): string {
   for (const mode of ['light', 'dark'] as Mode[]) {
     lines.push(`${sel}[data-mode='${mode}'] {`)
     for (const tok of COLOR_TOKENS) lines.push(`  ${colorVar(tok)}: ${t.color[mode][tok]};`)
+    const viz = t.viz?.[mode] ?? derivedViz(t.color[mode])
+    for (const tok of VIZ_TOKENS) lines.push(`  ${vizVar[tok]}: ${viz[tok]};`)
     lines.push('}')
   }
   return lines.join('\n')

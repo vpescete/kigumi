@@ -22,6 +22,13 @@ export default {
         success: { DEFAULT: 'var(--color-success)', bg: 'var(--color-success-bg)' },
         warning: { DEFAULT: 'var(--color-warning)', bg: 'var(--color-warning-bg)' },
         danger: { DEFAULT: 'var(--color-danger)', bg: 'var(--color-danger-bg)' },
+        viz: {
+          1: 'var(--viz-1)',
+          2: 'var(--viz-2)',
+          3: 'var(--viz-3)',
+          4: 'var(--viz-4)',
+          grid: 'var(--viz-grid)',
+        },
       },
       borderRadius: {
         sm: 'var(--radius-sm)',
@@ -31,6 +38,7 @@ export default {
       boxShadow: {
         sm: 'var(--shadow-sm)',
         md: 'var(--shadow-md)',
+        overlay: 'var(--shadow-overlay)',
       },
       fontFamily: {
         sans: 'var(--font-sans)',
@@ -38,6 +46,23 @@ export default {
       },
       ringColor: {
         DEFAULT: 'var(--color-ring)',
+      },
+      transitionDuration: {
+        fast: 'var(--dur-fast)',
+        base: 'var(--dur-base)',
+        slow: 'var(--dur-slow)',
+      },
+      transitionTimingFunction: {
+        out: 'var(--ease-out)',
+        'in-out': 'var(--ease-in-out)',
+      },
+      zIndex: {
+        sticky: 'var(--z-sticky)',
+        drawer: 'var(--z-drawer)',
+        overlay: 'var(--z-overlay)',
+        dialog: 'var(--z-dialog)',
+        toast: 'var(--z-toast)',
+        tooltip: 'var(--z-tooltip)',
       },
     },
   },

@@ -1,7 +1,7 @@
 // Theme validation: structural (all tokens/roles present) + a WCAG contrast linter (the same
 // >= 4.5:1 rule the design QA used). Authors get warnings before a theme ships.
 
-import { COLOR_TOKENS, TYPE_ROLES, type Mode, type Palette, type Theme } from './contract'
+import { COLOR_TOKENS, TYPE_ROLES, VIZ_TOKENS, type Mode, type Palette, type Theme } from './contract'
 
 /** Parses #rgb / #rrggbb to [r,g,b] 0–255, or null if unparseable. */
 export function hexToRgb(hex: string): [number, number, number] | null {
@@ -123,6 +123,35 @@ export function lintTheme(t: Theme): Lint[] {
   for (const [name, v] of injected) {
     if (typeof v !== 'string') err(`missing/invalid ${name}`)
     else if (breakout(v)) err(`${name} contains characters unsafe to inject as CSS`)
+  }
+
+  // Optional motion + overlay shadow — injected as CSS values, so breakout-check only when present.
+  if (t.motion) {
+    for (const [k, v] of Object.entries(t.motion)) {
+      if (typeof v !== 'string' || breakout(v)) err(`motion.${k} is invalid`)
+    }
+  }
+  if (t.shadow?.overlay != null && (typeof t.shadow.overlay !== 'string' || breakout(t.shadow.overlay))) {
+    err('shadow.overlay is invalid')
+  }
+
+  // Optional data-viz palette — validate each hue when present (charts need only 3:1 vs surface, warn).
+  if (t.viz) {
+    for (const mode of ['light', 'dark'] as Mode[]) {
+      const vp = t.viz[mode]
+      if (!vp) {
+        err(`viz: missing "${mode}" palette`)
+        continue
+      }
+      for (const tok of VIZ_TOKENS) {
+        if (!vp[tok]) err(`viz ${mode}: missing "${tok}"`)
+        else if (!SAFE_COLOR.test(vp[tok].trim())) err(`viz ${mode}: "${tok}" is not a valid color`)
+      }
+      const surface = t.color?.[mode]?.surface
+      const ratio = surface ? contrast(vp.viz1, surface) : null
+      if (ratio !== null && ratio < 3)
+        out.push({ level: 'warn', message: `viz ${mode}: viz1 vs surface ${ratio.toFixed(2)}:1 (< 3:1)` })
+    }
   }
 
   for (const mode of ['light', 'dark'] as Mode[]) {
