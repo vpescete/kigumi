@@ -1,16 +1,28 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Save } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Printer, Save } from 'lucide-react'
 import * as api from '../api'
 import { canRun } from '../api'
 import { useAuth } from '../auth'
 import type { Column } from '../ui'
-import { Button, Card, DataTable, ErrorState, Loading, PageHeader } from '../ui'
+import { Button, Card, confirm, cx, DataTable, ErrorState, focusRing, Loading, PageHeader, useToast } from '../ui'
 import { displayValue, modelTitle } from '../format'
+import { SERVICE_ACTIONS, type ServiceAction } from '../registries/serviceActions'
 import { ContractFields, editableScalar, useRelOptions } from './ContractFields'
+import { ReportViewer } from './ReportViewer'
 import { Chatter } from './Chatter'
 
 type FormValues = Record<string, unknown>
+
+// Friendly labels for state actions (machine names → active-voice; falls back to a prettified name).
+const ACTION_LABELS: Record<string, string> = {
+  confirm: 'Confirm',
+  done: 'Mark done',
+  button_draft: 'Reset to draft',
+  button_cancel: 'Cancel',
+}
+const actionLabel = (name: string): string =>
+  ACTION_LABELS[name] ?? name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
 
 function initialValues(contract: api.Contract, record: api.Row | null): FormValues {
   if (record) return { ...record }
@@ -27,6 +39,7 @@ export function ModelForm() {
   const { model = '', id = 'new' } = useParams()
   const nav = useNavigate()
   const { identity } = useAuth()
+  const toast = useToast()
   const isNew = id === 'new'
 
   const [contract, setContract] = useState<api.Contract | null>(null)
@@ -37,6 +50,7 @@ export function ModelForm() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [report, setReport] = useState<api.ReportMeta | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     setError(null)
@@ -110,10 +124,27 @@ export function ModelForm() {
     }
   }
 
+  // A cross-record service method (create_invoice, post, …): confirm if irreversible, run, toast, refresh.
+  async function runService(spec: ServiceAction): Promise<void> {
+    if (spec.confirm && !(await confirm({ title: spec.label, body: spec.confirm, confirmLabel: spec.label, tone: 'accent' }))) return
+    setBusy(true)
+    try {
+      const result = await api.callEndpoint(model, Number(id), spec.endpoint)
+      toast.success(spec.resultToast(result))
+      await load()
+    } catch (err: unknown) {
+      toast.error(err instanceof api.ApiError ? err.message : `${spec.label} failed`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (error && !contract) return <ErrorState message={error} />
   if (!contract) return <Loading />
 
   const actions = isNew ? [] : contract.actions.filter((a) => canRun(a, identity))
+  const services = isNew ? [] : SERVICE_ACTIONS[model] ?? []
+  const reports = isNew ? [] : contract.reports ?? []
   const relationFields = contract.fields.filter((f) => f.widget === 'one2many' && f.relation)
 
   return (
@@ -131,11 +162,17 @@ export function ModelForm() {
         actions={
           <>
             {actions.map((a) => (
-              <Button key={a.name} variant="secondary" onClick={() => act(a.name)}>
-                {a.name}
+              <Button key={a.name} variant="secondary" onClick={() => act(a.name)} disabled={busy}>
+                {actionLabel(a.name)}
               </Button>
             ))}
-            <Button variant="primary" icon={<Save size={16} />} onClick={save}>
+            {services.map((s) => (
+              <Button key={s.endpoint} variant="secondary" onClick={() => runService(s)} disabled={busy}>
+                {s.label}
+              </Button>
+            ))}
+            {reports.length > 0 && <PrintMenu reports={reports} onPick={setReport} />}
+            <Button variant="primary" icon={<Save size={16} />} onClick={save} disabled={busy}>
               {busy ? 'Saving…' : 'Save'}
             </Button>
           </>
@@ -155,6 +192,39 @@ export function ModelForm() {
         ))}
 
       {!isNew && contract.mailed && <Chatter model={model} id={Number(id)} />}
+
+      {report && <ReportViewer model={model} id={Number(id)} report={report} onClose={() => setReport(null)} />}
+    </div>
+  )
+}
+
+/** A "Print" button that opens a small menu of the model's reports. */
+function PrintMenu({ reports, onPick }: { reports: api.ReportMeta[]; onPick: (r: api.ReportMeta) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <Button variant="secondary" icon={<Printer size={15} />} onClick={() => setOpen((v) => !v)}>
+        Print <ChevronDown size={14} />
+      </Button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-overlay" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div className="absolute right-0 z-dialog mt-1 w-48 rounded-md border border-border bg-surface p-1 shadow-overlay">
+            {reports.map((r) => (
+              <button
+                key={r.name}
+                onClick={() => {
+                  setOpen(false)
+                  onPick(r)
+                }}
+                className={cx('t-body flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-text hover:bg-surface2', focusRing)}
+              >
+                {r.title}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
