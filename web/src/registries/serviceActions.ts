@@ -38,6 +38,14 @@ export const SERVICE_ACTIONS: Record<string, ServiceAction[]> = {
       resultToast: (r) => `Receipt created (draft transfer #${r.picking})`,
     },
   ],
+  'stock.picking': [
+    {
+      endpoint: 'validate',
+      label: 'Validate',
+      confirm: 'Validate this transfer? It moves the stock and cannot be undone.',
+      resultToast: (r) => `Transfer ${r.validated} done`,
+    },
+  ],
   'account.move': [
     {
       endpoint: 'post',
