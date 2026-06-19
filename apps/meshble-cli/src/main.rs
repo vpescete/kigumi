@@ -28,6 +28,7 @@ fn link_modules() {
         &meshble_mod_mail::MANIFEST,
         &meshble_mod_sales::MANIFEST,
         &meshble_mod_account::MANIFEST,
+        &meshble_mod_stock::MANIFEST,
     );
 }
 
@@ -325,6 +326,8 @@ async fn migrate_installed(db: &Db) -> Fallible {
     // Transient (wizard) models: give each one's create_date a DEFAULT now() so every insert is
     // timestamped and the GC cron can reclaim it (idempotent, tolerant if none are installed).
     db.ensure_transient_defaults().await?;
+    // Stock: one quant per (product, location) — a composite UNIQUE + the upsert anchor (idempotent).
+    db.ensure_stock_indexes().await?;
     // Scheduled jobs: create the cron ledger and seed the registered jobs (idempotent).
     db.ensure_crons().await?;
     if installed.iter().any(|m| m == "base") {
@@ -333,6 +336,55 @@ async fn migrate_installed(db: &Db) -> Fallible {
     if installed.iter().any(|m| m == "account") {
         seed_account_data(db).await?;
     }
+    if installed.iter().any(|m| m == "stock") {
+        seed_stock_data(db).await?;
+    }
+    Ok(())
+}
+
+/// Seeds a default warehouse + the standard locations (Stock / Vendors / Customers / Inventory) for the
+/// default company when `stock` is installed, so receipts and deliveries have somewhere to move stock.
+/// Idempotent: only an empty set of locations is seeded.
+async fn seed_stock_data(db: &Db) -> Fallible {
+    let location = match resolve_registered("stock.location") {
+        Ok(m) => m,
+        Err(_) => return Ok(()), // stock module not linked
+    };
+    let warehouse = resolve_registered("stock.warehouse").map_err(|e| e.to_string())?;
+    let company = resolve_registered("res.company").map_err(|e| e.to_string())?;
+    let su = Ctx::new(0, vec![]).sudo();
+
+    if db.count_secured(&location, &su, &[], &[], None).await? > 0 {
+        return Ok(());
+    }
+    let Some(&comp_id) = db.find_ids_secured(&company, &su, &[], &[], None).await?.first() else {
+        return Ok(());
+    };
+
+    let loc = |name: &str, usage: &str| {
+        serde_json::json!({ "name": name, "usage": usage, "company_id": comp_id, "active": true })
+    };
+    let mut new_location = |v: serde_json::Value| {
+        let location = &location;
+        let su = &su;
+        async move { db.insert_secured(location, su, &[], &[], v.as_object().unwrap()).await }
+    };
+    let stock = new_location(loc("Stock", "internal")).await?;
+    new_location(loc("Vendors", "supplier")).await?;
+    new_location(loc("Customers", "customer")).await?;
+    new_location(loc("Inventory adjustment", "inventory")).await?;
+
+    db.insert_secured(
+        &warehouse,
+        &su,
+        &[],
+        &[],
+        serde_json::json!({ "name": "Main Warehouse", "code": "WH", "location_id": stock, "company_id": comp_id, "active": true })
+            .as_object()
+            .unwrap(),
+    )
+    .await?;
+    println!("seeded default warehouse + stock locations");
     Ok(())
 }
 

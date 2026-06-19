@@ -2089,6 +2089,20 @@ impl Db {
         }
         Ok(())
     }
+
+    /// Stock indexes: one quant per (product, location) — a composite UNIQUE the metamodel can't express,
+    /// and the anchor for the `ON CONFLICT (product_id, location_id)` upsert the move-done mechanism uses.
+    /// Tolerates an unmigrated `stock_quant` (the stock module isn't installed). Run during migrate.
+    pub async fn ensure_stock_indexes(&self) -> Result<(), DbError> {
+        match sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS stock_quant_product_location ON stock_quant (product_id, location_id)")
+            .execute(&self.pool)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) if is_undefined_table(&e) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
 }
 
 /// True iff the error is Postgres `undefined_table` (42P01) — a mail thread table not yet migrated.
