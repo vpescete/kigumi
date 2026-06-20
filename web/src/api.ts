@@ -192,6 +192,29 @@ export async function modelNames(): Promise<string[]> {
   return asJson<string[]>(await request('/api/models'))
 }
 
+// ---- Modules (install / uninstall) ----
+
+export type ModuleInfo = {
+  name: string
+  version: string
+  summary: string
+  framework: string
+  depends: { name: string; req: string }[]
+  installed: boolean
+}
+
+export async function modules(): Promise<ModuleInfo[]> {
+  return asJson<ModuleInfo[]>(await request('/api/modules'))
+}
+
+export async function installModule(name: string): Promise<{ installed: string[]; needs_restart: boolean }> {
+  return asJson(await request(`/api/modules/${name}/install`, { method: 'POST' }))
+}
+
+export async function uninstallModule(name: string): Promise<{ uninstalled: string; needs_restart: boolean }> {
+  return asJson(await request(`/api/modules/${name}/uninstall`, { method: 'POST' }))
+}
+
 export async function contract(model: string): Promise<Contract> {
   return asJson<Contract>(await request(`/api/${model}/view`))
 }

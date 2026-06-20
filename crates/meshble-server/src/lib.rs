@@ -20,8 +20,9 @@ use axum::{
 use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{
-    check_access, field_accessible, is_mailed, report_for, wizard_for, Acl, Condition, Ctx, Domain,
-    FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
+    check_access, field_accessible, is_mailed, module_closure, report_for, resolve_modules, wizard_for,
+    Acl, Condition, Ctx, Domain, FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value,
+    WizardContext,
 };
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
@@ -64,6 +65,9 @@ fn base_router() -> Router<AppState> {
     Router::new()
         .route("/openapi.json", get(openapi_handler))
         .route("/api/models", get(models_handler))
+        .route("/api/modules", get(modules_handler))
+        .route("/api/modules/:name/install", post(module_install_handler))
+        .route("/api/modules/:name/uninstall", post(module_uninstall_handler))
         .route("/api/:name/view", get(view_handler))
 }
 
@@ -240,6 +244,111 @@ async fn me_handler(State(state): State<AppState>, headers: HeaderMap) -> Respon
         "allowed_company_ids": ctx.allowed_company_ids,
     });
     json_response(body.to_string())
+}
+
+/// Lists every linked module with its manifest + installed state. Any authenticated user may read it.
+async fn modules_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    if let Err(r) = authenticate(backend, &headers) {
+        return r;
+    }
+    let mods = match resolve_modules() {
+        Ok(m) => m,
+        Err(e) => return internal_error("modules", e),
+    };
+    let installed = match backend.db.installed_modules().await {
+        Ok(i) => i,
+        Err(e) => return write_error("modules", e),
+    };
+    let items: Vec<serde_json::Value> = mods
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "name": m.name,
+                "version": m.version,
+                "summary": m.summary,
+                "framework": m.framework,
+                "depends": m.depends.iter().map(|d| serde_json::json!({ "name": d.name, "req": d.req })).collect::<Vec<_>>(),
+                "installed": installed.iter().any(|i| i == m.name),
+            })
+        })
+        .collect();
+    json_response(serde_json::json!(items).to_string())
+}
+
+/// Installs a module + its dependency closure (marks the install ledger). The new module's tables and
+/// served models apply on the next server restart (the router is built from the installed set at
+/// startup) — the response carries `needs_restart`. Admin only.
+async fn module_install_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "installing a module requires the admin group").into_response();
+    }
+    let want = match module_closure(&name) {
+        Ok(w) => w,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let mods = match resolve_modules() {
+        Ok(m) => m,
+        Err(e) => return internal_error("modules", e),
+    };
+    let mut installed_now: Vec<&str> = Vec::new();
+    for m in mods.iter().filter(|m| want.contains(&m.name)) {
+        match backend.db.is_module_installed(m.name).await {
+            Ok(true) => {}
+            Ok(false) => match backend.db.mark_module_installed(m.name, m.version).await {
+                Ok(_) => installed_now.push(m.name),
+                Err(e) => return write_error("module_install", e),
+            },
+            Err(e) => return write_error("module_install", e),
+        }
+    }
+    json_response(serde_json::json!({ "installed": installed_now, "needs_restart": true }).to_string())
+}
+
+/// Uninstalls a module (marks the ledger; its tables and data are kept). Refuses `base` and any module
+/// an installed module still depends on. Applies on restart. Admin only.
+async fn module_uninstall_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "uninstalling a module requires the admin group").into_response();
+    }
+    if name == "base" {
+        return (StatusCode::BAD_REQUEST, "cannot uninstall 'base' (the foundational module)").into_response();
+    }
+    match backend.db.is_module_installed(&name).await {
+        Ok(false) => return (StatusCode::BAD_REQUEST, format!("module '{name}' is not installed")).into_response(),
+        Ok(true) => {}
+        Err(e) => return write_error("module_uninstall", e),
+    }
+    let mods = match resolve_modules() {
+        Ok(m) => m,
+        Err(e) => return internal_error("modules", e),
+    };
+    let installed = match backend.db.installed_modules().await {
+        Ok(i) => i,
+        Err(e) => return write_error("modules", e),
+    };
+    let dependents: Vec<&str> = mods
+        .iter()
+        .filter(|m| installed.iter().any(|i| i == m.name) && m.depends.iter().any(|d| d.name == name))
+        .map(|m| m.name)
+        .collect();
+    if !dependents.is_empty() {
+        return (StatusCode::BAD_REQUEST, format!("uninstall {dependents:?} first — they depend on '{name}'")).into_response();
+    }
+    match backend.db.mark_module_uninstalled(&name).await {
+        Ok(_) => json_response(serde_json::json!({ "uninstalled": name, "needs_restart": true }).to_string()),
+        Err(e) => write_error("module_uninstall", e),
+    }
 }
 
 async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -> Response {

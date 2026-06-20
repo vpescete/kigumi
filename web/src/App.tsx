@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
+  Blocks,
   Box,
   ChevronDown,
   ChevronRight,
@@ -122,6 +123,9 @@ function SidebarNav({ groups, onNavigate }: { groups: NavGroup[]; onNavigate?: (
           </div>
         )
       })}
+      <div className="pt-1.5">
+        <NavItem to="/modules" label="Modules" onNavigate={onNavigate} />
+      </div>
     </nav>
   )
 }
@@ -172,6 +176,7 @@ function RailNav({ groups }: { groups: NavGroup[] }) {
           active={g.models.some((m) => pathname.startsWith(`/m/${m}`))}
         />
       ))}
+      <RailItem to="/modules" label="Modules" icon={<Blocks size={18} />} active={pathname.startsWith('/modules')} />
     </nav>
   )
 }
@@ -201,6 +206,7 @@ function Breadcrumbs() {
   const crumbs: { label: string; to?: string }[] = [{ label: 'Home', to: '/' }]
   if (pathname === '/') crumbs.push({ label: 'Dashboard' })
   else if (pathname.startsWith('/theme-studio')) crumbs.push({ label: 'Theme Studio' })
+  else if (pathname.startsWith('/modules')) crumbs.push({ label: 'Modules' })
   else if (params.model) {
     crumbs.push({ label: modelTitle(params.model), to: `/m/${params.model}` })
     if (params.id) crumbs.push({ label: params.id === 'new' ? 'New' : `#${params.id}` })
