@@ -35,14 +35,19 @@ const GROUP_ICON: Record<string, ReactNode> = {
   Other: <Box size={15} />,
 }
 
-function Brand() {
+function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
-    <NavLink to="/" className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-4">
-      <div className="grid h-7 w-7 place-items-center rounded-md bg-accent text-sm font-bold text-accent-fg">M</div>
-      <div className="leading-tight">
-        <div className="font-semibold text-text">Meshble</div>
-        <div className="t-mono text-[10px] text-muted">precision ERP</div>
-      </div>
+    <NavLink
+      to="/"
+      className={cx('flex h-14 shrink-0 items-center gap-2.5 overflow-hidden border-b border-border', collapsed ? 'justify-center px-0' : 'px-4')}
+    >
+      <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-sm font-bold text-accent-fg">M</div>
+      {!collapsed && (
+        <div className="whitespace-nowrap leading-tight">
+          <div className="font-semibold text-text">Meshble</div>
+          <div className="t-mono text-[10px] text-muted">precision ERP</div>
+        </div>
+      )}
     </NavLink>
   )
 }
@@ -121,14 +126,70 @@ function SidebarNav({ groups, onNavigate }: { groups: NavGroup[]; onNavigate?: (
   )
 }
 
-function Sidebar({ groups, onNavigate, className }: { groups: NavGroup[]; onNavigate?: () => void; className?: string }) {
+/** Collapsed rail: icon-only nav. Each item reveals a hover flyout (the label, and a group's models)
+ * to the right — so navigation stays reachable without expanding. */
+function RailItem({ icon, active, label, to, models }: { icon: ReactNode; active: boolean; label: string; to?: string; models?: string[] }) {
+  const iconCls = cx(
+    'grid h-9 w-9 place-items-center rounded-md',
+    active ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-surface2 hover:text-text',
+    focusRing,
+  )
   return (
-    <aside className={cx('flex h-full w-[244px] shrink-0 flex-col border-r border-border bg-bg', className)}>
-      <Brand />
-      <SidebarNav groups={groups} onNavigate={onNavigate} />
-      <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
+    <div className="group relative flex justify-center">
+      {to ? (
+        <NavLink to={to} end className={iconCls} aria-label={label}>
+          {icon}
+        </NavLink>
+      ) : (
+        <span className={iconCls} role="img" aria-label={label}>
+          {icon}
+        </span>
+      )}
+      {/* Hover flyout (pl-2 bridges the gap so moving onto it doesn't close it). */}
+      <div className="invisible absolute left-full top-0 z-dialog pl-2 opacity-0 transition-opacity duration-fast group-hover:visible group-hover:opacity-100">
+        <div className="min-w-[12rem] rounded-lg border border-border bg-surface p-1.5 shadow-overlay">
+          <div className="t-label px-2 pb-1 pt-0.5 text-muted">{label}</div>
+          {models
+            ? models.map((m) => <NavItem key={m} to={`/m/${m}`} label={modelTitle(m)} />)
+            : to && <NavItem to={to} end label={label} />}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RailNav({ groups }: { groups: NavGroup[] }) {
+  const { pathname } = useLocation()
+  return (
+    <nav className="flex-1 space-y-1 overflow-y-auto overflow-x-visible p-2">
+      <RailItem to="/" label="Dashboard" icon={<LayoutDashboard size={18} />} active={pathname === '/'} />
+      {groups.map((g) => (
+        <RailItem
+          key={g.label}
+          label={g.label}
+          icon={GROUP_ICON[g.label] ?? <Box size={18} />}
+          models={g.models}
+          active={g.models.some((m) => pathname.startsWith(`/m/${m}`))}
+        />
+      ))}
+    </nav>
+  )
+}
+
+function Sidebar({ groups, collapsed, onNavigate, className }: { groups: NavGroup[]; collapsed?: boolean; onNavigate?: () => void; className?: string }) {
+  return (
+    <aside
+      className={cx(
+        'flex h-full shrink-0 flex-col border-r border-border bg-bg transition-[width] duration-base ease-out',
+        collapsed ? 'w-[60px]' : 'w-[244px]',
+        className,
+      )}
+    >
+      <Brand collapsed={collapsed} />
+      {collapsed ? <RailNav groups={groups} /> : <SidebarNav groups={groups} onNavigate={onNavigate} />}
+      <div className={cx('flex items-center border-t border-border py-2.5', collapsed ? 'justify-center px-0' : 'gap-2 px-4')}>
         <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />
-        <span className="t-mono text-[10px] text-muted">live · contract-driven</span>
+        {!collapsed && <span className="t-mono text-[10px] text-muted">live · contract-driven</span>}
       </div>
     </aside>
   )
@@ -401,7 +462,7 @@ export function App() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar groups={groups} className={collapsed ? 'hidden' : 'hidden md:flex'} />
+      <Sidebar groups={groups} collapsed={collapsed} className="hidden md:flex" />
       {drawer && (
         <Portal>
           <div className="fixed inset-0 z-drawer bg-bg/70 backdrop-blur-sm md:hidden" onClick={() => setDrawer(false)} aria-hidden="true" />
