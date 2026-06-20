@@ -20,7 +20,7 @@ import {
 import { useTheme } from './theme'
 import { useAuth } from './auth'
 import * as api from './api'
-import { cx, focusRing, CommandPalette, Loading, Portal, Tooltip, type CommandSection } from './ui'
+import { cx, focusRing, CommandPalette, Loading, Portal, type CommandSection } from './ui'
 import { modelTitle } from './format'
 import { groupModels, useModels, type NavGroup } from './nav'
 import { Dashboard } from './screens/Dashboard'
@@ -119,9 +119,6 @@ function SidebarNav({ groups, onNavigate }: { groups: NavGroup[]; onNavigate?: (
           </div>
         )
       })}
-      <div className="pt-1.5">
-        <NavItem to="/theme-studio" label="Theme Studio" onNavigate={onNavigate} />
-      </div>
     </nav>
   )
 }
@@ -167,47 +164,19 @@ function Breadcrumbs() {
   )
 }
 
-function ThemeSwitcher() {
-  const { theme, setTheme, mode, toggleMode, themes } = useTheme()
-  return (
-    <div className="flex items-center gap-2">
-      <div className="hidden max-w-[360px] items-center gap-0.5 overflow-x-auto rounded-md border border-border bg-surface2 p-1 lg:flex">
-        {themes.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTheme(t.id)}
-            title={`${t.name}${t.author && t.author !== 'Meshble' ? ` · ${t.author}` : ''}`}
-            className={cx(
-              'whitespace-nowrap rounded-sm px-2 py-1 text-xs font-medium',
-              theme === t.id ? 'bg-accent text-accent-fg shadow-sm' : 'text-muted hover:text-text',
-              focusRing,
-            )}
-          >
-            {t.name}
-          </button>
-        ))}
-      </div>
-      <Tooltip label={`Switch to ${mode === 'dark' ? 'light' : 'dark'} mode`}>
-        <button
-          onClick={toggleMode}
-          aria-label={`Switch to ${mode === 'dark' ? 'light' : 'dark'} mode`}
-          className={cx('grid h-8 w-8 place-items-center rounded-md border border-border text-muted hover:bg-surface2 hover:text-text', focusRing)}
-        >
-          {mode === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
-      </Tooltip>
-    </div>
-  )
-}
-
+/** The account menu (top-right avatar): identity + the Appearance controls (theme picker, light/dark,
+ * Theme Studio) — the ONLY place theme is changed — + sign out. */
 function UserMenu() {
   const { identity, logout } = useAuth()
+  const { theme, setTheme, mode, toggleMode, themes } = useTheme()
+  const nav = useNavigate()
   const [open, setOpen] = useState(false)
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label="Account"
+        aria-haspopup="menu"
         aria-expanded={open}
         className={cx('grid h-8 w-8 place-items-center rounded-full bg-accent text-xs font-semibold text-accent-fg', focusRing)}
       >
@@ -216,15 +185,56 @@ function UserMenu() {
       {open && (
         <>
           <div className="fixed inset-0 z-overlay" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute right-0 z-dialog mt-2 w-56 rounded-md border border-border bg-surface p-1.5 shadow-overlay">
+          <div role="menu" className="absolute right-0 z-dialog mt-2 w-64 rounded-lg border border-border bg-surface p-1.5 shadow-overlay">
             <div className="px-2.5 py-1.5">
               <div className="t-body font-medium text-text">User #{identity?.uid}</div>
               <div className="t-caption truncate text-muted">{identity?.groups.join(', ') || 'no groups'}</div>
             </div>
+
+            <div className="my-1 border-t border-border" />
+            <div className="t-label px-2.5 pb-1 pt-1 text-muted">Appearance</div>
+            <div className="grid grid-cols-2 gap-1 px-1.5 pb-1">
+              {themes.map((t) => (
+                <button
+                  key={t.id}
+                  role="menuitemradio"
+                  aria-checked={theme === t.id}
+                  onClick={() => setTheme(t.id)}
+                  title={`${t.name}${t.author && t.author !== 'Meshble' ? ` · ${t.author}` : ''}`}
+                  className={cx(
+                    'truncate rounded-md border px-2 py-1 text-xs font-medium',
+                    theme === t.id ? 'border-accent/40 bg-accent-soft text-accent' : 'border-border text-muted hover:bg-surface2 hover:text-text',
+                    focusRing,
+                  )}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+            <button
+              role="menuitem"
+              onClick={toggleMode}
+              className={cx('t-body flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-text hover:bg-surface2', focusRing)}
+            >
+              {mode === 'dark' ? <Sun size={15} className="text-muted" /> : <Moon size={15} className="text-muted" />}
+              {mode === 'dark' ? 'Light mode' : 'Dark mode'}
+            </button>
+            <button
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                nav('/theme-studio')
+              }}
+              className={cx('t-body flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-text hover:bg-surface2', focusRing)}
+            >
+              <Palette size={15} className="text-muted" /> Theme Studio
+            </button>
+
             <div className="my-1 border-t border-border" />
             <button
+              role="menuitem"
               onClick={() => void logout()}
-              className={cx('t-body flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-muted hover:bg-surface2 hover:text-text', focusRing)}
+              className={cx('t-body flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-muted hover:bg-surface2 hover:text-text', focusRing)}
             >
               <LogOut size={15} /> Sign out
             </button>
@@ -260,7 +270,6 @@ function Topbar({ onOpenCommand, onOpenDrawer }: { onOpenCommand: () => void; on
           <span className="t-body">Search…</span>
           <kbd className="t-mono rounded-sm border border-border px-1.5 py-0.5 text-[10px]">⌘K</kbd>
         </button>
-        <ThemeSwitcher />
         <UserMenu />
       </div>
     </header>
@@ -270,7 +279,6 @@ function Topbar({ onOpenCommand, onOpenDrawer }: { onOpenCommand: () => void; on
 /** Mounts the command palette and wires the global ⌘K shortcut + the model/action/record sections. */
 function useCommandPalette(models: string[]) {
   const nav = useNavigate()
-  const { toggleMode } = useTheme()
   const { logout } = useAuth()
   const [open, setOpen] = useState(false)
   const [records, setRecords] = useState<CommandSection | null>(null)
@@ -326,7 +334,6 @@ function useCommandPalette(models: string[]) {
       items: [
         { id: 'go:dashboard', label: 'Dashboard', icon: <LayoutDashboard size={15} />, run: () => nav('/') },
         ...models.map((m) => ({ id: `go:${m}`, label: modelTitle(m), hint: m, run: () => nav(`/m/${m}`) })),
-        { id: 'go:theme', label: 'Theme Studio', icon: <Palette size={15} />, run: () => nav('/theme-studio') },
       ],
     }
     const create: CommandSection = {
@@ -335,13 +342,10 @@ function useCommandPalette(models: string[]) {
     }
     const actions: CommandSection = {
       title: 'Actions',
-      items: [
-        { id: 'act:theme', label: 'Toggle light / dark', icon: <Sun size={15} />, run: toggleMode },
-        { id: 'act:signout', label: 'Sign out', icon: <LogOut size={15} />, run: () => void logout() },
-      ],
+      items: [{ id: 'act:signout', label: 'Sign out', icon: <LogOut size={15} />, run: () => void logout() }],
     }
     return records ? [records, goto, create, actions] : [goto, create, actions]
-  }, [models, records, nav, toggleMode, logout])
+  }, [models, records, nav, logout])
 
   const node = <CommandPalette open={open} onClose={() => setOpen(false)} sections={sections} onQuery={onQuery} />
   return { open: () => setOpen(true), node }
