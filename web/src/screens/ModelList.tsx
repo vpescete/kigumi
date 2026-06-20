@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { Inbox, Plus } from 'lucide-react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Filter, Inbox, Plus, X } from 'lucide-react'
 import * as api from '../api'
 import type { Column } from '../ui'
 import { Button, cx, DataTable, ErrorState, focusRing, PageHeader, SkeletonTable } from '../ui'
@@ -13,6 +13,9 @@ const noResolve: Resolver = () => undefined
 export function ModelList() {
   const { model = '' } = useParams()
   const nav = useNavigate()
+  const [params] = useSearchParams()
+  const domainParam = params.get('domain')
+  const filterLabel = params.get('label')
   const [contract, setContract] = useState<api.Contract | null>(null)
   const [page, setPage] = useState<api.Page | null>(null)
   const [resolve, setResolve] = useState<Resolver>(() => noResolve)
@@ -26,7 +29,14 @@ export function ModelList() {
     setError(null)
     async function load(): Promise<void> {
       try {
-        const [c, p] = await Promise.all([api.contract(model), api.list(model, { limit: 80 })])
+        // A `?domain=` (set by smart buttons) filters the list to the related records.
+        let domain: unknown
+        try {
+          domain = domainParam ? JSON.parse(domainParam) : undefined
+        } catch {
+          domain = undefined
+        }
+        const [c, p] = await Promise.all([api.contract(model), api.list(model, { limit: 80, domain })])
         if (!active) return
         setContract(c)
         setPage(p)
@@ -52,7 +62,7 @@ export function ModelList() {
     return () => {
       active = false
     }
-  }, [model])
+  }, [model, domainParam])
 
   if (error) return <ErrorState message={error} />
 
@@ -79,6 +89,19 @@ export function ModelList() {
           </Button>
         }
       />
+      {domainParam && (
+        <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent-soft px-3 py-1 t-caption text-accent">
+          <Filter size={12} />
+          <span className="truncate">{filterLabel || 'Filtered'}</span>
+          <button
+            onClick={() => nav(`/m/${model}`)}
+            aria-label="Clear filter"
+            className={cx('-mr-1 grid h-4 w-4 place-items-center rounded-full hover:bg-accent/20', focusRing)}
+          >
+            <X size={11} />
+          </button>
+        </div>
+      )}
       {!ready ? (
         <SkeletonTable rows={8} cols={Math.min(5, cols.length || 4)} />
       ) : page!.data.length === 0 ? (

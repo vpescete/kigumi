@@ -9,6 +9,7 @@ import { Button, Card, confirm, DataTable, ErrorState, Menu, type MenuGroup, Pag
 import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
 import { SERVICE_ACTIONS, type ServiceAction } from '../registries/serviceActions'
 import { EditableRelation, editableChildFields, toCommands, toLines, type Line } from './EditableRelation'
+import { SmartButtons } from './SmartButtons'
 import { ContractFields, FieldCell, isWritable, notebookPages, useRelOptions, useResolver } from './ContractFields'
 import { ReportViewer } from './ReportViewer'
 import { WizardModal } from './WizardModal'
@@ -286,6 +287,8 @@ export function ModelForm() {
           </>
         }
       />
+
+      {!isNew && <SmartButtons model={model} recordId={Number(id)} record={record} />}
 
       <Card className="p-5 mb-5">
         <ContractFields
