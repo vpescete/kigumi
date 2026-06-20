@@ -11,6 +11,8 @@ import {
   Moon,
   Package,
   Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Settings as SettingsIcon,
   ShoppingCart,
@@ -241,10 +243,29 @@ function UserMenu() {
   )
 }
 
-function Topbar({ onOpenCommand, onOpenDrawer }: { onOpenCommand: () => void; onOpenDrawer: () => void }) {
+function Topbar({
+  onOpenCommand,
+  onOpenDrawer,
+  onToggleSidebar,
+  collapsed,
+}: {
+  onOpenCommand: () => void
+  onOpenDrawer: () => void
+  onToggleSidebar: () => void
+  collapsed: boolean
+}) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-bg px-4 md:px-5">
       <div className="flex min-w-0 flex-1 items-center gap-3">
+        {/* Desktop: collapse/expand the fixed sidebar. */}
+        <button
+          onClick={onToggleSidebar}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={cx('hidden h-8 w-8 shrink-0 place-items-center rounded-md text-muted hover:bg-surface2 hover:text-text md:grid', focusRing)}
+        >
+          {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        </button>
+        {/* Mobile: open the navigation drawer. */}
         <button
           onClick={onOpenDrawer}
           aria-label="Open navigation"
@@ -347,13 +368,24 @@ function useCommandPalette(models: string[]) {
   return { open: () => setOpen(true), node }
 }
 
+const COLLAPSE_KEY = 'msh-sidebar-collapsed'
+
 export function App() {
   const { identity, loading } = useAuth()
   const models = useModels()
   const groups = useMemo(() => groupModels(models), [models])
   const [drawer, setDrawer] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1')
   const command = useCommandPalette(models)
   const { pathname } = useLocation()
+
+  const toggleSidebar = useCallback(() => {
+    setCollapsed((c) => {
+      const next = !c
+      localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0')
+      return next
+    })
+  }, [])
 
   // Close the mobile drawer on navigation.
   useEffect(() => setDrawer(false), [pathname])
@@ -369,7 +401,7 @@ export function App() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar groups={groups} className="hidden md:flex" />
+      <Sidebar groups={groups} className={collapsed ? 'hidden' : 'hidden md:flex'} />
       {drawer && (
         <Portal>
           <div className="fixed inset-0 z-drawer bg-bg/70 backdrop-blur-sm md:hidden" onClick={() => setDrawer(false)} aria-hidden="true" />
@@ -386,7 +418,7 @@ export function App() {
         </Portal>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onOpenCommand={command.open} onOpenDrawer={() => setDrawer(true)} />
+        <Topbar onOpenCommand={command.open} onOpenDrawer={() => setDrawer(true)} onToggleSidebar={toggleSidebar} collapsed={collapsed} />
         <main className="flex-1 overflow-auto">
           <div className="mx-auto max-w-[1180px] px-4 py-6 sm:px-6 sm:py-7">
             <Outlet />
