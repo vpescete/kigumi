@@ -1,12 +1,16 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { ThemeProvider } from './theme'
 import { AuthProvider } from './auth'
 import { ToastProvider } from './ui'
 import { getAllThemes, loadDropInThemes } from './theme/registry'
 import { injectThemes } from './theme/css'
 import { App } from './App'
+import { Dashboard } from './screens/Dashboard'
+import { ModelList } from './screens/ModelList'
+import { ModelForm } from './screens/ModelForm'
+import { ThemeStudio } from './screens/ThemeStudio'
 import './index.css'
 import './type.css'
 
@@ -18,14 +22,26 @@ document.documentElement.dataset.theme =
   savedTheme && getAllThemes().some((t) => t.id === savedTheme) ? savedTheme : 'graphite'
 document.documentElement.dataset.mode = savedMode === 'light' ? 'light' : 'dark'
 
+// App is the layout route (shell + auth gate + <Outlet/>); a DATA router (not BrowserRouter) is what
+// lets a dirty form block in-app navigation via useBlocker.
+const router = createBrowserRouter([
+  {
+    element: <App />,
+    children: [
+      { index: true, element: <Dashboard /> },
+      { path: 'm/:model', element: <ModelList /> },
+      { path: 'm/:model/:id', element: <ModelForm /> },
+      { path: 'theme-studio', element: <ThemeStudio /> },
+    ],
+  },
+])
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider>
       <AuthProvider>
         <ToastProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
+          <RouterProvider router={router} />
         </ToastProvider>
       </AuthProvider>
     </ThemeProvider>

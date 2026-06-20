@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useBlocker, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Printer, Save, SlidersHorizontal } from 'lucide-react'
 import * as api from '../api'
 import { canRun } from '../api'
@@ -62,6 +62,8 @@ export function ModelForm() {
   const [busy, setBusy] = useState(false)
   const [report, setReport] = useState<api.ReportMeta | null>(null)
   const [wizard, setWizard] = useState<WizardSpec | null>(null)
+  // When true, the next in-app navigation is NOT blocked (used for the post-save redirect).
+  const skipGuardRef = useRef(false)
 
   const load = useCallback(async (): Promise<void> => {
     setError(null)
@@ -90,6 +92,7 @@ export function ModelForm() {
   }, [model, id, isNew])
 
   useEffect(() => {
+    skipGuardRef.current = false // re-arm the nav guard for the freshly loaded record
     setContract(null)
     setRecord(null)
     void load()
@@ -113,7 +116,7 @@ export function ModelForm() {
   }, [contract, values, initial, record, childContracts])
 
   // Browser-level guard: warn before a tab close / reload / external navigation while there are
-  // unsaved changes. (In-app SPA navigation is guarded separately, see the nav blocker below.)
+  // unsaved changes.
   useEffect(() => {
     if (!dirty) return
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -123,6 +126,21 @@ export function ModelForm() {
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [dirty])
+
+  // In-app guard: block an SPA navigation away from a dirty form and ask to confirm. `skipGuardRef`
+  // lets the post-save navigation (a new record redirecting to its id) pass without prompting.
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) => dirty && !skipGuardRef.current && currentLocation.pathname !== nextLocation.pathname,
+  )
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return
+    void confirm({
+      title: 'Discard unsaved changes?',
+      body: 'You have unsaved changes on this record. Leave without saving them?',
+      confirmLabel: 'Discard changes',
+      tone: 'danger',
+    }).then((ok) => (ok ? blocker.proceed() : blocker.reset()))
+  }, [blocker])
 
   function setField(name: string, value: unknown): void {
     setValues((prev) => ({ ...prev, [name]: value }))
@@ -151,6 +169,7 @@ export function ModelForm() {
       if (isNew) {
         const newId = await api.create(model, payload)
         toast.success(`${modelTitle(model)} created`)
+        skipGuardRef.current = true // the create redirect is not an "abandon changes" navigation
         nav(`/m/${model}/${newId}`)
       } else {
         await api.update(model, Number(id), payload)

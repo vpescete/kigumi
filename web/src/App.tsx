@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   Box,
   ChevronDown,
@@ -23,10 +23,6 @@ import * as api from './api'
 import { cx, focusRing, CommandPalette, Loading, Portal, type CommandSection } from './ui'
 import { modelTitle } from './format'
 import { groupModels, useModels, type NavGroup } from './nav'
-import { Dashboard } from './screens/Dashboard'
-import { ModelList } from './screens/ModelList'
-import { ModelForm } from './screens/ModelForm'
-import { ThemeStudio } from './screens/ThemeStudio'
 import { Login } from './screens/Login'
 
 const GROUP_ICON: Record<string, ReactNode> = {
@@ -393,12 +389,7 @@ export function App() {
         <Topbar onOpenCommand={command.open} onOpenDrawer={() => setDrawer(true)} />
         <main className="flex-1 overflow-auto">
           <div className="mx-auto max-w-[1180px] px-4 py-6 sm:px-6 sm:py-7">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/m/:model" element={<ModelList />} />
-              <Route path="/m/:model/:id" element={<ModelForm />} />
-              <Route path="/theme-studio" element={<ThemeStudio />} />
-            </Routes>
+            <Outlet />
           </div>
         </main>
       </div>
