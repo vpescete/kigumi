@@ -51,10 +51,16 @@ export function groupModels(models: string[]): NavGroup[] {
 }
 
 /** Loads the list of served model names once. */
+/** Event the Modules page fires after a live install/uninstall so the nav refetches its catalog. */
+export const MODULES_CHANGED = 'meshble:modules-changed'
+
 export function useModels(): string[] {
   const [models, setModels] = useState<string[]>([])
   useEffect(() => {
-    void api.modelNames().then(setModels).catch(() => setModels([]))
+    const refresh = (): void => void api.modelNames().then(setModels).catch(() => setModels([]))
+    refresh()
+    window.addEventListener(MODULES_CHANGED, refresh)
+    return () => window.removeEventListener(MODULES_CHANGED, refresh)
   }, [])
   return models
 }

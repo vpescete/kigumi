@@ -6,8 +6,8 @@
 //! `meshble_core::resolve_all_registered()` and its security policy, then calls [`router`] or
 //! [`router_with_data`]. The core stays headless; this crate is optional.
 
-use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use axum::{
     body::Bytes,
@@ -20,9 +20,9 @@ use axum::{
 use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{
-    check_access, field_accessible, is_mailed, module_closure, report_for, resolve_modules, wizard_for,
-    Acl, Condition, Ctx, Domain, FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value,
-    WizardContext,
+    check_access, field_accessible, is_mailed, module_closure, module_of, report_for, resolve_modules,
+    wizard_for, Acl, Condition, Ctx, Domain, FieldKind, Operation, Operator, RecordRule, ResolvedModel,
+    Value, WizardContext,
 };
 use meshble_db::{Db, DbError};
 use meshble_schema::{openapi, to_ui_contract};
@@ -48,7 +48,20 @@ const MAX_BODY_BYTES: usize = 25 * 1024 * 1024;
 #[derive(Clone)]
 struct AppState {
     models: Arc<Vec<ResolvedModel>>,
+    /// Names of currently-installed modules — the live "served catalog" gate (Odoo's registry). A
+    /// model is served only when its owning module is in this set, so installing/uninstalling a module
+    /// takes effect without a restart. EMPTY means "do not gate" (metadata-only router and tests, which
+    /// serve exactly the models they were handed). Shared + mutated by the install/uninstall handlers
+    /// and a background refresh.
+    installed: Arc<RwLock<HashSet<String>>>,
     data: Option<DataBackend>,
+}
+
+/// Whether `model_name` is currently served: not gated when the installed set is empty, otherwise its
+/// owning module must be installed (a model with no resolvable owner is always served).
+fn is_served(state: &AppState, model_name: &str) -> bool {
+    let inst = state.installed.read().expect("installed lock");
+    inst.is_empty() || module_of(model_name).map(|owner| inst.contains(owner)).unwrap_or(true)
 }
 
 #[derive(Clone)]
@@ -73,7 +86,11 @@ fn base_router() -> Router<AppState> {
 
 /// Metadata-only router: OpenAPI spec, model list, UI contracts. No database.
 pub fn router(models: Vec<ResolvedModel>) -> Router {
-    base_router().with_state(AppState { models: Arc::new(models), data: None })
+    base_router().with_state(AppState {
+        models: Arc::new(models),
+        installed: Arc::new(RwLock::new(HashSet::new())),
+        data: None,
+    })
 }
 
 /// Full router: metadata routes plus secured CRUD data endpoints. `auth_secret` is the HS256
@@ -96,6 +113,38 @@ pub fn router_with_data(
 #[allow(clippy::too_many_arguments)]
 pub fn router_with_data_rasterized(
     models: Vec<ResolvedModel>,
+    db: Db,
+    acls: &'static [Acl],
+    rules: &'static [RecordRule],
+    auth_secret: impl Into<String>,
+    blobs: Arc<dyn BlobStore>,
+    rasterizer: Option<Arc<dyn Rasterizer>>,
+) -> Router {
+    // Empty installed set = no gating: serves exactly `models` (the host/tests' chosen catalog).
+    build_data_router(models, Arc::new(RwLock::new(HashSet::new())), db, acls, rules, auth_secret, blobs, rasterizer)
+}
+
+/// Like [`router_with_data`] but with a **live served catalog**: `installed` (a shared, mutable set of
+/// installed module names) gates which models are served, so installing/uninstalling a module via the
+/// `/api/modules/*` endpoints takes effect without restarting the process (the host passes the FULL
+/// linked catalog as `models` and keeps `installed` in sync with the DB). Used by `meshble serve`.
+#[allow(clippy::too_many_arguments)]
+pub fn router_with_data_dynamic(
+    models: Vec<ResolvedModel>,
+    installed: Arc<RwLock<HashSet<String>>>,
+    db: Db,
+    acls: &'static [Acl],
+    rules: &'static [RecordRule],
+    auth_secret: impl Into<String>,
+    blobs: Arc<dyn BlobStore>,
+) -> Router {
+    build_data_router(models, installed, db, acls, rules, auth_secret, blobs, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_data_router(
+    models: Vec<ResolvedModel>,
+    installed: Arc<RwLock<HashSet<String>>>,
     db: Db,
     acls: &'static [Acl],
     rules: &'static [RecordRule],
@@ -151,6 +200,7 @@ pub fn router_with_data_rasterized(
         .route("/api/:name/:id/unfollow", post(unfollow_handler))
         .with_state(AppState {
             models: Arc::new(models),
+            installed,
             data: Some(DataBackend {
                 db: Arc::new(db),
                 acls,
@@ -187,6 +237,7 @@ fn resolve_model<'a>(state: &'a AppState, name: &str) -> Result<&'a ResolvedMode
         .models
         .iter()
         .find(|m| m.name == name)
+        .filter(|_| is_served(state, name))
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("unknown model: {name}")).into_response())
 }
 
@@ -206,7 +257,14 @@ async fn openapi_handler(State(state): State<AppState>) -> Response {
 }
 
 async fn models_handler(State(state): State<AppState>) -> Json<Vec<String>> {
-    Json(state.models.iter().map(|m| m.name.to_string()).collect())
+    Json(
+        state
+            .models
+            .iter()
+            .filter(|m| is_served(&state, m.name))
+            .map(|m| m.name.to_string())
+            .collect(),
+    )
 }
 
 /// Logs the detail server-side and returns an opaque 500 — internal schema/SQL detail must never
@@ -276,9 +334,10 @@ async fn modules_handler(State(state): State<AppState>, headers: HeaderMap) -> R
     json_response(serde_json::json!(items).to_string())
 }
 
-/// Installs a module + its dependency closure (marks the install ledger). The new module's tables and
-/// served models apply on the next server restart (the router is built from the installed set at
-/// startup) — the response carries `needs_restart`. Admin only.
+/// Installs a module + its dependency closure: marks the ledger, MIGRATES the new modules' tables, and
+/// adds them to the live served catalog — all without a restart (the served set is consulted per
+/// request, like a registry). Reference-data seeds are not run here (they apply on `meshble migrate`).
+/// Admin only.
 async fn module_install_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
     let ctx = match authenticate(backend, &headers) {
@@ -307,7 +366,24 @@ async fn module_install_handler(State(state): State<AppState>, Path(name): Path<
             Err(e) => return write_error("module_install", e),
         }
     }
-    json_response(serde_json::json!({ "installed": installed_now, "needs_restart": true }).to_string())
+    // Migrate the freshly-installed modules' tables (idempotent over the whole installed set), then add
+    // them to the live served catalog so their models are reachable immediately — no restart.
+    if let Err(e) = backend.db.migrate_installed_schema().await {
+        return write_error("module_install", e);
+    }
+    refresh_installed(&state.installed, backend).await;
+    json_response(serde_json::json!({ "installed": installed_now, "needs_restart": false }).to_string())
+}
+
+/// Reloads the live served-catalog set from the install ledger. Called after install/uninstall and by
+/// a periodic background refresh, so a change (here or by another process / the CLI) is reflected
+/// without a restart — the single-process analogue of Odoo's registry-change signaling.
+async fn refresh_installed(installed: &Arc<RwLock<HashSet<String>>>, backend: &DataBackend) {
+    if let Ok(names) = backend.db.installed_modules().await {
+        if let Ok(mut w) = installed.write() {
+            *w = names.into_iter().collect();
+        }
+    }
 }
 
 /// Uninstalls a module (marks the ledger; its tables and data are kept). Refuses `base` and any module
@@ -346,13 +422,16 @@ async fn module_uninstall_handler(State(state): State<AppState>, Path(name): Pat
         return (StatusCode::BAD_REQUEST, format!("uninstall {dependents:?} first — they depend on '{name}'")).into_response();
     }
     match backend.db.mark_module_uninstalled(&name).await {
-        Ok(_) => json_response(serde_json::json!({ "uninstalled": name, "needs_restart": true }).to_string()),
+        Ok(_) => {
+            refresh_installed(&state.installed, backend).await;
+            json_response(serde_json::json!({ "uninstalled": name, "needs_restart": false }).to_string())
+        }
         Err(e) => write_error("module_uninstall", e),
     }
 }
 
 async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -> Response {
-    match state.models.iter().find(|m| m.name == name) {
+    match state.models.iter().find(|m| m.name == name).filter(|_| is_served(&state, &name)) {
         Some(m) => match to_ui_contract(m, &[]) {
             Ok(json) => json_response(json),
             Err(e) => internal_error("view", e),
@@ -370,9 +449,9 @@ async fn list_handler(
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Response {
-    let model = match state.models.iter().find(|m| m.name == name) {
-        Some(m) => m,
-        None => return (StatusCode::NOT_FOUND, format!("unknown model: {name}")).into_response(),
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
     let ctx = match authenticate(backend, &headers) {

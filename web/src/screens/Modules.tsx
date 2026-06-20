@@ -2,9 +2,10 @@
 // Install/uninstall update the install ledger; the server router is built from the installed set at
 // startup, so a restart is required to load/unload a module's models — surfaced as a notice.
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, Check, Plus, RotateCw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Check, Info, Plus, Trash2 } from 'lucide-react'
 import * as api from '../api'
 import { useAuth } from '../auth'
+import { MODULES_CHANGED } from '../nav'
 import { Badge, Button, Card, ErrorState, PageHeader, SkeletonText, useToast } from '../ui'
 
 export function Modules() {
@@ -14,7 +15,6 @@ export function Modules() {
   const [mods, setMods] = useState<api.ModuleInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [needsRestart, setNeedsRestart] = useState(false)
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -28,12 +28,17 @@ export function Modules() {
     void load()
   }, [load])
 
+  // The server applies install/uninstall live; tell the nav to refetch its catalog.
+  const applied = (): void => {
+    window.dispatchEvent(new Event(MODULES_CHANGED))
+  }
+
   async function install(name: string): Promise<void> {
     setBusy(name)
     try {
       const r = await api.installModule(name)
       toast.success(r.installed.length ? `Installed: ${r.installed.join(', ')}` : 'Already installed')
-      if (r.needs_restart) setNeedsRestart(true)
+      applied()
       await load()
     } catch (err: unknown) {
       toast.error(err instanceof api.ApiError ? err.message : 'Install failed')
@@ -47,7 +52,7 @@ export function Modules() {
     try {
       const r = await api.uninstallModule(name)
       toast.success(`Uninstalled ${r.uninstalled}`)
-      if (r.needs_restart) setNeedsRestart(true)
+      applied()
       await load()
     } catch (err: unknown) {
       toast.error(err instanceof api.ApiError ? err.message : 'Uninstall failed')
@@ -67,18 +72,14 @@ export function Modules() {
         subtitle={mods ? `${installedCount} of ${mods.length} installed` : ' '}
       />
 
-      {needsRestart && (
-        <Card className="mb-5 flex items-start gap-3 border-warning/30 bg-warning-bg p-4">
-          <RotateCw size={16} className="mt-0.5 shrink-0 text-warning" />
-          <div>
-            <div className="t-body font-medium text-text">Restart required</div>
-            <p className="t-caption mt-0.5 text-muted">
-              The install ledger changed. Restart the server (<span className="t-mono">meshble serve</span>) to load or
-              unload the affected modules — their tables migrate and their models start being served at startup.
-            </p>
-          </div>
-        </Card>
-      )}
+      <Card className="mb-5 flex items-start gap-3 p-4">
+        <Info size={16} className="mt-0.5 shrink-0 text-accent" />
+        <p className="t-caption text-muted">
+          Install and uninstall apply <span className="text-text">live</span> — the server stays up and the module's
+          models become available (or unavailable) immediately, no restart. Uninstall keeps the data. Module reference
+          data (e.g. default accounts or stock locations) is seeded by <span className="t-mono">meshble migrate</span>.
+        </p>
+      </Card>
 
       {!mods ? (
         <Card className="p-5">

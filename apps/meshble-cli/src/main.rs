@@ -14,12 +14,14 @@ use meshble::prelude::*;
 use meshble_auth::hash_password;
 use meshble_config::Settings;
 use meshble_db::Db;
-use meshble_server::router_with_data;
+use meshble_server::router_with_data_dynamic;
 
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
 /// How often the scheduler checks for due cron jobs (each job's own interval lives in the DB).
 const CRON_TICK_SECS: u64 = 60;
+/// How often a running server re-reads the install ledger to pick up out-of-band module changes.
+const MODULE_REFRESH_SECS: u64 = 8;
 
 /// Forces the module crates to link so their `inventory` registrations are present in this binary.
 fn link_modules() {
@@ -308,28 +310,10 @@ async fn migrate(db: &Db) -> Fallible {
 /// Migrates the models that belong to currently-installed modules, in FK-dependency order, then
 /// seeds base reference data if `base` is installed.
 async fn migrate_installed(db: &Db) -> Fallible {
+    // Schema migration (tables, M2M junctions, framework indexes, cron ledger) is the reusable core,
+    // shared with the server's live install. The CLI then layers reference-data seeding on top.
+    db.migrate_installed_schema().await?;
     let installed = db.installed_modules().await?;
-    let plan = migration_plan().map_err(|e| e.to_string())?;
-    let installed_targets: Vec<_> =
-        plan.iter().filter(|t| installed.iter().any(|m| m == t.module)).collect();
-    for t in &installed_targets {
-        db.install_or_upgrade(&t.model, t.model.name, &t.version, &[]).await?;
-        println!("migrated {} ({} {})", t.model.name, t.module, t.version);
-    }
-    // Second pass: Many2many junction tables, once every model table exists (their FKs need both ends).
-    for t in &installed_targets {
-        db.create_m2m_relations(&t.model).await?;
-    }
-    // Mail subsystem indexes for the polymorphic thread/tracking lookups (idempotent, tolerant if the
-    // mail module isn't installed). The metamodel has no index DDL yet, so the framework ensures these.
-    db.ensure_mail_indexes().await?;
-    // Transient (wizard) models: give each one's create_date a DEFAULT now() so every insert is
-    // timestamped and the GC cron can reclaim it (idempotent, tolerant if none are installed).
-    db.ensure_transient_defaults().await?;
-    // Stock: one quant per (product, location) — a composite UNIQUE + the upsert anchor (idempotent).
-    db.ensure_stock_indexes().await?;
-    // Scheduled jobs: create the cron ledger and seed the registered jobs (idempotent).
-    db.ensure_crons().await?;
     if installed.iter().any(|m| m == "base") {
         seed_base_data(db).await?;
     }
@@ -519,15 +503,14 @@ async fn serve(s: Settings) -> Fallible {
     let bind = s.config.server.bind.clone();
     let db = Db::connect(&s.secrets.database_url).await?;
 
-    // Serve only the models of INSTALLED modules (module selection, approach B). A model whose owning
-    // module is not installed is omitted from the catalog the router exposes.
+    // The router is handed the FULL linked catalog; a LIVE installed set (below) gates which models are
+    // actually served, per request — so installing/uninstalling a module from the UI takes effect
+    // without restarting the process (approach B, but dynamic like Odoo's registry rather than fixed at
+    // startup). A model whose owning module is not installed is simply not served until it is.
     db.ensure_module_schema().await?;
-    let installed = db.installed_modules().await?;
-    let models: Vec<_> = resolve_all_registered()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .filter(|m| module_of(m.name).map(|owner| installed.iter().any(|i| i == owner)).unwrap_or(false))
-        .collect();
+    let models: Vec<_> = resolve_all_registered().map_err(|e| e.to_string())?.into_iter().collect();
+    let installed_set: std::sync::Arc<std::sync::RwLock<std::collections::HashSet<String>>> =
+        std::sync::Arc::new(std::sync::RwLock::new(db.installed_modules().await?.into_iter().collect()));
 
     // Effective access = compiled-in baseline ∪ runtime DB overrides (hybrid, D12). For ACLs the DB
     // rows only widen access (union); for record rules they add restrictions/alternatives through the
@@ -562,6 +545,23 @@ async fn serve(s: Settings) -> Fallible {
         }
     });
 
+    // Live served-catalog refresh: re-read the install ledger periodically so a module installed or
+    // uninstalled by ANOTHER process (or the CLI) is reflected without a restart (Odoo's registry
+    // signaling, polled). The acting server process also refreshes its own set synchronously on
+    // install/uninstall, so this only matters for multi-process / out-of-band changes.
+    let refresh_db = db.clone();
+    let refresh_set = installed_set.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(MODULE_REFRESH_SECS)).await;
+            if let Ok(names) = refresh_db.installed_modules().await {
+                if let Ok(mut w) = refresh_set.write() {
+                    *w = names.into_iter().collect();
+                }
+            }
+        }
+    });
+
     // Content-addressed blob store for attachments. The root is config-driven (validated present for
     // the fs backend); identical bytes deduplicate to one immutable file.
     let blob_root = s
@@ -573,7 +573,7 @@ async fn serve(s: Settings) -> Fallible {
     let blobs: std::sync::Arc<dyn meshble_storage::BlobStore> =
         std::sync::Arc::new(meshble_storage::FsBlobStore::new(blob_root));
 
-    let app = router_with_data(models, db, acls, rules, s.secrets.jwt_secret.clone(), blobs);
+    let app = router_with_data_dynamic(models, installed_set, db, acls, rules, s.secrets.jwt_secret.clone(), blobs);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("meshble serving on http://{bind}  ({} models)", registered_model_names().len());

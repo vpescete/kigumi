@@ -7,6 +7,7 @@
 //! KEPT (non-destructive, reversible) — deliberately unlike Odoo, which drops them.
 
 use crate::{Db, DbError};
+use meshble_core::migration_plan;
 use sqlx::Row;
 
 const ENSURE: &str = "CREATE TABLE IF NOT EXISTS installed_module \
@@ -57,6 +58,30 @@ impl Db {
             .bind(name)
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    /// Migrates the SCHEMA of every currently-installed module (the model tables in FK-dependency
+    /// order, then Many2many junctions, then the framework indexes and the cron ledger). Idempotent —
+    /// re-running at the same version is a no-op. This is the reusable core of the CLI's
+    /// `migrate_installed`; the CLI then layers module reference-data seeding on top. The server calls
+    /// it on a live install so a newly-installed module's tables exist without a restart. Reference-data
+    /// seeds are NOT run here (they live with the host).
+    pub async fn migrate_installed_schema(&self) -> Result<(), DbError> {
+        let installed = self.installed_modules().await?;
+        let plan = migration_plan().map_err(DbError::Migration)?;
+        let targets: Vec<_> = plan.iter().filter(|t| installed.iter().any(|m| m == t.module)).collect();
+        for t in &targets {
+            self.install_or_upgrade(&t.model, t.model.name, &t.version, &[]).await?;
+        }
+        // Second pass: Many2many junction tables, once every model table exists (FKs need both ends).
+        for t in &targets {
+            self.create_m2m_relations(&t.model).await?;
+        }
+        self.ensure_mail_indexes().await?;
+        self.ensure_transient_defaults().await?;
+        self.ensure_stock_indexes().await?;
+        self.ensure_crons().await?;
         Ok(())
     }
 }
