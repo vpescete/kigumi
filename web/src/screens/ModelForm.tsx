@@ -191,6 +191,22 @@ export function ModelForm() {
   ].filter((g) => g.items.length > 0)
   const ops = opGroups.flatMap((g) => g.items)
 
+  // Dirty = the current values differ from the loaded record (scalars compared as strings; One2many via
+  // its x2many command diff). New records are always "dirty" (you mean to create). After a save, load()
+  // resets values to the fresh record, so this returns to clean and Save disables itself again.
+  const dirty =
+    isNew ||
+    contract.fields.some((f) => {
+      if (f.widget === 'one2many' && f.relation) {
+        const child = childContracts[f.name]
+        return child
+          ? toCommands((values[f.name] as Line[]) ?? [], record?.[f.name], editableChildFields(child, f.inverse)).length > 0
+          : false
+      }
+      if (!isWritable(f, values)) return false
+      return String(values[f.name] ?? '') !== String(record?.[f.name] ?? '')
+    })
+
   return (
     <div>
       <button
@@ -205,6 +221,13 @@ export function ModelForm() {
         subtitle={model}
         actions={
           <>
+            {/* Unsaved-changes hint: explains why Save is enabled (and, when absent, why it is greyed). */}
+            {dirty && !isNew && (
+              <span className="mr-1 inline-flex items-center gap-1.5 t-caption text-warning">
+                <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
+                Unsaved changes
+              </span>
+            )}
             {/* Workflow transitions: visible, secondary emphasis (Save stays the one primary). */}
             {actions.map((a) => (
               <Button key={a.name} variant="outline" onClick={() => act(a.name)} disabled={busy}>
@@ -220,7 +243,7 @@ export function ModelForm() {
             ) : ops.length > 1 ? (
               <Menu label="Actions" icon={<SlidersHorizontal size={15} />} groups={opGroups} disabled={busy} />
             ) : null}
-            <Button variant="primary" icon={<Save size={16} />} onClick={save} disabled={busy}>
+            <Button variant="primary" icon={<Save size={16} />} onClick={save} disabled={busy || !dirty}>
               {busy ? 'Saving…' : 'Save'}
             </Button>
           </>
