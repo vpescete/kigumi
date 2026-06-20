@@ -208,7 +208,11 @@ export function FieldInput({
   context?: FieldContext
 }) {
   const cls =
-    'w-full px-3 rounded-md bg-surface2 border border-border text-text focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]'
+    'w-full px-3 rounded-md bg-input text-text border border-input-border placeholder:text-muted shadow-xs ' +
+    'transition-[color,box-shadow,border-color] duration-fast ease-out hover:border-muted ' +
+    'focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-offset-2 ' +
+    'focus-visible:ring-offset-bg focus-visible:shadow-focus disabled:opacity-50 disabled:cursor-not-allowed ' +
+    'aria-[invalid=true]:border-danger aria-[invalid=true]:focus-visible:shadow-focus-danger'
   const style = { height: 'var(--control-h)' }
 
   switch (field.widget) {
@@ -222,7 +226,7 @@ export function FieldInput({
           role="switch"
           aria-checked={on}
           onClick={() => onChange(!on)}
-          className={cx('relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors', on ? 'border-accent bg-accent' : 'border-border bg-surface2', focusRing)}
+          className={cx('relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full border shadow-xs transition-colors', on ? 'border-accent bg-accent' : 'border-input-border bg-input', focusRing)}
         >
           <span className={cx('inline-block h-4 w-4 rounded-full transition-transform', on ? 'translate-x-6 bg-accent-fg' : 'translate-x-1 bg-muted')} />
         </button>

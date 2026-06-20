@@ -22,6 +22,8 @@ export default {
         success: { DEFAULT: 'var(--color-success)', bg: 'var(--color-success-bg)' },
         warning: { DEFAULT: 'var(--color-warning)', bg: 'var(--color-warning-bg)' },
         danger: { DEFAULT: 'var(--color-danger)', bg: 'var(--color-danger-bg)' },
+        input: 'var(--color-input)',
+        'input-border': 'var(--color-input-border)',
         viz: {
           1: 'var(--viz-1)',
           2: 'var(--viz-2)',
@@ -36,16 +38,23 @@ export default {
         lg: 'var(--radius-lg)',
       },
       boxShadow: {
+        xs: 'var(--shadow-xs)',
         sm: 'var(--shadow-sm)',
         md: 'var(--shadow-md)',
         overlay: 'var(--shadow-overlay)',
+        focus: 'var(--shadow-focus)',
+        'focus-danger': 'var(--shadow-focus-danger)',
       },
       fontFamily: {
-        sans: 'var(--font-sans)',
+        sans: 'var(--font-body)',
+        display: 'var(--font-display)',
         mono: 'var(--font-mono)',
       },
       ringColor: {
         DEFAULT: 'var(--color-ring)',
+      },
+      ringOffsetColor: {
+        DEFAULT: 'var(--color-ring-offset)',
       },
       transitionDuration: {
         fast: 'var(--dur-fast)',

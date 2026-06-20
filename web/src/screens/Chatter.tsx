@@ -152,7 +152,7 @@ function ActivitySection({
   onSchedule: () => void
   onDone: (aid: number) => void
 }) {
-  const input = 'px-3 rounded-md bg-surface2 border border-border text-text focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]'
+  const input = 'px-3 rounded-md bg-input border border-input-border text-text shadow-xs transition-[box-shadow,border-color] duration-fast ease-out hover:border-muted focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:shadow-focus'
   return (
     <div className="mb-4 rounded-md border border-border p-3">
       <div className="t-label text-muted mb-2">Activities</div>
@@ -218,7 +218,7 @@ function Composer({
         onChange={(e) => onBody(e.target.value)}
         placeholder="Write a message…"
         rows={2}
-        className="w-full px-3 py-2 rounded-md bg-surface2 border border-border text-text focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+        className="w-full px-3 py-2 rounded-md bg-input border border-input-border text-text shadow-xs transition-[box-shadow,border-color] duration-fast ease-out hover:border-muted focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:shadow-focus"
       />
       <div className="flex gap-2 mt-2">
         <Button variant="primary" icon={<Send size={15} />} onClick={onComment} disabled={busy || !body.trim()}>

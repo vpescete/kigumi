@@ -1,9 +1,10 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
+import { AlertTriangle, ArrowDown, ArrowUp } from 'lucide-react'
 import { STATE_LABEL, type OrderState } from './data'
-import { cx, focusRing } from './ui/cx'
+import { cx, focusRing, focusRingDanger } from './ui/cx'
 
 // Re-export the overlay/feedback primitives so `import { ... } from './ui'` reaches everything.
-export { cx, focusRing }
+export { cx, focusRing, focusRingDanger }
 export { Portal, useFocusTrap, useDismiss, useReducedMotion } from './ui/overlay'
 export { Skeleton, SkeletonText, SkeletonTable, SkeletonStat } from './ui/Skeleton'
 export { Tooltip } from './ui/Tooltip'
@@ -15,37 +16,63 @@ export { CommandPalette, type CommandSection, type CommandItem } from './ui/Comm
 export { Tabs, type Tab } from './ui/Tabs'
 
 /* ── Button ─────────────────────────────────────────────────────────────────── */
-type BtnVariant = 'primary' | 'secondary' | 'ghost'
+// 'primary' is kept as an alias of 'default' so existing call sites don't change.
+type BtnVariant = 'default' | 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive'
+type BtnSize = 'sm' | 'md' | 'lg' | 'icon'
+
+const BTN_VARIANTS: Record<Exclude<BtnVariant, 'primary'>, string> = {
+  default: 'bg-accent text-accent-fg shadow-xs hover:bg-accent-hover active:bg-accent',
+  secondary: 'bg-surface2 text-text border border-border shadow-xs hover:bg-surface hover:border-input-border active:bg-surface2',
+  outline: 'bg-transparent text-text border border-border hover:bg-surface2 hover:border-input-border active:bg-surface',
+  ghost: 'bg-transparent text-muted hover:text-text hover:bg-surface2 active:bg-surface',
+  destructive: 'bg-danger text-bg shadow-xs hover:opacity-90 active:opacity-100',
+}
+const BTN_SIZES: Record<BtnSize, { cls: string; style: CSSProperties }> = {
+  sm: { cls: 'text-xs px-2.5 gap-1.5', style: { height: 'calc(var(--control-h) - 4px)' } },
+  md: { cls: 'px-3', style: { height: 'var(--control-h)' } },
+  lg: { cls: 'px-4 text-[14px]', style: { height: 'calc(var(--control-h) + 4px)' } },
+  icon: { cls: 'p-0 aspect-square', style: { height: 'var(--control-h)', width: 'var(--control-h)' } },
+}
+
 export function Button({
   children,
   variant = 'secondary',
+  size = 'md',
   icon,
   onClick,
   className,
   disabled,
+  type = 'submit',
+  title,
+  ariaLabel,
 }: {
   children?: ReactNode
   variant?: BtnVariant
+  size?: BtnSize
   icon?: ReactNode
   onClick?: () => void
   className?: string
   disabled?: boolean
+  type?: 'button' | 'submit'
+  title?: string
+  ariaLabel?: string
 }) {
+  const v = variant === 'primary' ? 'default' : variant
+  const sz = BTN_SIZES[size]
   const base =
-    'inline-flex items-center justify-center gap-2 rounded-md px-3 font-medium whitespace-nowrap ' +
-    'transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ' +
-    'focus-visible:ring-offset-bg disabled:opacity-50'
-  const variants: Record<BtnVariant, string> = {
-    primary: 'bg-accent text-accent-fg hover:bg-accent-hover shadow-sm',
-    secondary: 'bg-surface2 text-text border border-border hover:bg-surface',
-    ghost: 'text-muted hover:text-text hover:bg-surface2',
-  }
+    'inline-flex items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap select-none ' +
+    'transition-[color,background-color,box-shadow,border-color,transform] duration-fast ease-out ' +
+    'active:translate-y-px disabled:opacity-50 disabled:pointer-events-none ' +
+    (v === 'destructive' ? focusRingDanger : focusRing)
   return (
     <button
+      type={type}
       onClick={onClick}
       disabled={disabled}
-      className={cx(base, variants[variant], className)}
-      style={{ height: 'var(--control-h)' }}
+      title={title}
+      aria-label={ariaLabel}
+      className={cx(base, sz.cls, BTN_VARIANTS[v], className)}
+      style={sz.style}
     >
       {icon}
       {children}
@@ -54,26 +81,44 @@ export function Button({
 }
 
 /* ── Card ───────────────────────────────────────────────────────────────────── */
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
+// `interactive` adds a hover lift, for cards that act as a button/link.
+export function Card({
+  children,
+  className,
+  interactive,
+}: {
+  children: ReactNode
+  className?: string
+  interactive?: boolean
+}) {
   return (
-    <div className={cx('bg-surface border border-border rounded-lg shadow-sm', className)}>{children}</div>
+    <div
+      className={cx(
+        'bg-surface border border-border rounded-lg shadow-sm',
+        interactive && 'transition-shadow duration-base ease-out hover:shadow-md hover:border-input-border',
+        className,
+      )}
+    >
+      {children}
+    </div>
   )
 }
 
 /* ── Badge ──────────────────────────────────────────────────────────────────── */
+// Pill with a soft tinted fill and a hairline tinted border (the Untitled status-pill look).
 type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'accent'
 export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: Tone }) {
   const tones: Record<Tone, string> = {
-    neutral: 'bg-surface2 text-muted',
-    success: 'bg-success-bg text-success',
-    warning: 'bg-warning-bg text-warning',
-    danger: 'bg-danger-bg text-danger',
-    accent: 'bg-accent text-accent-fg',
+    neutral: 'bg-surface2 text-muted border-border',
+    success: 'bg-success-bg text-success border-success/30',
+    warning: 'bg-warning-bg text-warning border-warning/30',
+    danger: 'bg-danger-bg text-danger border-danger/30',
+    accent: 'bg-accent-soft text-accent border-accent/30',
   }
   return (
     <span
       className={cx(
-        'inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 text-xs font-medium',
+        'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium',
         tones[tone],
       )}
     >
@@ -91,7 +136,7 @@ const STATE_TONE: Record<OrderState, Tone> = {
 export function StateBadge({ state }: { state: OrderState }) {
   return (
     <Badge tone={STATE_TONE[state]}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
       {STATE_LABEL[state]}
     </Badge>
   )
@@ -141,7 +186,7 @@ export function DataTable<T>({
     <Card className="overflow-x-auto">
       <table className="w-full border-collapse text-text">
         <thead>
-          <tr className="border-b border-border">
+          <tr className="border-b border-border bg-surface2/40">
             {columns.map((c, i) => (
               <th
                 key={i}
@@ -175,7 +220,8 @@ export function DataTable<T>({
               }
               className={cx(
                 'border-b border-border last:border-0',
-                onRowClick && 'cursor-pointer hover:bg-surface2 focus:outline-none focus-visible:bg-surface2',
+                onRowClick &&
+                  'cursor-pointer transition-colors duration-fast hover:bg-surface2 focus:outline-none focus-visible:bg-surface2 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]',
               )}
               style={{ height: 'var(--density-row)' }}
             >
@@ -206,7 +252,10 @@ export function Loading({ label = 'Loading…' }: { label?: string }) {
 export function ErrorState({ message }: { message: string }) {
   return (
     <Card className="p-6">
-      <div className="t-body text-danger">⚠ {message}</div>
+      <div className="t-body text-danger flex items-center gap-2">
+        <AlertTriangle size={15} className="shrink-0" />
+        {message}
+      </div>
     </Card>
   )
 }
@@ -231,8 +280,8 @@ export function Stat({
       </div>
       <div className="mt-2 t-display text-text">{value}</div>
       {delta && (
-        <div className={cx('mt-1.5 t-caption font-medium', delta.dir === 'up' ? 'text-success' : 'text-danger')}>
-          {delta.dir === 'up' ? '▲' : '▼'} {delta.text}
+        <div className={cx('mt-1.5 t-caption font-medium inline-flex items-center gap-1', delta.dir === 'up' ? 'text-success' : 'text-danger')}>
+          {delta.dir === 'up' ? <ArrowUp size={12} /> : <ArrowDown size={12} />} {delta.text}
         </div>
       )}
     </Card>

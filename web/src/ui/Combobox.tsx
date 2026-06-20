@@ -81,9 +81,9 @@ export function Combobox({
     <div ref={ref} className="relative">
       <div
         className={cx(
-          'flex items-center gap-1 rounded-md border border-border bg-surface2 px-2',
-          focusRing,
-          'focus-within:ring-2 focus-within:ring-[var(--color-ring)]',
+          'flex items-center gap-1 rounded-md border border-input-border bg-input px-2 shadow-xs',
+          'transition-[box-shadow,border-color] duration-fast ease-out',
+          'focus-within:border-accent focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-offset-bg focus-within:shadow-focus',
         )}
         style={{ height: 'var(--control-h)' }}
       >

@@ -308,7 +308,7 @@ function TextInput({ value, onChange, mono }: { value: string; onChange: (v: str
     <input
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={(mono ? 't-mono ' : 't-body ') + 'w-full bg-surface2 border border-border rounded-md px-2 text-text focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]'}
+      className={(mono ? 't-mono ' : 't-body ') + 'w-full bg-input border border-input-border rounded-md px-2 text-text shadow-xs transition-[box-shadow,border-color] duration-fast ease-out hover:border-muted focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:shadow-focus'}
       style={{ height: 'var(--control-h)' }}
     />
   )

@@ -6,7 +6,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { X } from 'lucide-react'
 import { Portal, useDismiss, useFocusTrap, useReducedMotion } from './overlay'
-import { cx, focusRing } from './cx'
+import { cx, focusRing, focusRingDanger } from './cx'
 
 type Size = 'sm' | 'md' | 'lg' | 'xl'
 const WIDTH: Record<Size, string> = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' }
@@ -90,7 +90,11 @@ export function confirm(opts: {
       host.remove()
       resolve(val)
     }
-    const btn = 'inline-flex h-[var(--control-h)] items-center justify-center rounded-md px-3 font-medium ' + focusRing
+    // Buttons inlined (not <Button>) to avoid a ui.tsx <-> ui/Dialog import cycle; same visual spec.
+    const danger = opts.tone === 'danger'
+    const btn =
+      'inline-flex h-[var(--control-h)] items-center justify-center rounded-md px-3 font-medium select-none ' +
+      'transition-[color,background-color,box-shadow,transform] duration-fast ease-out active:translate-y-px '
     root.render(
       <Dialog
         open
@@ -99,11 +103,18 @@ export function confirm(opts: {
         size="sm"
         footer={
           <>
-            <button className={cx(btn, 'text-muted hover:text-text hover:bg-surface2')} onClick={() => close(false)}>
+            <button
+              className={cx(btn, focusRing, 'bg-surface2 text-text border border-border shadow-xs hover:bg-surface hover:border-input-border')}
+              onClick={() => close(false)}
+            >
               {opts.cancelLabel ?? 'Cancel'}
             </button>
             <button
-              className={cx(btn, opts.tone === 'danger' ? 'bg-danger text-bg hover:opacity-90' : 'bg-accent text-accent-fg hover:bg-accent-hover')}
+              className={cx(
+                btn,
+                danger ? focusRingDanger : focusRing,
+                danger ? 'bg-danger text-bg shadow-xs hover:opacity-90 active:opacity-100' : 'bg-accent text-accent-fg shadow-xs hover:bg-accent-hover',
+              )}
               onClick={() => close(true)}
             >
               {opts.confirmLabel ?? 'Confirm'}

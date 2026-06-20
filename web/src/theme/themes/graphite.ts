@@ -20,9 +20,9 @@ export const graphite: Theme = {
     caption: { stack: 'body', size: '12px', weight: 400, lh: '1.35', tracking: '0.01em', transform: 'none' },
     mono: { stack: 'mono', size: '12px', weight: 450, lh: '1.45', tracking: '0', transform: 'none' }
   },
-  radius: { sm: '3px', md: '5px', lg: '8px' },
-  shadow: { sm: "0 1px 0 0 rgba(8, 11, 14, 0.4)", md: "0 4px 16px -6px rgba(6, 9, 12, 0.7)", overlay: "0 12px 40px -10px rgba(3, 6, 9, 0.85)" },
-  density: { row: '35px', control: '30px', fsBase: '13px', space: '8px' },
+  radius: { sm: '4px', md: '6px', lg: '10px' },
+  shadow: { sm: "0 1px 3px 0 rgba(3, 6, 9, 0.5), 0 1px 2px -1px rgba(3, 6, 9, 0.5)", md: "0 4px 16px -6px rgba(6, 9, 12, 0.7)", overlay: "0 12px 40px -10px rgba(3, 6, 9, 0.85)" },
+  density: { row: '35px', control: '32px', fsBase: '13px', space: '8px' },
   viz: {
     light: { viz1: '#0D8092', viz2: '#1E7A52', viz3: '#9A6614', viz4: '#5A5FCF', vizGrid: '#D8DBDF' },
     dark: { viz1: '#22B8CF', viz2: '#3DD68C', viz3: '#E0A93B', viz4: '#7B8CFF', vizGrid: '#272D34' },

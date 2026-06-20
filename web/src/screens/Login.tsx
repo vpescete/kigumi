@@ -45,7 +45,7 @@ export function Login() {
                 value={loginName}
                 onChange={(e) => setLoginName(e.target.value)}
                 autoComplete="username"
-                className="mt-1.5 w-full px-3 rounded-md bg-surface2 border border-border text-text focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                className="mt-1.5 w-full px-3 rounded-md bg-input border border-input-border text-text shadow-xs transition-[box-shadow,border-color] duration-fast ease-out hover:border-muted focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:shadow-focus"
                 style={{ height: 'var(--control-h)' }}
               />
             </label>
@@ -56,7 +56,7 @@ export function Login() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
-                className="mt-1.5 w-full px-3 rounded-md bg-surface2 border border-border text-text focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                className="mt-1.5 w-full px-3 rounded-md bg-input border border-input-border text-text shadow-xs transition-[box-shadow,border-color] duration-fast ease-out hover:border-muted focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:shadow-focus"
                 style={{ height: 'var(--control-h)' }}
               />
             </label>
