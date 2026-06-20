@@ -573,11 +573,12 @@ async fn serve(s: Settings) -> Fallible {
             refresh_view_overrides(&refresh_views, &refresh_db).await;
             // Reload the access policy only when the DB rows actually changed — avoids the
             // load_*_static identifier-string leak on every idle tick, while still picking up
-            // out-of-band edits (the `meshble acl/rule` CLI, or direct SQL) without a restart.
+            // out-of-band edits (the `meshble acl/rule` CLI, or direct SQL) without a restart. The
+            // cursor advances only when the reload SUCCEEDED, so a transient DB error leaves the prior
+            // good policy in force and retries next tick (never silently drops a restricting rule).
             let fp = access_fingerprint(&refresh_db).await;
-            if fp != access_fp {
+            if fp != access_fp && refresh_access(&refresh_acls, &refresh_rules, &refresh_db).await {
                 access_fp = fp;
-                refresh_access(&refresh_acls, &refresh_rules, &refresh_db).await;
             }
         }
     });

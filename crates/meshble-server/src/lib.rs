@@ -20,9 +20,9 @@ use axum::{
 use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{
-    check_access, field_accessible, is_mailed, module_closure, module_of, registered_acls,
-    registered_rules, report_for, resolve_modules, wizard_for, Acl, Condition, Ctx, Domain, FieldDef,
-    FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
+    check_access, delegated_fields, field_accessible, is_mailed, module_closure, module_of,
+    registered_acls, registered_rules, report_for, resolve_modules, wizard_for, Acl, Condition, Ctx,
+    Domain, FieldDef, FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
 };
 use meshble_db::{is_safe_ident, CustomField, Db, DbError, ViewOverride};
 use meshble_schema::{openapi, pg_column_type, to_ui_contract};
@@ -219,33 +219,47 @@ impl DataBackend {
     fn rules(&self) -> Arc<[RecordRule]> {
         self.rules.read().expect("rules lock").clone()
     }
-    /// Reload the effective access policy from the DB into the live snapshots (after a mutation).
-    async fn reload_access(&self) {
-        refresh_access(&self.acls, &self.rules, &self.db).await;
+    /// Reload the effective access policy after a mutation — but only if the rows actually changed
+    /// since `before` (a no-op upsert must not pay the load_*_static leak). The caller captures the
+    /// fingerprint before its DB write and passes it here.
+    async fn reload_access(&self, before: u64) {
+        if access_fingerprint(&self.db).await != before {
+            refresh_access(&self.acls, &self.rules, &self.db).await;
+        }
     }
 }
 
 /// Recomputes the effective access policy — compiled-in baseline ∪ DB overrides — and swaps it into
-/// the live snapshots, so a runtime ACL/rule change takes effect without a restart. The baseline is
-/// always included (it never fails to load), so a transient DB error degrades to baseline-only rather
-/// than an empty, deny-all policy. NB this leaks the DB rows' identifier strings (load_*_static), so
-/// the poll loop guards it behind [`access_fingerprint`] and only calls it when the rows changed; the
-/// admin mutation endpoints call it directly (rare, so the leak is bounded like a custom-field add).
-pub async fn refresh_access(acls: &AclState, rules: &RuleState, db: &Db) {
-    let mut a = registered_acls();
-    if let Ok(db_a) = db.load_acls_static().await {
-        a.extend(db_a);
+/// the live snapshots, so a runtime ACL/rule change takes effect without a restart. On a DB load error
+/// it KEEPS the prior good snapshot (it does not degrade to baseline-only — that would silently drop a
+/// live restricting rule) and returns `false`, so the caller can retry on the next tick. Returns `true`
+/// only when both halves reloaded. NB it leaks the DB rows' identifier strings (load_*_static), so the
+/// poll loop and the mutation endpoints guard it behind [`access_fingerprint`] and only call it when the
+/// rows changed (rare → bounded leak, like a custom-field add).
+pub async fn refresh_access(acls: &AclState, rules: &RuleState, db: &Db) -> bool {
+    let mut ok = true;
+    match db.load_acls_static().await {
+        Ok(db_a) => {
+            let mut a = registered_acls();
+            a.extend(db_a);
+            if let Ok(mut w) = acls.write() {
+                *w = Arc::from(a);
+            }
+        }
+        // Keep the prior snapshot (which still holds the baseline) rather than dropping the DB grants.
+        Err(_) => ok = false,
     }
-    if let Ok(mut w) = acls.write() {
-        *w = Arc::from(a);
+    match db.load_rules_static().await {
+        Ok(db_r) => {
+            let mut r = registered_rules();
+            r.extend(db_r);
+            if let Ok(mut w) = rules.write() {
+                *w = Arc::from(r);
+            }
+        }
+        Err(_) => ok = false,
     }
-    let mut r = registered_rules();
-    if let Ok(db_r) = db.load_rules_static().await {
-        r.extend(db_r);
-    }
-    if let Ok(mut w) = rules.write() {
-        *w = Arc::from(r);
-    }
+    ok
 }
 
 /// A cheap content hash of the DB-backed ACL/rule rows (owned data, no leak). The poll loop compares
@@ -763,7 +777,11 @@ async fn add_view_handler(State(state): State<AppState>, Path(name): Path<String
     let Some(field) = str_field(&body, "field") else {
         return (StatusCode::BAD_REQUEST, "'field' is required").into_response();
     };
-    if !model.fields.iter().any(|f| f.name == field) {
+    // The field must appear in the served contract: a model-own/custom field, or a delegated (_inherits)
+    // parent field — both are rendered, so both are legitimately overridable.
+    let known = model.fields.iter().any(|f| f.name == field)
+        || delegated_fields(&name).unwrap_or_default().iter().any(|d| d.def.name == field);
+    if !known {
         return (StatusCode::BAD_REQUEST, format!("unknown field '{field}' on {name}")).into_response();
     }
     let label = str_field(&body, "label");
@@ -797,13 +815,14 @@ async fn set_acl_handler(State(state): State<AppState>, headers: HeaderMap, Json
         return (StatusCode::BAD_REQUEST, "'group' is required").into_response();
     };
     let flag = |k: &str| body.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    let before = access_fingerprint(&backend.db).await;
     match backend
         .db
         .set_db_acl(model, group, flag("read"), flag("write"), flag("create"), flag("delete"))
         .await
     {
         Ok(_) => {
-            backend.reload_access().await;
+            backend.reload_access(before).await;
             json_response(serde_json::json!({ "acl": { "model": model, "group": group } }).to_string())
         }
         Err(e) => write_error("set_acl", e),
@@ -812,8 +831,11 @@ async fn set_acl_handler(State(state): State<AppState>, headers: HeaderMap, Json
 
 /// Add a runtime record rule (admin only): the DB half of the hybrid ir.rule. Body: `{model, domain,
 /// groups?, ops?}` where `domain` is the JSON domain AST, `groups` a CSV (empty/absent = global), and
-/// `ops` a CSV subset of r/w/c/d (default `r`). The domain is validated at write time. Reloads the
-/// live policy and returns the new rule id. DB rules ADD restrictions through the same engine.
+/// `ops` a CSV subset of r/w/c/d (default `r`). The domain is validated against the model at write time
+/// (a rule on an unknown field would otherwise brick every non-superuser read of the model at query
+/// time). Reloads the live policy and returns the new rule id. Rules compose through the engine like
+/// Odoo's ir.rule: a global rule (no groups) AND-restricts everyone; a group rule OR-grants its groups
+/// an additional alternative — so a group rule can widen that group's access (admin authority).
 async fn set_rule_handler(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
     let ctx = match authenticate(backend, &headers) {
@@ -830,11 +852,21 @@ async fn set_rule_handler(State(state): State<AppState>, headers: HeaderMap, Jso
         return (StatusCode::BAD_REQUEST, "'domain' is required").into_response();
     };
     let domain_json = domain.to_string();
+    // Validate the domain against the resolved (custom-field-merged) model up front, so a rule that
+    // references an unknown/mistyped field is rejected here (400) instead of failing every read later.
+    let resolved = match resolve_model(&state, model) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    if let Err(e) = Domain::from_json(&domain_json).and_then(|d| d.validate(&resolved)) {
+        return (StatusCode::BAD_REQUEST, format!("invalid rule domain: {e:?}")).into_response();
+    }
     let groups = str_field(&body, "groups").unwrap_or("");
     let ops = str_field(&body, "ops").unwrap_or("r");
+    let before = access_fingerprint(&backend.db).await;
     match backend.db.set_db_rule(model, groups, ops, &domain_json).await {
         Ok(id) => {
-            backend.reload_access().await;
+            backend.reload_access(before).await;
             json_response(serde_json::json!({ "rule": id, "model": model }).to_string())
         }
         Err(e) => write_error("set_rule", e),
