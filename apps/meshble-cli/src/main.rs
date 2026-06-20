@@ -14,7 +14,7 @@ use meshble::prelude::*;
 use meshble_auth::hash_password;
 use meshble_config::Settings;
 use meshble_db::Db;
-use meshble_server::{refresh_custom_fields, router_with_data_dynamic};
+use meshble_server::{access_fingerprint, refresh_access, refresh_custom_fields, router_with_data_dynamic};
 
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
@@ -520,24 +520,15 @@ async fn serve(s: Settings) -> Fallible {
 
     // Effective access = compiled-in baseline ∪ runtime DB overrides (hybrid, D12). For ACLs the DB
     // rows only widen access (union); for record rules they add restrictions/alternatives through the
-    // same engine — either way the static baseline stays in force. Collected once at startup and
-    // given the process lifetime (the server holds them for `'static`).
+    // same engine — either way the static baseline stays in force. Held as a LIVE snapshot (not leaked
+    // to `'static`), so a DB ACL/rule added via the CLI or the `/api/_acl` `/api/_rule` endpoints takes
+    // effect without a restart: the poll loop below reloads on change, the endpoints reload at once.
     db.ensure_access_schema().await?;
-    let mut all_acls = registered_acls();
-    let db_acls = db.load_acls_static().await?;
-    let db_acl_count = db_acls.len();
-    all_acls.extend(db_acls);
-    let acls: &'static [Acl] = Box::leak(all_acls.into_boxed_slice());
-
-    let mut all_rules = registered_rules();
-    let db_rules = db.load_rules_static().await?;
-    let db_rule_count = db_rules.len();
-    all_rules.extend(db_rules);
-    let rules: &'static [RecordRule] = Box::leak(all_rules.into_boxed_slice());
-
-    if db_acl_count > 0 || db_rule_count > 0 {
-        println!("loaded {db_acl_count} runtime ACL override(s), {db_rule_count} runtime rule(s)");
-    }
+    let acls: meshble_server::AclState =
+        std::sync::Arc::new(std::sync::RwLock::new(std::sync::Arc::from(registered_acls())));
+    let rules: meshble_server::RuleState =
+        std::sync::Arc::new(std::sync::RwLock::new(std::sync::Arc::from(registered_rules())));
+    refresh_access(&acls, &rules, &db).await;
     // Background scheduler: each registered cron job has its own interval persisted in meshble_cron;
     // this fixed tick only bounds how promptly a due job is observed. The claim is atomic + SKIP
     // LOCKED, so running several server processes is safe (no double-run).
@@ -558,6 +549,9 @@ async fn serve(s: Settings) -> Fallible {
     let refresh_db = db.clone();
     let refresh_set = installed_set.clone();
     let refresh_custom = custom_fields.clone();
+    let refresh_acls = acls.clone();
+    let refresh_rules = rules.clone();
+    let mut access_fp = access_fingerprint(&db).await;
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(MODULE_REFRESH_SECS)).await;
@@ -567,6 +561,14 @@ async fn serve(s: Settings) -> Fallible {
                 }
             }
             refresh_custom_fields(&refresh_custom, &refresh_db).await;
+            // Reload the access policy only when the DB rows actually changed — avoids the
+            // load_*_static identifier-string leak on every idle tick, while still picking up
+            // out-of-band edits (the `meshble acl/rule` CLI, or direct SQL) without a restart.
+            let fp = access_fingerprint(&refresh_db).await;
+            if fp != access_fp {
+                access_fp = fp;
+                refresh_access(&refresh_acls, &refresh_rules, &refresh_db).await;
+            }
         }
     });
 

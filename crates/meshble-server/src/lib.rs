@@ -20,9 +20,9 @@ use axum::{
 use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{
-    check_access, field_accessible, is_mailed, module_closure, module_of, report_for, resolve_modules,
-    wizard_for, Acl, Condition, Ctx, Domain, FieldDef, FieldKind, Operation, Operator, RecordRule,
-    ResolvedModel, Value, WizardContext,
+    check_access, field_accessible, is_mailed, module_closure, module_of, registered_acls,
+    registered_rules, report_for, resolve_modules, wizard_for, Acl, Condition, Ctx, Domain, FieldDef,
+    FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
 };
 use meshble_db::{is_safe_ident, CustomField, Db, DbError};
 use meshble_schema::{openapi, pg_column_type, to_ui_contract};
@@ -44,6 +44,14 @@ const REFRESH_TTL: u64 = 2_592_000; // 30 days
 /// Maximum request body, bounding an upload (and any JSON write) in memory. Explicit so it is neither
 /// axum's restrictive 2 MB default nor unbounded. Config-driven sizing is a later enhancement.
 const MAX_BODY_BYTES: usize = 25 * 1024 * 1024;
+
+/// The effective access policy, swappable at runtime. Held as an `Arc` snapshot behind an `RwLock`:
+/// a request clones the current snapshot (cheap refcount bump) and reads it without holding the lock
+/// across `.await`, while the poll loop and the mutation endpoints replace the snapshot wholesale —
+/// so a DB-backed ACL/rule added via the CLI or the `/api/_acl` `/api/_rule` endpoints takes effect
+/// with no restart, the same "declarative, no recompile" property as runtime custom fields.
+pub type AclState = Arc<RwLock<Arc<[Acl]>>>;
+pub type RuleState = Arc<RwLock<Arc<[RecordRule]>>>;
 
 #[derive(Clone)]
 struct AppState {
@@ -124,11 +132,69 @@ pub async fn refresh_custom_fields(map: &Arc<RwLock<HashMap<String, Vec<FieldDef
 #[derive(Clone)]
 struct DataBackend {
     db: Arc<Db>,
-    acls: &'static [Acl],
-    rules: &'static [RecordRule],
+    acls: AclState,
+    rules: RuleState,
     auth: Arc<Authenticator>,
     blobs: Arc<dyn BlobStore>,
     rasterizer: Option<Arc<dyn Rasterizer>>,
+}
+
+impl DataBackend {
+    /// A consistent snapshot of the effective ACLs (cheap `Arc` clone — does not hold the lock).
+    fn acls(&self) -> Arc<[Acl]> {
+        self.acls.read().expect("acls lock").clone()
+    }
+    /// A consistent snapshot of the effective record rules.
+    fn rules(&self) -> Arc<[RecordRule]> {
+        self.rules.read().expect("rules lock").clone()
+    }
+    /// Reload the effective access policy from the DB into the live snapshots (after a mutation).
+    async fn reload_access(&self) {
+        refresh_access(&self.acls, &self.rules, &self.db).await;
+    }
+}
+
+/// Recomputes the effective access policy — compiled-in baseline ∪ DB overrides — and swaps it into
+/// the live snapshots, so a runtime ACL/rule change takes effect without a restart. The baseline is
+/// always included (it never fails to load), so a transient DB error degrades to baseline-only rather
+/// than an empty, deny-all policy. NB this leaks the DB rows' identifier strings (load_*_static), so
+/// the poll loop guards it behind [`access_fingerprint`] and only calls it when the rows changed; the
+/// admin mutation endpoints call it directly (rare, so the leak is bounded like a custom-field add).
+pub async fn refresh_access(acls: &AclState, rules: &RuleState, db: &Db) {
+    let mut a = registered_acls();
+    if let Ok(db_a) = db.load_acls_static().await {
+        a.extend(db_a);
+    }
+    if let Ok(mut w) = acls.write() {
+        *w = Arc::from(a);
+    }
+    let mut r = registered_rules();
+    if let Ok(db_r) = db.load_rules_static().await {
+        r.extend(db_r);
+    }
+    if let Ok(mut w) = rules.write() {
+        *w = Arc::from(r);
+    }
+}
+
+/// A cheap content hash of the DB-backed ACL/rule rows (owned data, no leak). The poll loop compares
+/// it across ticks and only reloads the policy when it changes — so out-of-band edits (the `meshble
+/// acl/rule` CLI, direct SQL) go live without paying the load_*_static string leak on every tick.
+pub async fn access_fingerprint(db: &Db) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    if let Ok(acls) = db.list_db_acls().await {
+        for a in &acls {
+            (a.model.as_str(), a.group.as_str(), a.read, a.write, a.create, a.delete).hash(&mut h);
+        }
+    }
+    if let Ok(rules) = db.list_db_rules().await {
+        for r in &rules {
+            (r.id, r.model.as_str(), r.groups.as_str(), r.ops.as_str(), r.domain.as_str(), r.active)
+                .hash(&mut h);
+        }
+    }
+    h.finish()
 }
 
 fn base_router() -> Router<AppState> {
@@ -180,14 +246,15 @@ pub fn router_with_data_rasterized(
     rasterizer: Option<Arc<dyn Rasterizer>>,
 ) -> Router {
     // Empty installed set = no gating: serves exactly `models` (the host/tests' chosen catalog). No
-    // runtime custom fields (tests use the compile-time models directly).
+    // runtime custom fields (tests use the compile-time models directly). The `'static` baseline is
+    // wrapped into a (non-refreshed) live snapshot — fine for tests, which never mutate access.
     build_data_router(
         models,
         Arc::new(RwLock::new(HashSet::new())),
         Arc::new(RwLock::new(HashMap::new())),
         db,
-        acls,
-        rules,
+        Arc::new(RwLock::new(Arc::from(acls))),
+        Arc::new(RwLock::new(Arc::from(rules))),
         auth_secret,
         blobs,
         rasterizer,
@@ -204,8 +271,8 @@ pub fn router_with_data_dynamic(
     installed: Arc<RwLock<HashSet<String>>>,
     custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
     db: Db,
-    acls: &'static [Acl],
-    rules: &'static [RecordRule],
+    acls: AclState,
+    rules: RuleState,
     auth_secret: impl Into<String>,
     blobs: Arc<dyn BlobStore>,
 ) -> Router {
@@ -218,8 +285,8 @@ fn build_data_router(
     installed: Arc<RwLock<HashSet<String>>>,
     custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
     db: Db,
-    acls: &'static [Acl],
-    rules: &'static [RecordRule],
+    acls: AclState,
+    rules: RuleState,
     auth_secret: impl Into<String>,
     blobs: Arc<dyn BlobStore>,
     rasterizer: Option<Arc<dyn Rasterizer>>,
@@ -231,6 +298,10 @@ fn build_data_router(
         .route("/auth/me", get(me_handler))
         .route("/health", get(health_handler))
         .route("/ready", get(ready_handler))
+        // Runtime access policy (admin only): grant a DB ACL / add a DB record rule, live (no restart).
+        // Static segments, so they take precedence over the `/api/:name` model routes below.
+        .route("/api/_acl", post(set_acl_handler))
+        .route("/api/_rule", post(set_rule_handler))
         .route("/api/:name", get(list_handler).post(create_handler))
         .route(
             "/api/:name/:id",
@@ -572,6 +643,69 @@ async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -
     }
 }
 
+/// Grant or update a runtime ACL (admin only): the DB half of the hybrid ir.model.access. Upserts the
+/// `(model, group)` grant and reloads the live policy so it takes effect with no restart. DB ACLs only
+/// WIDEN access (they union with the compiled-in baseline) — this can never revoke a static grant.
+async fn set_acl_handler(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "managing access requires the admin group").into_response();
+    }
+    let Some(model) = str_field(&body, "model") else {
+        return (StatusCode::BAD_REQUEST, "'model' is required").into_response();
+    };
+    let Some(group) = str_field(&body, "group") else {
+        return (StatusCode::BAD_REQUEST, "'group' is required").into_response();
+    };
+    let flag = |k: &str| body.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    match backend
+        .db
+        .set_db_acl(model, group, flag("read"), flag("write"), flag("create"), flag("delete"))
+        .await
+    {
+        Ok(_) => {
+            backend.reload_access().await;
+            json_response(serde_json::json!({ "acl": { "model": model, "group": group } }).to_string())
+        }
+        Err(e) => write_error("set_acl", e),
+    }
+}
+
+/// Add a runtime record rule (admin only): the DB half of the hybrid ir.rule. Body: `{model, domain,
+/// groups?, ops?}` where `domain` is the JSON domain AST, `groups` a CSV (empty/absent = global), and
+/// `ops` a CSV subset of r/w/c/d (default `r`). The domain is validated at write time. Reloads the
+/// live policy and returns the new rule id. DB rules ADD restrictions through the same engine.
+async fn set_rule_handler(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "managing access requires the admin group").into_response();
+    }
+    let Some(model) = str_field(&body, "model") else {
+        return (StatusCode::BAD_REQUEST, "'model' is required").into_response();
+    };
+    let Some(domain) = body.get("domain").filter(|v| !v.is_null()) else {
+        return (StatusCode::BAD_REQUEST, "'domain' is required").into_response();
+    };
+    let domain_json = domain.to_string();
+    let groups = str_field(&body, "groups").unwrap_or("");
+    let ops = str_field(&body, "ops").unwrap_or("r");
+    match backend.db.set_db_rule(model, groups, ops, &domain_json).await {
+        Ok(id) => {
+            backend.reload_access().await;
+            json_response(serde_json::json!({ "rule": id, "model": model }).to_string())
+        }
+        Err(e) => write_error("set_rule", e),
+    }
+}
+
 const DEFAULT_LIMIT: i64 = 80;
 const MAX_LIMIT: i64 = 500;
 
@@ -596,7 +730,7 @@ async fn list_handler(
     };
     match backend
         .db
-        .list_secured(&model, &ctx, backend.acls, backend.rules, filter.as_ref(), &order, limit, offset)
+        .list_secured(&model, &ctx, &backend.acls(), &backend.rules(), filter.as_ref(), &order, limit, offset)
         .await
     {
         Ok(page) => {
@@ -735,7 +869,7 @@ async fn get_one_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.find_one_secured(&model, &ctx, backend.acls, backend.rules, id).await {
+    match backend.db.find_one_secured(&model, &ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(Some(obj)) => {
             json_response(serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string()))
         }
@@ -769,7 +903,7 @@ async fn create_handler(
         Ok(o) => o,
         Err(r) => return r,
     };
-    match backend.db.insert_secured(&model, &ctx, backend.acls, backend.rules, obj).await {
+    match backend.db.insert_secured(&model, &ctx, &backend.acls(), &backend.rules(), obj).await {
         Ok(id) => json_status(StatusCode::CREATED, format!("{{\"id\": {id}}}")),
         Err(e) => write_error("create", e),
     }
@@ -794,7 +928,7 @@ async fn update_handler(
         Ok(o) => o,
         Err(r) => return r,
     };
-    match backend.db.update_secured(&model, &ctx, backend.acls, backend.rules, id, obj).await {
+    match backend.db.update_secured(&model, &ctx, &backend.acls(), &backend.rules(), id, obj).await {
         Ok(0) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
         Ok(n) => json_status(StatusCode::OK, format!("{{\"updated\": {n}}}")),
         Err(e) => write_error("update", e),
@@ -816,7 +950,7 @@ async fn action_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.run_action(&model, &ctx, backend.acls, backend.rules, id, &action).await {
+    match backend.db.run_action(&model, &ctx, &backend.acls(), &backend.rules(), id, &action).await {
         Ok(()) => json_response(format!("{{\"ok\":true,\"action\":{}}}", serde_json::to_string(&action).unwrap_or_default())),
         Err(e) => write_error("action", e),
     }
@@ -843,7 +977,7 @@ async fn generate_variants_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.generate_variants(&ctx, backend.acls, backend.rules, id).await {
+    match backend.db.generate_variants(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(o) => json_response(
             serde_json::json!({ "created": o.created, "archived": o.archived, "kept": o.kept })
                 .to_string(),
@@ -870,7 +1004,7 @@ async fn apply_pricelist_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.apply_pricelist(&ctx, backend.acls, backend.rules, id).await {
+    match backend.db.apply_pricelist(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(n) => json_response(serde_json::json!({ "priced": n }).to_string()),
         Err(e) => write_error("apply_pricelist", e),
     }
@@ -908,7 +1042,7 @@ async fn create_invoice_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.create_sale_invoice(&ctx, backend.acls, backend.rules, id).await {
+    match backend.db.create_sale_invoice(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(move_id) => json_response(serde_json::json!({ "invoice": move_id }).to_string()),
         Err(e) => write_error("create_invoice", e),
     }
@@ -932,7 +1066,7 @@ async fn post_move_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.post_move(&ctx, backend.acls, backend.rules, id).await {
+    match backend.db.post_move(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(number) => json_response(serde_json::json!({ "posted": number }).to_string()),
         Err(e) => write_error("post", e),
     }
@@ -956,7 +1090,7 @@ async fn validate_picking_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.validate_picking(&ctx, backend.acls, backend.rules, id).await {
+    match backend.db.validate_picking(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(number) => json_response(serde_json::json!({ "validated": number }).to_string()),
         Err(e) => write_error("validate", e),
     }
@@ -980,7 +1114,7 @@ async fn create_delivery_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.create_delivery(&ctx, backend.acls, backend.rules, id).await {
+    match backend.db.create_delivery(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(picking) => json_status(StatusCode::CREATED, serde_json::json!({ "picking": picking }).to_string()),
         Err(e) => write_error("create_delivery", e),
     }
@@ -1004,7 +1138,7 @@ async fn create_receipt_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.create_receipt(&ctx, backend.acls, backend.rules, id).await {
+    match backend.db.create_receipt(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(picking) => json_status(StatusCode::CREATED, serde_json::json!({ "picking": picking }).to_string()),
         Err(e) => write_error("create_receipt", e),
     }
@@ -1032,7 +1166,7 @@ async fn report_handler(
         Err(r) => return r,
     };
     let want_pdf = params.get("format").map(|f| f == "pdf").unwrap_or(false);
-    match backend.db.find_one_secured(&model, &ctx, backend.acls, backend.rules, id).await {
+    match backend.db.find_one_secured(&model, &ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(Some(rec)) => {
             let html = (reg.func)(&rec);
             if !want_pdf {
@@ -1087,7 +1221,7 @@ async fn apply_discount_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.apply_sale_order_discount(&ctx, backend.acls, backend.rules, id).await {
+    match backend.db.apply_sale_order_discount(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(n) => json_response(serde_json::json!({ "discounted": n }).to_string()),
         Err(e) => write_error("apply_discount", e),
     }
@@ -1128,11 +1262,11 @@ async fn open_wizard_handler(
         .into_iter()
         .map(|(k, v)| (k.to_string(), value_to_json(&v)))
         .collect();
-    let id = match backend.db.insert_secured(&model, &ctx, backend.acls, backend.rules, &seed).await {
+    let id = match backend.db.insert_secured(&model, &ctx, &backend.acls(), &backend.rules(), &seed).await {
         Ok(id) => id,
         Err(e) => return write_error("open", e),
     };
-    match backend.db.find_one_secured(&model, &ctx, backend.acls, backend.rules, id).await {
+    match backend.db.find_one_secured(&model, &ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(Some(rec)) => {
             json_status(StatusCode::CREATED, serde_json::to_string(&rec).unwrap_or_else(|_| "{}".to_string()))
         }
@@ -1155,7 +1289,7 @@ async fn delete_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.delete_secured(&model, &ctx, backend.acls, backend.rules, id).await {
+    match backend.db.delete_secured(&model, &ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(0) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
         Ok(n) => json_status(StatusCode::OK, format!("{{\"deleted\": {n}}}")),
         Err(e) => write_error("delete", e),
@@ -1229,7 +1363,7 @@ async fn chatter_gate(
     if !is_mailed(name) {
         return Err((StatusCode::BAD_REQUEST, format!("model '{name}' has no mail thread")).into_response());
     }
-    match backend.db.find_one_secured(&host, ctx, backend.acls, backend.rules, id).await {
+    match backend.db.find_one_secured(&host, ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(Some(_)) => Ok(()),
         Ok(None) => Err((StatusCode::NOT_FOUND, "not found or not permitted").into_response()),
         Err(DbError::AccessDenied { .. }) => Err((StatusCode::FORBIDDEN, "access denied").into_response()),
@@ -1267,10 +1401,10 @@ async fn attachment_gate(
     write: bool,
 ) -> Result<(), Response> {
     let host = resolve_model(state, name)?;
-    if write && !check_access(Operation::Write, name, ctx, backend.acls) {
+    if write && !check_access(Operation::Write, name, ctx, &backend.acls()) {
         return Err((StatusCode::FORBIDDEN, "access denied").into_response());
     }
-    match backend.db.find_one_secured(&host, ctx, backend.acls, backend.rules, id).await {
+    match backend.db.find_one_secured(&host, ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(Some(_)) => Ok(()),
         Ok(None) => Err((StatusCode::NOT_FOUND, "not found or not permitted").into_response()),
         Err(DbError::AccessDenied { .. }) => Err((StatusCode::FORBIDDEN, "access denied").into_response()),
@@ -1306,7 +1440,7 @@ async fn list_attachments_handler(
     };
     // The gate IS the access decision; read the (admin-only) attachment model elevated.
     let su = ctx.sudo();
-    match backend.db.find_secured(att, &su, backend.acls, backend.rules, Some(&thread_filter(&name, id))).await {
+    match backend.db.find_secured(att, &su, &backend.acls(), &backend.rules(), Some(&thread_filter(&name, id))).await {
         Ok(rows) => json_response(serde_json::json!({ "data": rows }).to_string()),
         Err(e) => write_error("attachments", e),
     }
@@ -1343,7 +1477,7 @@ async fn upload_attachment_handler(
         "file_size": body.len() as i64,
         "checksum": sha,
     });
-    match backend.db.insert_secured(att, &su, backend.acls, backend.rules, payload.as_object().unwrap()).await {
+    match backend.db.insert_secured(att, &su, &backend.acls(), &backend.rules(), payload.as_object().unwrap()).await {
         Ok(aid) => json_status(
             StatusCode::CREATED,
             serde_json::json!({ "id": aid, "name": filename, "mimetype": mimetype, "file_size": body.len(), "checksum": sha }).to_string(),
@@ -1369,7 +1503,7 @@ async fn download_attachment_handler(
     };
     // Read the attachment row elevated, then gate on READ of the host record it is attached to.
     let su = ctx.sudo();
-    let row = match backend.db.find_one_secured(att, &su, backend.acls, backend.rules, aid).await {
+    let row = match backend.db.find_one_secured(att, &su, &backend.acls(), &backend.rules(), aid).await {
         Ok(Some(r)) => r,
         Ok(None) => return (StatusCode::NOT_FOUND, "attachment not found").into_response(),
         Err(e) => return write_error("attachment", e),
@@ -1420,7 +1554,7 @@ async fn delete_attachment_handler(
         Err(r) => return r,
     };
     let su = ctx.sudo();
-    let row = match backend.db.find_one_secured(att, &su, backend.acls, backend.rules, aid).await {
+    let row = match backend.db.find_one_secured(att, &su, &backend.acls(), &backend.rules(), aid).await {
         Ok(Some(r)) => r,
         Ok(None) => return (StatusCode::NOT_FOUND, "attachment not found").into_response(),
         Err(e) => return write_error("attachment", e),
@@ -1430,7 +1564,7 @@ async fn delete_attachment_handler(
     if let Err(r) = attachment_gate(&state, backend, &ctx, res_model, res_id, true).await {
         return r;
     }
-    match backend.db.delete_secured(att, &su, backend.acls, backend.rules, aid).await {
+    match backend.db.delete_secured(att, &su, &backend.acls(), &backend.rules(), aid).await {
         Ok(0) => (StatusCode::NOT_FOUND, "attachment not found").into_response(),
         Ok(_) => json_response(serde_json::json!({ "deleted": 1 }).to_string()),
         Err(e) => write_error("attachment", e),
@@ -1451,7 +1585,7 @@ async fn messages_handler(
     // isn't forced to grant users a blanket read ACL on mail.message (which would leak all threads).
     let su = ctx.sudo();
     let filter = thread_filter(&name, id);
-    match backend.db.find_secured(mail, &su, backend.acls, backend.rules, Some(&filter)).await {
+    match backend.db.find_secured(mail, &su, &backend.acls(), &backend.rules(), Some(&filter)).await {
         Ok(rows) => {
             // Embed each message's field-change audit (mail.tracking) so a notification message
             // carries its old→new diffs — one thread payload, comments and audit uniform.
@@ -1534,7 +1668,7 @@ async fn post_message_handler(
     // The gate authorized this post; author stays the real caller (ctx.uid above), but the insert
     // runs elevated so users need no create ACL on mail.message (see the read path / mail ACLs).
     let su = ctx.sudo();
-    match backend.db.insert_secured(mail, &su, backend.acls, backend.rules, &values).await {
+    match backend.db.insert_secured(mail, &su, &backend.acls(), &backend.rules(), &values).await {
         Ok(mid) => json_status(StatusCode::CREATED, format!("{{\"id\": {mid}}}")),
         Err(e) => write_error("message", e),
     }
@@ -1570,7 +1704,7 @@ async fn activities_handler(
         op: Operator::Eq,
         value: Value::Bool(true),
     }));
-    match backend.db.find_secured(act, &su, backend.acls, backend.rules, Some(&filter)).await {
+    match backend.db.find_secured(act, &su, &backend.acls(), &backend.rules(), Some(&filter)).await {
         Ok(rows) => {
             let enriched: Vec<Json2> = rows
                 .into_iter()
@@ -1621,7 +1755,7 @@ async fn schedule_activity_handler(
     values.insert("user_id".into(), Json2::Number(assignee.into()));
     values.insert("active".into(), Json2::Bool(true));
     let su = ctx.sudo();
-    match backend.db.insert_secured(act, &su, backend.acls, backend.rules, &values).await {
+    match backend.db.insert_secured(act, &su, &backend.acls(), &backend.rules(), &values).await {
         Ok(aid) => json_status(StatusCode::CREATED, format!("{{\"id\": {aid}}}")),
         Err(e) => write_error("activity", e),
     }
@@ -1640,7 +1774,7 @@ async fn activity_done_handler(
     };
     let su = ctx.sudo();
     // The activity must exist AND belong to this host record.
-    let belongs = match backend.db.find_one_secured(act, &su, backend.acls, backend.rules, aid).await {
+    let belongs = match backend.db.find_one_secured(act, &su, &backend.acls(), &backend.rules(), aid).await {
         Ok(Some(a)) => {
             a.get("res_model").and_then(|v| v.as_str()) == Some(name.as_str())
                 && a.get("res_id").and_then(|v| v.as_i64()) == Some(id)
@@ -1653,7 +1787,7 @@ async fn activity_done_handler(
     }
     let mut values = serde_json::Map::new();
     values.insert("active".into(), Json2::Bool(false));
-    match backend.db.update_secured(act, &su, backend.acls, backend.rules, aid, &values).await {
+    match backend.db.update_secured(act, &su, &backend.acls(), &backend.rules(), aid, &values).await {
         // 0 rows = the activity vanished between the belongs-check and the update (e.g. the host was
         // concurrently deleted, cascading the cleanup). Report it truthfully, don't claim success.
         Ok(0) => (StatusCode::NOT_FOUND, "activity not found on this record").into_response(),
@@ -1683,7 +1817,7 @@ async fn followers_handler(
     };
     let su = ctx.sudo();
     let filter = follower_filter(&name, id, None);
-    match backend.db.find_secured(foll, &su, backend.acls, backend.rules, Some(&filter)).await {
+    match backend.db.find_secured(foll, &su, &backend.acls(), &backend.rules(), Some(&filter)).await {
         Ok(rows) => json_response(serde_json::json!({ "data": rows }).to_string()),
         Err(DbError::AccessDenied { .. }) => (StatusCode::FORBIDDEN, "access denied").into_response(),
         Err(e) => internal_error("followers", e),
@@ -1715,7 +1849,7 @@ async fn follow_handler(
     values.insert("res_id".into(), Json2::Number(id.into()));
     values.insert("user_id".into(), Json2::Number(uid.into()));
     let su = ctx.sudo();
-    match backend.db.insert_secured(foll, &su, backend.acls, backend.rules, &values).await {
+    match backend.db.insert_secured(foll, &su, &backend.acls(), &backend.rules(), &values).await {
         Ok(_) => json_status(StatusCode::CREATED, "{\"ok\":true}".to_string()),
         // Already following — the unique index rejected the duplicate. Idempotent success.
         Err(DbError::Conflict(_)) => json_response("{\"ok\":true,\"already\":true}".to_string()),
@@ -1744,12 +1878,12 @@ async fn unfollow_handler(
     }
     let su = ctx.sudo();
     let filter = follower_filter(&name, id, Some(uid));
-    let ids = match backend.db.find_ids_secured(foll, &su, backend.acls, backend.rules, Some(&filter)).await {
+    let ids = match backend.db.find_ids_secured(foll, &su, &backend.acls(), &backend.rules(), Some(&filter)).await {
         Ok(v) => v,
         Err(e) => return internal_error("unfollow", e),
     };
     for fid in ids {
-        if let Err(e) = backend.db.delete_secured(foll, &su, backend.acls, backend.rules, fid).await {
+        if let Err(e) = backend.db.delete_secured(foll, &su, &backend.acls(), &backend.rules(), fid).await {
             return write_error("unfollow", e);
         }
     }
