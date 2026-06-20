@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Printer, Save, SlidersHorizontal } from 'lucide-react'
 import * as api from '../api'
@@ -52,6 +52,9 @@ export function ModelForm() {
   const [contract, setContract] = useState<api.Contract | null>(null)
   const [record, setRecord] = useState<api.Row | null>(null)
   const [values, setValues] = useState<FormValues>({})
+  // Snapshot of the values at load — the baseline for the dirty check (handles new-record defaults:
+  // an untouched new form equals its defaults, so it is not "dirty").
+  const [initial, setInitial] = useState<FormValues>({})
   const [childContracts, setChildContracts] = useState<Record<string, api.Contract>>({})
   const relOptions = useRelOptions(contract)
   const resolve = useResolver(contract, relOptions)
@@ -71,7 +74,9 @@ export function ModelForm() {
       }
       setContract(c)
       setRecord(rec)
-      setValues(initialValues(c, rec))
+      const init = initialValues(c, rec)
+      setValues(init)
+      setInitial(init)
       // Fetch the contract of each inlined One2many's target, for the detail table columns.
       const o2m = c.fields.filter((f) => f.widget === 'one2many' && f.relation)
       const children = await Promise.all(
@@ -89,6 +94,35 @@ export function ModelForm() {
     setRecord(null)
     void load()
   }, [load])
+
+  // Unsaved-changes signal: current values differ from the load snapshot (scalars vs `initial`,
+  // One2many via its x2many command diff vs the loaded rows). Used by the dirty-aware Save AND the
+  // navigation guard below.
+  const dirty = useMemo(() => {
+    if (!contract) return false
+    return contract.fields.some((f) => {
+      if (f.widget === 'one2many' && f.relation) {
+        const child = childContracts[f.name]
+        return child
+          ? toCommands((values[f.name] as Line[]) ?? [], record?.[f.name], editableChildFields(child, f.inverse)).length > 0
+          : false
+      }
+      if (!isWritable(f, values)) return false
+      return String(values[f.name] ?? '') !== String(initial[f.name] ?? '')
+    })
+  }, [contract, values, initial, record, childContracts])
+
+  // Browser-level guard: warn before a tab close / reload / external navigation while there are
+  // unsaved changes. (In-app SPA navigation is guarded separately, see the nav blocker below.)
+  useEffect(() => {
+    if (!dirty) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirty])
 
   function setField(name: string, value: unknown): void {
     setValues((prev) => ({ ...prev, [name]: value }))
@@ -190,22 +224,6 @@ export function ModelForm() {
     { label: 'Print', items: reports.map((r) => ({ label: r.title, icon: <Printer size={14} />, onSelect: () => setReport(r) })) },
   ].filter((g) => g.items.length > 0)
   const ops = opGroups.flatMap((g) => g.items)
-
-  // Dirty = the current values differ from the loaded record (scalars compared as strings; One2many via
-  // its x2many command diff). New records are always "dirty" (you mean to create). After a save, load()
-  // resets values to the fresh record, so this returns to clean and Save disables itself again.
-  const dirty =
-    isNew ||
-    contract.fields.some((f) => {
-      if (f.widget === 'one2many' && f.relation) {
-        const child = childContracts[f.name]
-        return child
-          ? toCommands((values[f.name] as Line[]) ?? [], record?.[f.name], editableChildFields(child, f.inverse)).length > 0
-          : false
-      }
-      if (!isWritable(f, values)) return false
-      return String(values[f.name] ?? '') !== String(record?.[f.name] ?? '')
-    })
 
   return (
     <div>
