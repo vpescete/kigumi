@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ChevronDown, Printer, Save } from 'lucide-react'
+import { ArrowLeft, Printer, Save, SlidersHorizontal } from 'lucide-react'
 import * as api from '../api'
 import { canRun } from '../api'
 import { useAuth } from '../auth'
 import type { Column } from '../ui'
-import { Button, Card, confirm, cx, DataTable, ErrorState, focusRing, PageHeader, Skeleton, Tabs, useToast } from '../ui'
+import { Button, Card, confirm, DataTable, ErrorState, Menu, type MenuGroup, PageHeader, Skeleton, Tabs, useToast } from '../ui'
 import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
 import { SERVICE_ACTIONS, type ServiceAction } from '../registries/serviceActions'
 import { EditableRelation, editableChildFields, toCommands, toLines, type Line } from './EditableRelation'
@@ -182,6 +182,15 @@ export function ModelForm() {
   const reports = isNew ? [] : contract.reports ?? []
   const pages = isNew ? [] : notebookPages(contract)
 
+  // Operations menu: service methods + wizards + reports, grouped. `ops` is the flat list (for the
+  // single-op inline case), `opGroups` the grouped list (for the Actions menu).
+  const opGroups: MenuGroup[] = [
+    { label: 'Operations', items: services.map((s) => ({ label: s.label, onSelect: () => void runService(s) })) },
+    { label: 'Tools', items: wizards.map((w) => ({ label: w.label, onSelect: () => setWizard(w) })) },
+    { label: 'Print', items: reports.map((r) => ({ label: r.title, icon: <Printer size={14} />, onSelect: () => setReport(r) })) },
+  ].filter((g) => g.items.length > 0)
+  const ops = opGroups.flatMap((g) => g.items)
+
   return (
     <div>
       <button
@@ -196,22 +205,21 @@ export function ModelForm() {
         subtitle={model}
         actions={
           <>
+            {/* Workflow transitions: visible, secondary emphasis (Save stays the one primary). */}
             {actions.map((a) => (
-              <Button key={a.name} variant="secondary" onClick={() => act(a.name)} disabled={busy}>
+              <Button key={a.name} variant="outline" onClick={() => act(a.name)} disabled={busy}>
                 {actionLabel(a.name)}
               </Button>
             ))}
-            {services.map((s) => (
-              <Button key={s.endpoint} variant="secondary" onClick={() => runService(s)} disabled={busy}>
-                {s.label}
+            {/* Everything you "run" on the record — operations, tools, print — collapses into one menu
+                (or a single inline button when there is exactly one), instead of a row of flat buttons. */}
+            {ops.length === 1 ? (
+              <Button variant="outline" icon={ops[0].icon} onClick={ops[0].onSelect} disabled={busy}>
+                {ops[0].label}
               </Button>
-            ))}
-            {wizards.map((w) => (
-              <Button key={w.wizardModel} variant="secondary" onClick={() => setWizard(w)} disabled={busy}>
-                {w.label}
-              </Button>
-            ))}
-            {reports.length > 0 && <PrintMenu reports={reports} onPick={setReport} />}
+            ) : ops.length > 1 ? (
+              <Menu label="Actions" icon={<SlidersHorizontal size={15} />} groups={opGroups} disabled={busy} />
+            ) : null}
             <Button variant="primary" icon={<Save size={16} />} onClick={save} disabled={busy}>
               {busy ? 'Saving…' : 'Save'}
             </Button>
@@ -257,37 +265,6 @@ export function ModelForm() {
 
       {report && <ReportViewer model={model} id={Number(id)} report={report} onClose={() => setReport(null)} />}
       {wizard && <WizardModal spec={wizard} hostModel={model} hostId={Number(id)} onClose={() => setWizard(null)} onApplied={load} />}
-    </div>
-  )
-}
-
-/** A "Print" button that opens a small menu of the model's reports. */
-function PrintMenu({ reports, onPick }: { reports: api.ReportMeta[]; onPick: (r: api.ReportMeta) => void }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="relative">
-      <Button variant="secondary" icon={<Printer size={15} />} onClick={() => setOpen((v) => !v)}>
-        Print <ChevronDown size={14} />
-      </Button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-overlay" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute right-0 z-dialog mt-1 w-48 rounded-md border border-border bg-surface p-1 shadow-overlay">
-            {reports.map((r) => (
-              <button
-                key={r.name}
-                onClick={() => {
-                  setOpen(false)
-                  onPick(r)
-                }}
-                className={cx('t-body flex w-full items-center rounded-sm px-2.5 py-1.5 text-left text-text hover:bg-surface2', focusRing)}
-              >
-                {r.title}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
     </div>
   )
 }

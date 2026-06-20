@@ -14,6 +14,7 @@ export { ToastProvider, useToast } from './ui/Toast'
 export { Combobox, type ComboOption } from './ui/Combobox'
 export { CommandPalette, type CommandSection, type CommandItem } from './ui/CommandPalette'
 export { Tabs, type Tab } from './ui/Tabs'
+export { Menu, type MenuItem, type MenuGroup } from './ui/Menu'
 
 /* ── Button ─────────────────────────────────────────────────────────────────── */
 // 'primary' is kept as an alias of 'default' so existing call sites don't change.
