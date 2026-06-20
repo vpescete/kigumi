@@ -184,6 +184,7 @@
         <a class="hover:text-text" href="#thesis">Why</a>
         <a class="hover:text-text" href="#features">Capabilities</a>
         <a class="hover:text-text" href="#flow">How it works</a>
+        <a class="hover:text-text" href="#compare">Compare</a>
         <a class="hover:text-text" href="./docs/en/README.html">Docs</a>
         <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank"
           rel="noopener">GitHub</a>
@@ -279,7 +280,7 @@
         </h2>
         <p class="mt-5 text-[17px] leading-relaxed text-muted">
           One model definition is the single source of truth. From it Meshble generates the database schema, a typed
-          REST API, an OpenAPI spec and an agnostic UI contract — no hand-written endpoints, no drift, no frontend
+          REST API, an OpenAPI spec and an agnostic UI contract: no hand-written endpoints, no drift, no frontend
           welded to the backend. The whole chain (sales, purchase, inventory, accounting) sits on an inspectable
           metamodel compiled at build time, with secure CRUD that runs in one place.
         </p>
@@ -393,6 +394,126 @@
             <p class="mt-2 text-[14px] leading-relaxed text-muted">The bundled React app renders lists, forms, wizards
               and reports straight from the contract. Or wire your own client to the same API.</p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────── Comparison (honest matrix, no benchmark theatre) ───────────── -->
+    <section id="compare" class="mx-auto max-w-content px-5 py-24 sm:px-8">
+      <div class="reveal max-w-2xl">
+        <h2 class="font-display text-3xl font-semibold text-text sm:text-4xl">An honest comparison.</h2>
+        <p class="mt-3 text-[15px] leading-relaxed text-muted">
+          Meshble is not a turnkey suite, and it does not pretend to beat decades of enterprise software on breadth. It
+          competes on a different axis: a small, typed, open core you own and integrate. Here is where that genuinely
+          wins, and where a mature platform still does.
+        </p>
+      </div>
+
+      <div class="reveal mt-10 overflow-x-auto rounded-lg border border-border">
+        <table class="w-full min-w-[860px] border-collapse text-left text-[13.5px]">
+          <thead>
+            <tr class="border-b border-border bg-surface">
+              <th class="px-4 py-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted">Dimension</th>
+              <th class="bg-[#22b8cf14] px-4 py-3 font-display text-[15px] font-semibold text-accent">Meshble</th>
+              <th class="px-4 py-3 font-display text-[15px] font-semibold text-text">Odoo</th>
+              <th class="px-4 py-3 font-display text-[15px] font-semibold text-text">SAP S/4HANA</th>
+              <th class="px-4 py-3 font-display text-[15px] font-semibold text-text">Salesforce</th>
+              <th class="px-4 py-3 font-display text-[15px] font-semibold text-text">ServiceNow</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border">
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">What it is</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Headless ERP framework you build on</td>
+              <td class="px-4 py-3 text-muted">All-in-one ERP and CRM suite</td>
+              <td class="px-4 py-3 text-muted">Enterprise resource suite</td>
+              <td class="px-4 py-3 text-muted">CRM-led cloud platform</td>
+              <td class="px-4 py-3 text-muted">Workflow and ITSM platform</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Core stack</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Rust + PostgreSQL, single binary</td>
+              <td class="px-4 py-3 text-muted">Python + PostgreSQL</td>
+              <td class="px-4 py-3 text-muted">ABAP + HANA in-memory</td>
+              <td class="px-4 py-3 text-muted">Proprietary, multi-tenant</td>
+              <td class="px-4 py-3 text-muted">Proprietary platform</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Frontend</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Decoupled: any client, React UI included</td>
+              <td class="px-4 py-3 text-muted">Coupled web client (OWL)</td>
+              <td class="px-4 py-3 text-muted">SAP Fiori / GUI</td>
+              <td class="px-4 py-3 text-muted">Lightning (fixed)</td>
+              <td class="px-4 py-3 text-muted">Now UI (fixed)</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Customize with</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Typed Rust modules, verified at compile time</td>
+              <td class="px-4 py-3 text-muted">Python modules at runtime</td>
+              <td class="px-4 py-3 text-muted">ABAP, consultant-heavy</td>
+              <td class="px-4 py-3 text-muted">Apex plus declarative clicks</td>
+              <td class="px-4 py-3 text-muted">Low-code plus scripting</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">API and integration</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">API-first: REST + OpenAPI generated from the model</td>
+              <td class="px-4 py-3 text-muted">RPC API, UI not headless</td>
+              <td class="px-4 py-3 text-muted">OData, heavyweight</td>
+              <td class="px-4 py-3 text-muted">Strong REST, with limits</td>
+              <td class="px-4 py-3 text-muted">Strong REST</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Source and hosting</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Open, self-hosted</td>
+              <td class="px-4 py-3 text-muted">Open core, paid Enterprise</td>
+              <td class="px-4 py-3 text-muted">Proprietary, license + cloud</td>
+              <td class="px-4 py-3 text-muted">Proprietary SaaS</td>
+              <td class="px-4 py-3 text-muted">Proprietary SaaS</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Cost model</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Free, you host it</td>
+              <td class="px-4 py-3 text-muted">Free CE / per-user Enterprise</td>
+              <td class="px-4 py-3 text-muted">License + large implementation</td>
+              <td class="px-4 py-3 text-muted">Per user, per month</td>
+              <td class="px-4 py-3 text-muted">Enterprise subscription</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Live module install</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Yes, no restart</td>
+              <td class="px-4 py-3 text-muted">Yes</td>
+              <td class="px-4 py-3 text-muted">Staged transports</td>
+              <td class="px-4 py-3 text-muted">Metadata deploy</td>
+              <td class="px-4 py-3 text-muted">Yes</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Maturity and catalog</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-[#e0a93b]">Young, small module set</td>
+              <td class="px-4 py-3 text-muted">Thousands of apps, mature</td>
+              <td class="px-4 py-3 text-muted">Deepest enterprise depth</td>
+              <td class="px-4 py-3 text-muted">Vast AppExchange (CRM)</td>
+              <td class="px-4 py-3 text-muted">Mature, ITSM-centric</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="reveal mt-6 grid gap-4 md:grid-cols-2">
+        <div class="rounded-lg border border-accent/25 bg-[linear-gradient(160deg,rgba(34,184,207,0.10),rgba(20,24,29,0.4))] p-6">
+          <h3 class="font-display text-lg font-semibold text-text">Reach for Meshble when</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted">
+            You want a typed, headless core to build a product or internal tools on; you self-host and dislike per-user
+            fees; you will write modules in Rust and value compile-time safety and a clean generated API over a
+            ready-made catalog.
+          </p>
+        </div>
+        <div class="rounded-lg border border-border bg-surface p-6">
+          <h3 class="font-display text-lg font-semibold text-text">Look elsewhere when</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted">
+            You need a turnkey suite with thousands of ready apps today (Odoo), deep industry processes and a global
+            support org (SAP), a CRM-led sales motion (Salesforce), or enterprise ITSM (ServiceNow). Meshble is young:
+            a small module set and no partner network yet.
+          </p>
         </div>
       </div>
     </section>

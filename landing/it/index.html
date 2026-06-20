@@ -184,6 +184,7 @@
         <a class="hover:text-text" href="#thesis">Perché</a>
         <a class="hover:text-text" href="#features">Funzionalità</a>
         <a class="hover:text-text" href="#flow">Come funziona</a>
+        <a class="hover:text-text" href="#compare">Confronto</a>
         <a class="hover:text-text" href="../docs/it/README.html">Documentazione</a>
         <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank"
           rel="noopener">GitHub</a>
@@ -279,7 +280,7 @@
         </h2>
         <p class="mt-5 text-[17px] leading-relaxed text-muted">
           Una sola definizione di modello è l'unica fonte di verità. Da essa Meshble genera lo schema del database, una
-          REST API tipizzata, una specifica OpenAPI e un contratto UI agnostico — niente endpoint scritti a mano, niente
+          REST API tipizzata, una specifica OpenAPI e un contratto UI agnostico: niente endpoint scritti a mano, niente
           drift, niente frontend saldato al backend. L'intera catena (vendite, acquisti, magazzino, contabilità) poggia
           su un metamodello ispezionabile compilato a build time, con CRUD sicuro che gira in un unico posto.
         </p>
@@ -395,6 +396,126 @@
             <p class="mt-2 text-[14px] leading-relaxed text-muted">L'app React inclusa renderizza liste, form, wizard e
               report direttamente dal contratto. Oppure collega il tuo client alla stessa API.</p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────── Confronto (matrice onesta, niente teatrino dei benchmark) ───────────── -->
+    <section id="compare" class="mx-auto max-w-content px-5 py-24 sm:px-8">
+      <div class="reveal max-w-2xl">
+        <h2 class="font-display text-3xl font-semibold text-text sm:text-4xl">Un confronto onesto.</h2>
+        <p class="mt-3 text-[15px] leading-relaxed text-muted">
+          Meshble non è una suite chiavi in mano e non pretende di battere sull'ampiezza decenni di software
+          enterprise. Compete su un altro asse: un core piccolo, tipizzato e aperto che possiedi e integri. Ecco dove
+          questo vince davvero, e dove una piattaforma matura resta avanti.
+        </p>
+      </div>
+
+      <div class="reveal mt-10 overflow-x-auto rounded-lg border border-border">
+        <table class="w-full min-w-[860px] border-collapse text-left text-[13.5px]">
+          <thead>
+            <tr class="border-b border-border bg-surface">
+              <th class="px-4 py-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted">Dimensione</th>
+              <th class="bg-[#22b8cf14] px-4 py-3 font-display text-[15px] font-semibold text-accent">Meshble</th>
+              <th class="px-4 py-3 font-display text-[15px] font-semibold text-text">Odoo</th>
+              <th class="px-4 py-3 font-display text-[15px] font-semibold text-text">SAP S/4HANA</th>
+              <th class="px-4 py-3 font-display text-[15px] font-semibold text-text">Salesforce</th>
+              <th class="px-4 py-3 font-display text-[15px] font-semibold text-text">ServiceNow</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border">
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Cos'è</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Framework ERP headless su cui costruisci</td>
+              <td class="px-4 py-3 text-muted">Suite ERP e CRM all-in-one</td>
+              <td class="px-4 py-3 text-muted">Suite enterprise gestionale</td>
+              <td class="px-4 py-3 text-muted">Piattaforma cloud orientata al CRM</td>
+              <td class="px-4 py-3 text-muted">Piattaforma di workflow e ITSM</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Stack di base</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Rust + PostgreSQL, singolo binario</td>
+              <td class="px-4 py-3 text-muted">Python + PostgreSQL</td>
+              <td class="px-4 py-3 text-muted">ABAP + HANA in-memory</td>
+              <td class="px-4 py-3 text-muted">Proprietario, multi-tenant</td>
+              <td class="px-4 py-3 text-muted">Piattaforma proprietaria</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Frontend</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Disaccoppiato: qualsiasi client, UI React inclusa</td>
+              <td class="px-4 py-3 text-muted">Web client accoppiato (OWL)</td>
+              <td class="px-4 py-3 text-muted">SAP Fiori / GUI</td>
+              <td class="px-4 py-3 text-muted">Lightning (fisso)</td>
+              <td class="px-4 py-3 text-muted">Now UI (fisso)</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Si personalizza con</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Moduli Rust tipizzati, verificati a compile time</td>
+              <td class="px-4 py-3 text-muted">Moduli Python a runtime</td>
+              <td class="px-4 py-3 text-muted">ABAP, molta consulenza</td>
+              <td class="px-4 py-3 text-muted">Apex più configurazione a clic</td>
+              <td class="px-4 py-3 text-muted">Low-code più scripting</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">API e integrazione</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">API-first: REST + OpenAPI generati dal modello</td>
+              <td class="px-4 py-3 text-muted">API RPC, UI non headless</td>
+              <td class="px-4 py-3 text-muted">OData, pesante</td>
+              <td class="px-4 py-3 text-muted">REST solido, con limiti</td>
+              <td class="px-4 py-3 text-muted">REST solido</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Sorgente e hosting</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Aperto, self-hosted</td>
+              <td class="px-4 py-3 text-muted">Open core, Enterprise a pagamento</td>
+              <td class="px-4 py-3 text-muted">Proprietario, licenza + cloud</td>
+              <td class="px-4 py-3 text-muted">SaaS proprietario</td>
+              <td class="px-4 py-3 text-muted">SaaS proprietario</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Modello di costo</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Gratuito, lo ospiti tu</td>
+              <td class="px-4 py-3 text-muted">CE gratuito / Enterprise per utente</td>
+              <td class="px-4 py-3 text-muted">Licenza + grande implementazione</td>
+              <td class="px-4 py-3 text-muted">Per utente, al mese</td>
+              <td class="px-4 py-3 text-muted">Abbonamento enterprise</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Install moduli a caldo</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Sì, senza restart</td>
+              <td class="px-4 py-3 text-muted">Sì</td>
+              <td class="px-4 py-3 text-muted">Transport in stage</td>
+              <td class="px-4 py-3 text-muted">Deploy di metadati</td>
+              <td class="px-4 py-3 text-muted">Sì</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Maturità e catalogo</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-[#e0a93b]">Giovane, pochi moduli</td>
+              <td class="px-4 py-3 text-muted">Migliaia di app, maturo</td>
+              <td class="px-4 py-3 text-muted">Massima profondità enterprise</td>
+              <td class="px-4 py-3 text-muted">Vasto AppExchange (CRM)</td>
+              <td class="px-4 py-3 text-muted">Maturo, orientato all'ITSM</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="reveal mt-6 grid gap-4 md:grid-cols-2">
+        <div class="rounded-lg border border-accent/25 bg-[linear-gradient(160deg,rgba(34,184,207,0.10),rgba(20,24,29,0.4))] p-6">
+          <h3 class="font-display text-lg font-semibold text-text">Scegli Meshble quando</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted">
+            Vuoi un core tipizzato e headless su cui costruire un prodotto o strumenti interni; fai self-hosting e mal
+            sopporti i costi per utente; scriverai moduli in Rust e dai valore alla sicurezza a compile time e a un'API
+            generata pulita più che a un catalogo pronto.
+          </p>
+        </div>
+        <div class="rounded-lg border border-border bg-surface p-6">
+          <h3 class="font-display text-lg font-semibold text-text">Guarda altrove quando</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted">
+            Ti serve una suite chiavi in mano con migliaia di app già pronte (Odoo), processi di settore profondi e una
+            rete di supporto globale (SAP), una macchina di vendita guidata dal CRM (Salesforce) o un ITSM enterprise
+            (ServiceNow). Meshble è giovane: pochi moduli e nessuna rete di partner, per ora.
+          </p>
         </div>
       </div>
     </section>
