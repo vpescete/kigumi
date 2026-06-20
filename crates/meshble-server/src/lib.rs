@@ -24,7 +24,7 @@ use meshble_core::{
     registered_rules, report_for, resolve_modules, wizard_for, Acl, Condition, Ctx, Domain, FieldDef,
     FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
 };
-use meshble_db::{is_safe_ident, CustomField, Db, DbError};
+use meshble_db::{is_safe_ident, CustomField, Db, DbError, ViewOverride};
 use meshble_schema::{openapi, pg_column_type, to_ui_contract};
 use meshble_storage::{sha256_hex, BlobStore};
 
@@ -66,6 +66,11 @@ struct AppState {
     /// it is resolved, so a field added at runtime appears in the contract and flows through CRUD with
     /// no recompile. Leaked to `'static` (loaded once at startup + on add), like the runtime ACLs.
     custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
+    /// Runtime view overrides, by model name — the declarative-extension layer for the UI contract.
+    /// Applied as a post-pass over the auto-derived contract when a model's `view` is served, so an
+    /// admin can relabel / hide / lock / re-widget a field at runtime with no recompile. Owned data
+    /// (no leak), so the poll loop can refresh it every tick freely.
+    view_overrides: Arc<RwLock<HashMap<String, Vec<ViewOverride>>>>,
     data: Option<DataBackend>,
 }
 
@@ -127,6 +132,72 @@ pub async fn refresh_custom_fields(map: &Arc<RwLock<HashMap<String, Vec<FieldDef
             *w = group_custom_fields(&fields);
         }
     }
+}
+
+/// Groups loaded view overrides into the by-model map the contract post-pass consults.
+fn group_view_overrides(rows: &[ViewOverride]) -> HashMap<String, Vec<ViewOverride>> {
+    let mut map: HashMap<String, Vec<ViewOverride>> = HashMap::new();
+    for o in rows {
+        map.entry(o.model.clone()).or_default().push(o.clone());
+    }
+    map
+}
+
+/// Reloads the live view-override map from `ir_ui_view` (after a change, and at startup). Owned data,
+/// so unlike the access policy this is leak-free and can run on every poll tick unconditionally.
+pub async fn refresh_view_overrides(map: &Arc<RwLock<HashMap<String, Vec<ViewOverride>>>>, db: &Db) {
+    if let Ok(rows) = db.load_view_overrides().await {
+        if let Ok(mut w) = map.write() {
+            *w = group_view_overrides(&rows);
+        }
+    }
+}
+
+/// Applies runtime view overrides as a post-pass over the auto-derived contract JSON: relabel /
+/// re-widget / hide / lock a field without touching `to_ui_contract`. Invisible fields are dropped from
+/// both `fields` and `list.columns`; `readonly` is forced true only (never false — a computed field's
+/// base readonly must stand). Returns the input unchanged if it does not parse (it always should).
+fn apply_view_overrides(contract: &str, overrides: &[ViewOverride]) -> String {
+    let mut v: Json2 = match serde_json::from_str(contract) {
+        Ok(v) => v,
+        Err(_) => return contract.to_string(),
+    };
+    let by_field: HashMap<&str, &ViewOverride> =
+        overrides.iter().map(|o| (o.field.as_str(), o)).collect();
+    let rewrite = |arr: &mut Vec<Json2>| {
+        arr.retain(|item| {
+            item.get("name")
+                .and_then(|n| n.as_str())
+                .and_then(|n| by_field.get(n))
+                .map(|o| !o.invisible)
+                .unwrap_or(true)
+        });
+        for item in arr.iter_mut() {
+            let Some(name) = item.get("name").and_then(|n| n.as_str()).map(str::to_string) else {
+                continue;
+            };
+            let Some(o) = by_field.get(name.as_str()) else { continue };
+            let Some(obj) = item.as_object_mut() else { continue };
+            if let Some(l) = &o.label {
+                obj.insert("label".into(), Json2::String(l.clone()));
+            }
+            if let Some(w) = &o.widget {
+                obj.insert("widget".into(), Json2::String(w.clone()));
+            }
+            if o.readonly {
+                obj.insert("readonly".into(), Json2::Bool(true));
+            }
+        }
+    };
+    if let Some(arr) = v.get_mut("fields").and_then(|f| f.as_array_mut()) {
+        rewrite(arr);
+    }
+    if let Some(cols) =
+        v.get_mut("list").and_then(|l| l.get_mut("columns")).and_then(|c| c.as_array_mut())
+    {
+        rewrite(cols);
+    }
+    v.to_string()
 }
 
 #[derive(Clone)]
@@ -205,6 +276,7 @@ fn base_router() -> Router<AppState> {
         .route("/api/modules/:name/install", post(module_install_handler))
         .route("/api/modules/:name/uninstall", post(module_uninstall_handler))
         .route("/api/:name/_fields", post(add_field_handler))
+        .route("/api/:name/_view", post(add_view_handler))
         .route("/api/:name/view", get(view_handler))
 }
 
@@ -214,6 +286,7 @@ pub fn router(models: Vec<ResolvedModel>) -> Router {
         models: Arc::new(models),
         installed: Arc::new(RwLock::new(HashSet::new())),
         custom_fields: Arc::new(RwLock::new(HashMap::new())),
+        view_overrides: Arc::new(RwLock::new(HashMap::new())),
         data: None,
     })
 }
@@ -252,6 +325,7 @@ pub fn router_with_data_rasterized(
         models,
         Arc::new(RwLock::new(HashSet::new())),
         Arc::new(RwLock::new(HashMap::new())),
+        Arc::new(RwLock::new(HashMap::new())),
         db,
         Arc::new(RwLock::new(Arc::from(acls))),
         Arc::new(RwLock::new(Arc::from(rules))),
@@ -270,13 +344,25 @@ pub fn router_with_data_dynamic(
     models: Vec<ResolvedModel>,
     installed: Arc<RwLock<HashSet<String>>>,
     custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
+    view_overrides: Arc<RwLock<HashMap<String, Vec<ViewOverride>>>>,
     db: Db,
     acls: AclState,
     rules: RuleState,
     auth_secret: impl Into<String>,
     blobs: Arc<dyn BlobStore>,
 ) -> Router {
-    build_data_router(models, installed, custom_fields, db, acls, rules, auth_secret, blobs, None)
+    build_data_router(
+        models,
+        installed,
+        custom_fields,
+        view_overrides,
+        db,
+        acls,
+        rules,
+        auth_secret,
+        blobs,
+        None,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -284,6 +370,7 @@ fn build_data_router(
     models: Vec<ResolvedModel>,
     installed: Arc<RwLock<HashSet<String>>>,
     custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
+    view_overrides: Arc<RwLock<HashMap<String, Vec<ViewOverride>>>>,
     db: Db,
     acls: AclState,
     rules: RuleState,
@@ -345,6 +432,7 @@ fn build_data_router(
             models: Arc::new(models),
             installed,
             custom_fields,
+            view_overrides,
             data: Some(DataBackend {
                 db: Arc::new(db),
                 acls,
@@ -637,9 +725,56 @@ async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -
         Ok(m) => m,
         Err(r) => return r,
     };
-    match to_ui_contract(&model, &[]) {
-        Ok(json) => json_response(json),
-        Err(e) => internal_error("view", e),
+    let json = match to_ui_contract(&model, &[]) {
+        Ok(j) => j,
+        Err(e) => return internal_error("view", e),
+    };
+    // Post-pass: fold in any runtime view overrides (relabel/hide/lock/re-widget) for this model.
+    let overrides = state
+        .view_overrides
+        .read()
+        .ok()
+        .and_then(|m| m.get(&name).cloned())
+        .unwrap_or_default();
+    if overrides.is_empty() {
+        json_response(json)
+    } else {
+        json_response(apply_view_overrides(&json, &overrides))
+    }
+}
+
+/// Override a field's UI on a model (admin only): relabel / hide / lock / re-widget at runtime, no
+/// recompile. Body: `{field, label?, widget?, invisible?, readonly?}`. Upserts the `ir_ui_view` row
+/// and reloads the live map; the change shows on the next `view` fetch. Pure UI metadata — it cannot
+/// grant access (that is the ACL/rule layer) or change storage (that is a custom field).
+async fn add_view_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "overriding a view requires the admin group").into_response();
+    }
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let Some(field) = str_field(&body, "field") else {
+        return (StatusCode::BAD_REQUEST, "'field' is required").into_response();
+    };
+    if !model.fields.iter().any(|f| f.name == field) {
+        return (StatusCode::BAD_REQUEST, format!("unknown field '{field}' on {name}")).into_response();
+    }
+    let label = str_field(&body, "label");
+    let widget = str_field(&body, "widget");
+    let flag = |k: &str| body.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    match backend.db.set_view_override(&name, field, label, widget, flag("invisible"), flag("readonly")).await {
+        Ok(_) => {
+            refresh_view_overrides(&state.view_overrides, &backend.db).await;
+            json_response(serde_json::json!({ "view": { "model": name, "field": field } }).to_string())
+        }
+        Err(e) => write_error("set_view", e),
     }
 }
 
@@ -2044,6 +2179,50 @@ mod tests {
 
         let (status, _) = fetch("/api/nope/view").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn view_overrides_relabel_hide_and_lock() {
+        let contract = "{\"fields\":[\
+            {\"name\":\"state\",\"label\":\"State\",\"widget\":\"selection\",\"readonly\":false},\
+            {\"name\":\"secret\",\"label\":\"Secret\",\"widget\":\"text\",\"readonly\":false}],\
+            \"list\":{\"columns\":[\
+            {\"name\":\"state\",\"label\":\"State\",\"widget\":\"selection\"},\
+            {\"name\":\"secret\",\"label\":\"Secret\",\"widget\":\"text\"}]}}";
+        let overrides = vec![
+            ViewOverride {
+                model: "sale.order".into(),
+                field: "state".into(),
+                label: Some("Status".into()),
+                widget: None,
+                invisible: false,
+                readonly: true,
+            },
+            ViewOverride {
+                model: "sale.order".into(),
+                field: "secret".into(),
+                label: None,
+                widget: None,
+                invisible: true,
+                readonly: false,
+            },
+        ];
+        let out = apply_view_overrides(contract, &overrides);
+        let v: Json2 = serde_json::from_str(&out).unwrap();
+        let fields = v["fields"].as_array().unwrap();
+        // 'secret' is hidden from both fields and columns; 'state' is relabeled and locked.
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0]["name"], "state");
+        assert_eq!(fields[0]["label"], "Status");
+        assert_eq!(fields[0]["readonly"], true);
+        let cols = v["list"]["columns"].as_array().unwrap();
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0]["name"], "state");
+        assert_eq!(cols[0]["label"], "Status");
+        // A no-override contract round-trips unchanged in shape (still parses, still 2 fields).
+        let untouched = apply_view_overrides(contract, &[]);
+        let v2: Json2 = serde_json::from_str(&untouched).unwrap();
+        assert_eq!(v2["fields"].as_array().unwrap().len(), 2);
     }
 }
 

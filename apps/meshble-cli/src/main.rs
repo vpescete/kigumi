@@ -14,7 +14,10 @@ use meshble::prelude::*;
 use meshble_auth::hash_password;
 use meshble_config::Settings;
 use meshble_db::Db;
-use meshble_server::{access_fingerprint, refresh_access, refresh_custom_fields, router_with_data_dynamic};
+use meshble_server::{
+    access_fingerprint, refresh_access, refresh_custom_fields, refresh_view_overrides,
+    router_with_data_dynamic,
+};
 
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
@@ -509,6 +512,7 @@ async fn serve(s: Settings) -> Fallible {
     // startup). A model whose owning module is not installed is simply not served until it is.
     db.ensure_module_schema().await?;
     db.ensure_custom_field_schema().await?;
+    db.ensure_view_schema().await?;
     let models: Vec<_> = resolve_all_registered().map_err(|e| e.to_string())?.into_iter().collect();
     let installed_set: std::sync::Arc<std::sync::RwLock<std::collections::HashSet<String>>> =
         std::sync::Arc::new(std::sync::RwLock::new(db.installed_modules().await?.into_iter().collect()));
@@ -517,6 +521,10 @@ async fn serve(s: Settings) -> Fallible {
     let custom_fields: std::sync::Arc<std::sync::RwLock<std::collections::HashMap<String, Vec<meshble::prelude::FieldDef>>>> =
         std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
     refresh_custom_fields(&custom_fields, &db).await;
+    // Runtime view overrides: relabel/hide/lock/re-widget a field, merged into the contract on serve.
+    let view_overrides: std::sync::Arc<std::sync::RwLock<std::collections::HashMap<String, Vec<meshble_db::ViewOverride>>>> =
+        std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+    refresh_view_overrides(&view_overrides, &db).await;
 
     // Effective access = compiled-in baseline ∪ runtime DB overrides (hybrid, D12). For ACLs the DB
     // rows only widen access (union); for record rules they add restrictions/alternatives through the
@@ -549,6 +557,7 @@ async fn serve(s: Settings) -> Fallible {
     let refresh_db = db.clone();
     let refresh_set = installed_set.clone();
     let refresh_custom = custom_fields.clone();
+    let refresh_views = view_overrides.clone();
     let refresh_acls = acls.clone();
     let refresh_rules = rules.clone();
     let mut access_fp = access_fingerprint(&db).await;
@@ -561,6 +570,7 @@ async fn serve(s: Settings) -> Fallible {
                 }
             }
             refresh_custom_fields(&refresh_custom, &refresh_db).await;
+            refresh_view_overrides(&refresh_views, &refresh_db).await;
             // Reload the access policy only when the DB rows actually changed — avoids the
             // load_*_static identifier-string leak on every idle tick, while still picking up
             // out-of-band edits (the `meshble acl/rule` CLI, or direct SQL) without a restart.
@@ -583,7 +593,17 @@ async fn serve(s: Settings) -> Fallible {
     let blobs: std::sync::Arc<dyn meshble_storage::BlobStore> =
         std::sync::Arc::new(meshble_storage::FsBlobStore::new(blob_root));
 
-    let app = router_with_data_dynamic(models, installed_set, custom_fields, db, acls, rules, s.secrets.jwt_secret.clone(), blobs);
+    let app = router_with_data_dynamic(
+        models,
+        installed_set,
+        custom_fields,
+        view_overrides,
+        db,
+        acls,
+        rules,
+        s.secrets.jwt_secret.clone(),
+        blobs,
+    );
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("meshble serving on http://{bind}  ({} models)", registered_model_names().len());

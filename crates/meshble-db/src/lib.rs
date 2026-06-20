@@ -14,9 +14,11 @@ mod migration;
 mod module_store;
 mod sequence;
 mod settings;
+mod view_override;
 pub use access_store::{AclRow, RuleRow};
 pub use auth_store::UserRow;
 pub use custom_field::{is_safe_ident, CustomField};
+pub use view_override::ViewOverride;
 pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 
