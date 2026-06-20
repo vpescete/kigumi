@@ -9,12 +9,14 @@
 mod access_store;
 mod auth_store;
 mod cron;
+mod custom_field;
 mod migration;
 mod module_store;
 mod sequence;
 mod settings;
 pub use access_store::{AclRow, RuleRow};
 pub use auth_store::UserRow;
+pub use custom_field::{is_safe_ident, CustomField};
 pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 

@@ -14,7 +14,7 @@ use meshble::prelude::*;
 use meshble_auth::hash_password;
 use meshble_config::Settings;
 use meshble_db::Db;
-use meshble_server::router_with_data_dynamic;
+use meshble_server::{refresh_custom_fields, router_with_data_dynamic};
 
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
@@ -508,9 +508,15 @@ async fn serve(s: Settings) -> Fallible {
     // without restarting the process (approach B, but dynamic like Odoo's registry rather than fixed at
     // startup). A model whose owning module is not installed is simply not served until it is.
     db.ensure_module_schema().await?;
+    db.ensure_custom_field_schema().await?;
     let models: Vec<_> = resolve_all_registered().map_err(|e| e.to_string())?.into_iter().collect();
     let installed_set: std::sync::Arc<std::sync::RwLock<std::collections::HashSet<String>>> =
         std::sync::Arc::new(std::sync::RwLock::new(db.installed_modules().await?.into_iter().collect()));
+    // Runtime custom fields: the declarative-extension layer, loaded live and merged into models on
+    // resolve — a field added via /api/<model>/_fields appears with no restart.
+    let custom_fields: std::sync::Arc<std::sync::RwLock<std::collections::HashMap<String, Vec<meshble::prelude::FieldDef>>>> =
+        std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+    refresh_custom_fields(&custom_fields, &db).await;
 
     // Effective access = compiled-in baseline ∪ runtime DB overrides (hybrid, D12). For ACLs the DB
     // rows only widen access (union); for record rules they add restrictions/alternatives through the
@@ -551,6 +557,7 @@ async fn serve(s: Settings) -> Fallible {
     // install/uninstall, so this only matters for multi-process / out-of-band changes.
     let refresh_db = db.clone();
     let refresh_set = installed_set.clone();
+    let refresh_custom = custom_fields.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(MODULE_REFRESH_SECS)).await;
@@ -559,6 +566,7 @@ async fn serve(s: Settings) -> Fallible {
                     *w = names.into_iter().collect();
                 }
             }
+            refresh_custom_fields(&refresh_custom, &refresh_db).await;
         }
     });
 
@@ -573,7 +581,7 @@ async fn serve(s: Settings) -> Fallible {
     let blobs: std::sync::Arc<dyn meshble_storage::BlobStore> =
         std::sync::Arc::new(meshble_storage::FsBlobStore::new(blob_root));
 
-    let app = router_with_data_dynamic(models, installed_set, db, acls, rules, s.secrets.jwt_secret.clone(), blobs);
+    let app = router_with_data_dynamic(models, installed_set, custom_fields, db, acls, rules, s.secrets.jwt_secret.clone(), blobs);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("meshble serving on http://{bind}  ({} models)", registered_model_names().len());

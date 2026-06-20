@@ -21,11 +21,11 @@ use serde_json::Value as Json2;
 use meshble_auth::{hash_password, new_jti, verify_password, Authenticator};
 use meshble_core::{
     check_access, field_accessible, is_mailed, module_closure, module_of, report_for, resolve_modules,
-    wizard_for, Acl, Condition, Ctx, Domain, FieldKind, Operation, Operator, RecordRule, ResolvedModel,
-    Value, WizardContext,
+    wizard_for, Acl, Condition, Ctx, Domain, FieldDef, FieldKind, Operation, Operator, RecordRule,
+    ResolvedModel, Value, WizardContext,
 };
-use meshble_db::{Db, DbError};
-use meshble_schema::{openapi, to_ui_contract};
+use meshble_db::{is_safe_ident, CustomField, Db, DbError};
+use meshble_schema::{openapi, pg_column_type, to_ui_contract};
 use meshble_storage::{sha256_hex, BlobStore};
 
 // Re-exported so hosts (the CLI) and tests can construct a store without a direct meshble-storage dep.
@@ -54,6 +54,10 @@ struct AppState {
     /// serve exactly the models they were handed). Shared + mutated by the install/uninstall handlers
     /// and a background refresh.
     installed: Arc<RwLock<HashSet<String>>>,
+    /// Runtime custom fields, by model name — the declarative-extension layer. Merged into a model when
+    /// it is resolved, so a field added at runtime appears in the contract and flows through CRUD with
+    /// no recompile. Leaked to `'static` (loaded once at startup + on add), like the runtime ACLs.
+    custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
     data: Option<DataBackend>,
 }
 
@@ -62,6 +66,59 @@ struct AppState {
 fn is_served(state: &AppState, model_name: &str) -> bool {
     let inst = state.installed.read().expect("installed lock");
     inst.is_empty() || module_of(model_name).map(|owner| inst.contains(owner)).unwrap_or(true)
+}
+
+/// The scalar field kinds a runtime custom field may take (relations are a follow-up).
+fn parse_custom_kind(kind: &str) -> Option<FieldKind> {
+    match kind {
+        "text" => Some(FieldKind::Text),
+        "integer" => Some(FieldKind::Integer),
+        "float" => Some(FieldKind::Float),
+        "decimal" => Some(FieldKind::Decimal { currency_field: None }),
+        "bool" => Some(FieldKind::Bool),
+        "date" => Some(FieldKind::Date),
+        "datetime" => Some(FieldKind::Datetime),
+        _ => None,
+    }
+}
+
+/// Builds a `'static` `FieldDef` from a runtime custom-field row (scalar kinds only). Strings are
+/// leaked, like the runtime ACL/rule strings — loaded once and held for the process lifetime.
+fn custom_field_def(cf: &CustomField) -> Option<FieldDef> {
+    let kind = parse_custom_kind(&cf.kind)?;
+    let leak = |s: &str| -> &'static str { Box::leak(s.to_string().into_boxed_str()) };
+    Some(FieldDef {
+        name: leak(&cf.name),
+        label: leak(&cf.label),
+        kind,
+        required: cf.required,
+        stored: true,
+        compute: None,
+        depends: &[],
+        default: cf.default_value.as_deref().map(leak),
+        unique: false,
+        check: None,
+    })
+}
+
+/// Groups loaded custom fields into the by-model map the resolver consults.
+fn group_custom_fields(fields: &[CustomField]) -> HashMap<String, Vec<FieldDef>> {
+    let mut map: HashMap<String, Vec<FieldDef>> = HashMap::new();
+    for cf in fields {
+        if let Some(def) = custom_field_def(cf) {
+            map.entry(cf.model.clone()).or_default().push(def);
+        }
+    }
+    map
+}
+
+/// Reloads the live custom-field map from the registry (after an add, and at startup).
+pub async fn refresh_custom_fields(map: &Arc<RwLock<HashMap<String, Vec<FieldDef>>>>, db: &Db) {
+    if let Ok(fields) = db.load_custom_fields().await {
+        if let Ok(mut w) = map.write() {
+            *w = group_custom_fields(&fields);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -81,6 +138,7 @@ fn base_router() -> Router<AppState> {
         .route("/api/modules", get(modules_handler))
         .route("/api/modules/:name/install", post(module_install_handler))
         .route("/api/modules/:name/uninstall", post(module_uninstall_handler))
+        .route("/api/:name/_fields", post(add_field_handler))
         .route("/api/:name/view", get(view_handler))
 }
 
@@ -89,6 +147,7 @@ pub fn router(models: Vec<ResolvedModel>) -> Router {
     base_router().with_state(AppState {
         models: Arc::new(models),
         installed: Arc::new(RwLock::new(HashSet::new())),
+        custom_fields: Arc::new(RwLock::new(HashMap::new())),
         data: None,
     })
 }
@@ -120,8 +179,19 @@ pub fn router_with_data_rasterized(
     blobs: Arc<dyn BlobStore>,
     rasterizer: Option<Arc<dyn Rasterizer>>,
 ) -> Router {
-    // Empty installed set = no gating: serves exactly `models` (the host/tests' chosen catalog).
-    build_data_router(models, Arc::new(RwLock::new(HashSet::new())), db, acls, rules, auth_secret, blobs, rasterizer)
+    // Empty installed set = no gating: serves exactly `models` (the host/tests' chosen catalog). No
+    // runtime custom fields (tests use the compile-time models directly).
+    build_data_router(
+        models,
+        Arc::new(RwLock::new(HashSet::new())),
+        Arc::new(RwLock::new(HashMap::new())),
+        db,
+        acls,
+        rules,
+        auth_secret,
+        blobs,
+        rasterizer,
+    )
 }
 
 /// Like [`router_with_data`] but with a **live served catalog**: `installed` (a shared, mutable set of
@@ -132,19 +202,21 @@ pub fn router_with_data_rasterized(
 pub fn router_with_data_dynamic(
     models: Vec<ResolvedModel>,
     installed: Arc<RwLock<HashSet<String>>>,
+    custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
     db: Db,
     acls: &'static [Acl],
     rules: &'static [RecordRule],
     auth_secret: impl Into<String>,
     blobs: Arc<dyn BlobStore>,
 ) -> Router {
-    build_data_router(models, installed, db, acls, rules, auth_secret, blobs, None)
+    build_data_router(models, installed, custom_fields, db, acls, rules, auth_secret, blobs, None)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn build_data_router(
     models: Vec<ResolvedModel>,
     installed: Arc<RwLock<HashSet<String>>>,
+    custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
     db: Db,
     acls: &'static [Acl],
     rules: &'static [RecordRule],
@@ -201,6 +273,7 @@ fn build_data_router(
         .with_state(AppState {
             models: Arc::new(models),
             installed,
+            custom_fields,
             data: Some(DataBackend {
                 db: Arc::new(db),
                 acls,
@@ -232,13 +305,23 @@ fn json_status(status: StatusCode, body: String) -> Response {
 }
 
 /// Resolves the model for a path name, or a 404 response.
-fn resolve_model<'a>(state: &'a AppState, name: &str) -> Result<&'a ResolvedModel, Response> {
-    state
+/// Resolves a served model, with its runtime custom fields MERGED in — returns an owned `ResolvedModel`
+/// (a cheap clone of the compile-time base plus any custom fields). Owning it decouples the value from
+/// the custom-field lock so handlers can hold it across `.await`. 404 when the model isn't served.
+fn resolve_model(state: &AppState, name: &str) -> Result<ResolvedModel, Response> {
+    let base = state
         .models
         .iter()
         .find(|m| m.name == name)
         .filter(|_| is_served(state, name))
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("unknown model: {name}")).into_response())
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("unknown model: {name}")).into_response())?;
+    let mut model = base.clone();
+    if let Ok(map) = state.custom_fields.read() {
+        if let Some(extra) = map.get(name) {
+            model.fields.extend(extra.iter().copied());
+        }
+    }
+    Ok(model)
 }
 
 /// Maps a write DbError to an HTTP response (opaque 500, never leaking schema/SQL on the 500 path).
@@ -430,13 +513,62 @@ async fn module_uninstall_handler(State(state): State<AppState>, Path(name): Pat
     }
 }
 
+/// Adds a runtime custom field to a model: registers it, adds the column, and merges it into the live
+/// catalog — it appears in the contract and flows through CRUD immediately, no recompile. Admin only.
+/// Scalar kinds: text | integer | float | decimal | bool | date | datetime.
+async fn add_field_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "adding a field requires the admin group").into_response();
+    }
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let obj = match body_object(&body) {
+        Ok(o) => o,
+        Err(r) => return r,
+    };
+    let Some(fname) = str_field(&body, "name") else {
+        return (StatusCode::BAD_REQUEST, "'name' is required").into_response();
+    };
+    let Some(kind_str) = str_field(&body, "kind") else {
+        return (StatusCode::BAD_REQUEST, "'kind' is required").into_response();
+    };
+    let label = str_field(&body, "label").unwrap_or(fname);
+    let required = obj.get("required").and_then(|v| v.as_bool()).unwrap_or(false);
+    let default = str_field(&body, "default");
+    let Some(kind) = parse_custom_kind(kind_str) else {
+        return (StatusCode::BAD_REQUEST, format!("unsupported kind '{kind_str}' (text|integer|float|decimal|bool|date|datetime)")).into_response();
+    };
+    if !is_safe_ident(fname) {
+        return (StatusCode::BAD_REQUEST, "field name must be lowercase letters, digits and underscore").into_response();
+    }
+    if model.fields.iter().any(|f| f.name == fname) {
+        return (StatusCode::BAD_REQUEST, format!("field '{fname}' already exists on {name}")).into_response();
+    }
+    let col_type = pg_column_type(&kind);
+    match backend.db.add_custom_field(&name, fname, label, kind_str, required, default, model.table, col_type).await {
+        Ok(_) => {
+            refresh_custom_fields(&state.custom_fields, &backend.db).await;
+            json_response(serde_json::json!({ "added": fname, "model": name }).to_string())
+        }
+        Err(e) => write_error("add_field", e),
+    }
+}
+
 async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -> Response {
-    match state.models.iter().find(|m| m.name == name).filter(|_| is_served(&state, &name)) {
-        Some(m) => match to_ui_contract(m, &[]) {
-            Ok(json) => json_response(json),
-            Err(e) => internal_error("view", e),
-        },
-        None => (StatusCode::NOT_FOUND, format!("unknown model: {name}")).into_response(),
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    match to_ui_contract(&model, &[]) {
+        Ok(json) => json_response(json),
+        Err(e) => internal_error("view", e),
     }
 }
 
@@ -458,13 +590,13 @@ async fn list_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    let (filter, order, limit, offset) = match parse_list_query(model, &params) {
+    let (filter, order, limit, offset) = match parse_list_query(&model, &params) {
         Ok(p) => p,
         Err(r) => return r,
     };
     match backend
         .db
-        .list_secured(model, &ctx, backend.acls, backend.rules, filter.as_ref(), &order, limit, offset)
+        .list_secured(&model, &ctx, backend.acls, backend.rules, filter.as_ref(), &order, limit, offset)
         .await
     {
         Ok(page) => {
@@ -603,7 +735,7 @@ async fn get_one_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.find_one_secured(model, &ctx, backend.acls, backend.rules, id).await {
+    match backend.db.find_one_secured(&model, &ctx, backend.acls, backend.rules, id).await {
         Ok(Some(obj)) => {
             json_response(serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string()))
         }
@@ -637,7 +769,7 @@ async fn create_handler(
         Ok(o) => o,
         Err(r) => return r,
     };
-    match backend.db.insert_secured(model, &ctx, backend.acls, backend.rules, obj).await {
+    match backend.db.insert_secured(&model, &ctx, backend.acls, backend.rules, obj).await {
         Ok(id) => json_status(StatusCode::CREATED, format!("{{\"id\": {id}}}")),
         Err(e) => write_error("create", e),
     }
@@ -662,7 +794,7 @@ async fn update_handler(
         Ok(o) => o,
         Err(r) => return r,
     };
-    match backend.db.update_secured(model, &ctx, backend.acls, backend.rules, id, obj).await {
+    match backend.db.update_secured(&model, &ctx, backend.acls, backend.rules, id, obj).await {
         Ok(0) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
         Ok(n) => json_status(StatusCode::OK, format!("{{\"updated\": {n}}}")),
         Err(e) => write_error("update", e),
@@ -684,7 +816,7 @@ async fn action_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.run_action(model, &ctx, backend.acls, backend.rules, id, &action).await {
+    match backend.db.run_action(&model, &ctx, backend.acls, backend.rules, id, &action).await {
         Ok(()) => json_response(format!("{{\"ok\":true,\"action\":{}}}", serde_json::to_string(&action).unwrap_or_default())),
         Err(e) => write_error("action", e),
     }
@@ -900,7 +1032,7 @@ async fn report_handler(
         Err(r) => return r,
     };
     let want_pdf = params.get("format").map(|f| f == "pdf").unwrap_or(false);
-    match backend.db.find_one_secured(model, &ctx, backend.acls, backend.rules, id).await {
+    match backend.db.find_one_secured(&model, &ctx, backend.acls, backend.rules, id).await {
         Ok(Some(rec)) => {
             let html = (reg.func)(&rec);
             if !want_pdf {
@@ -996,11 +1128,11 @@ async fn open_wizard_handler(
         .into_iter()
         .map(|(k, v)| (k.to_string(), value_to_json(&v)))
         .collect();
-    let id = match backend.db.insert_secured(model, &ctx, backend.acls, backend.rules, &seed).await {
+    let id = match backend.db.insert_secured(&model, &ctx, backend.acls, backend.rules, &seed).await {
         Ok(id) => id,
         Err(e) => return write_error("open", e),
     };
-    match backend.db.find_one_secured(model, &ctx, backend.acls, backend.rules, id).await {
+    match backend.db.find_one_secured(&model, &ctx, backend.acls, backend.rules, id).await {
         Ok(Some(rec)) => {
             json_status(StatusCode::CREATED, serde_json::to_string(&rec).unwrap_or_else(|_| "{}".to_string()))
         }
@@ -1023,7 +1155,7 @@ async fn delete_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.delete_secured(model, &ctx, backend.acls, backend.rules, id).await {
+    match backend.db.delete_secured(&model, &ctx, backend.acls, backend.rules, id).await {
         Ok(0) => (StatusCode::NOT_FOUND, "not found or not permitted").into_response(),
         Ok(n) => json_status(StatusCode::OK, format!("{{\"deleted\": {n}}}")),
         Err(e) => write_error("delete", e),
@@ -1097,7 +1229,7 @@ async fn chatter_gate(
     if !is_mailed(name) {
         return Err((StatusCode::BAD_REQUEST, format!("model '{name}' has no mail thread")).into_response());
     }
-    match backend.db.find_one_secured(host, ctx, backend.acls, backend.rules, id).await {
+    match backend.db.find_one_secured(&host, ctx, backend.acls, backend.rules, id).await {
         Ok(Some(_)) => Ok(()),
         Ok(None) => Err((StatusCode::NOT_FOUND, "not found or not permitted").into_response()),
         Err(DbError::AccessDenied { .. }) => Err((StatusCode::FORBIDDEN, "access denied").into_response()),
@@ -1138,7 +1270,7 @@ async fn attachment_gate(
     if write && !check_access(Operation::Write, name, ctx, backend.acls) {
         return Err((StatusCode::FORBIDDEN, "access denied").into_response());
     }
-    match backend.db.find_one_secured(host, ctx, backend.acls, backend.rules, id).await {
+    match backend.db.find_one_secured(&host, ctx, backend.acls, backend.rules, id).await {
         Ok(Some(_)) => Ok(()),
         Ok(None) => Err((StatusCode::NOT_FOUND, "not found or not permitted").into_response()),
         Err(DbError::AccessDenied { .. }) => Err((StatusCode::FORBIDDEN, "access denied").into_response()),

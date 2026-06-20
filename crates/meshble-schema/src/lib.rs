@@ -10,6 +10,12 @@ pub use openapi::openapi;
 use meshble_core::{actions_for, delegated_fields, field_is_readonly, field_required_groups, is_mailed, json_string, related_path, reports_for, view_for, Domain, DomainError, FieldDef, FieldKind, ResolvedModel};
 
 /// Postgres SQL type for a field with a column.
+/// The Postgres column type for a field kind — used by `to_ddl` and by the runtime custom-field
+/// `ALTER TABLE ADD COLUMN`. Empty string for kinds that have no own column (One2many/Many2many).
+pub fn pg_column_type(kind: &FieldKind) -> &'static str {
+    pg_type(kind)
+}
+
 fn pg_type(kind: &FieldKind) -> &'static str {
     match kind {
         FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) => "text",
