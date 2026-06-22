@@ -5,6 +5,7 @@ import {
   Box,
   ChevronDown,
   ChevronRight,
+  KeyRound,
   Landmark,
   LayoutDashboard,
   LogOut,
@@ -125,6 +126,7 @@ function SidebarNav({ groups, onNavigate }: { groups: NavGroup[]; onNavigate?: (
       })}
       <div className="pt-1.5">
         <NavItem to="/modules" label="Modules" onNavigate={onNavigate} />
+        <NavItem to="/access" label="Access" onNavigate={onNavigate} />
       </div>
     </nav>
   )
@@ -177,6 +179,7 @@ function RailNav({ groups }: { groups: NavGroup[] }) {
         />
       ))}
       <RailItem to="/modules" label="Modules" icon={<Blocks size={18} />} active={pathname.startsWith('/modules')} />
+      <RailItem to="/access" label="Access" icon={<KeyRound size={18} />} active={pathname.startsWith('/access')} />
     </nav>
   )
 }
@@ -207,6 +210,7 @@ function Breadcrumbs() {
   if (pathname === '/') crumbs.push({ label: 'Dashboard' })
   else if (pathname.startsWith('/theme-studio')) crumbs.push({ label: 'Theme Studio' })
   else if (pathname.startsWith('/modules')) crumbs.push({ label: 'Modules' })
+  else if (pathname.startsWith('/access')) crumbs.push({ label: 'Access' })
   else if (params.model) {
     crumbs.push({ label: modelTitle(params.model), to: `/m/${params.model}` })
     if (params.id) crumbs.push({ label: params.id === 'new' ? 'New' : `#${params.id}` })
