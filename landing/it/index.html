@@ -184,6 +184,7 @@
         <a class="hover:text-text" href="#thesis">Perché</a>
         <a class="hover:text-text" href="#features">Funzionalità</a>
         <a class="hover:text-text" href="#flow">Come funziona</a>
+        <a class="hover:text-text" href="#extend">Estendi</a>
         <a class="hover:text-text" href="#compare">Confronto</a>
         <a class="hover:text-text" href="../docs/it/README.html">Documentazione</a>
         <a class="hover:text-text" href="https://github.com/vpescete/msh_framework" target="_blank"
@@ -282,14 +283,16 @@
           Una sola definizione di modello è l'unica fonte di verità. Da essa Meshble genera lo schema del database, una
           REST API tipizzata, una specifica OpenAPI e un contratto UI agnostico: niente endpoint scritti a mano, niente
           drift, niente frontend saldato al backend. L'intera catena (vendite, acquisti, magazzino, contabilità) poggia
-          su un metamodello ispezionabile compilato a build time, con CRUD sicuro che gira in un unico posto.
+          su un metamodello ispezionabile compilato a build time, con CRUD sicuro che gira in un unico posto. Quel core
+          compilato è il pavimento, non il soffitto: campi, regole di accesso e ritocchi alle viste si aggiungono dal
+          database o dall'API su un server in esecuzione, senza ricompilare e senza riavviare.
         </p>
       </div>
 
       <dl class="reveal mt-14 grid grid-cols-2 gap-x-8 gap-y-10 border-t border-border pt-10 md:grid-cols-4">
         <div>
-          <dt class="font-display text-3xl font-semibold tnum text-text">A compile-time</dt>
-          <dd class="mt-1.5 text-[14px] text-muted">metamodello risolto a build time, non sintetizzato a runtime</dd>
+          <dt class="font-display text-3xl font-semibold tnum text-text">Compilato, vivo</dt>
+          <dd class="mt-1.5 text-[14px] text-muted">un core tipizzato risolto a build time, esteso con campi, viste e regole a runtime</dd>
         </div>
         <div>
           <dt class="font-display text-3xl font-semibold text-text">Un solo percorso</dt>
@@ -400,6 +403,60 @@
       </div>
     </section>
 
+    <!-- ───────────── Estensione a runtime (il framework, non solo la suite) ───────────── -->
+    <section id="extend" class="mx-auto max-w-content px-5 py-24 sm:px-8">
+      <div class="reveal max-w-2xl">
+        <h2 class="font-display text-3xl font-semibold text-text sm:text-4xl">Estendilo senza ridistribuire.</h2>
+        <p class="mt-3 text-[15px] leading-relaxed text-muted">
+          Il core tipizzato è il pavimento, non il soffitto. Aggiungi un campo, una regola di accesso o una modifica a
+          una vista direttamente dal database o dall'API, e ha effetto sul server in esecuzione. Senza ricompilare,
+          senza riavviare, senza script di migrazione scritti a mano. Questa è la metà framework di Meshble: la
+          sicurezza di un core compilato con la portata di una piattaforma che rimodelli a runtime.
+        </p>
+      </div>
+
+      <div class="reveal mt-10 grid gap-4 lg:grid-cols-3">
+        <article class="rounded-lg border border-border bg-surface p-6">
+          <div class="font-mono text-[12px] text-accent">campo</div>
+          <h3 class="mt-2 font-display text-lg font-semibold text-text">Aggiungi una colonna, dal vivo</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted">POST di un campo a un modello. Ottiene una colonna
+            Postgres reale e compare nel contratto che ogni client legge, senza ricompilare.</p>
+          <pre class="code mt-4 overflow-x-auto rounded-md border border-border bg-bg px-4 py-3 text-[12.5px] text-text"><span class="tok-fn">POST</span> /api/<span class="tok-str">product.product</span>/_fields
+{ <span class="tok-key">"name"</span>: <span class="tok-str">"warranty_months"</span>,
+  <span class="tok-key">"kind"</span>: <span class="tok-str">"integer"</span> }
+<span class="tok-com"># => { "added": "warranty_months" }</span></pre>
+        </article>
+
+        <article class="rounded-lg border border-border bg-surface p-6">
+          <div class="font-mono text-[12px] text-accent">regola</div>
+          <h3 class="mt-2 font-display text-lg font-semibold text-text">Cambia l'accesso, dal vivo</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted">POST di una record rule o di una ACL. Il dominio è
+            validato contro il modello, poi entra nello stesso engine che ogni lettura sicura già esegue.</p>
+          <pre class="code mt-4 overflow-x-auto rounded-md border border-border bg-bg px-4 py-3 text-[12.5px] text-text"><span class="tok-fn">POST</span> /api/_rule
+{ <span class="tok-key">"model"</span>: <span class="tok-str">"sale.order"</span>,
+  <span class="tok-key">"domain"</span>: { <span class="tok-key">"field"</span>: <span class="tok-str">"state"</span>,
+    <span class="tok-key">"op"</span>: <span class="tok-str">"="</span>, <span class="tok-key">"value"</span>: <span class="tok-str">"sale"</span> } }</pre>
+        </article>
+
+        <article class="rounded-lg border border-border bg-surface p-6">
+          <div class="font-mono text-[12px] text-accent">vista</div>
+          <h3 class="mt-2 font-display text-lg font-semibold text-text">Rimodella il form, dal vivo</h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted">POST di un override di vista per rinominare, nascondere,
+            bloccare o cambiare widget a un campo. Si fonde nel contratto UI come post-pass, senza toccare il frontend.</p>
+          <pre class="code mt-4 overflow-x-auto rounded-md border border-border bg-bg px-4 py-3 text-[12.5px] text-text"><span class="tok-fn">POST</span> /api/<span class="tok-str">res.partner</span>/_view
+{ <span class="tok-key">"field"</span>: <span class="tok-str">"email"</span>,
+  <span class="tok-key">"label"</span>: <span class="tok-str">"Email contatto"</span>,
+  <span class="tok-key">"readonly"</span>: <span class="tok-num">true</span> }</pre>
+        </article>
+      </div>
+
+      <p class="reveal mt-6 max-w-2xl text-[13.5px] leading-relaxed text-muted">
+        Ambito onesto: oggi i campi a runtime sono scalari e gli override di vista sono presentazionali. Relazioni e
+        visibilità condizionale sono nella roadmap. La logica di business profonda resta nei moduli compilati e
+        tipizzati, dove deve stare.
+      </p>
+    </section>
+
     <!-- ───────────── Confronto (matrice onesta, niente teatrino dei benchmark) ───────────── -->
     <section id="compare" class="mx-auto max-w-content px-5 py-24 sm:px-8">
       <div class="reveal max-w-2xl">
@@ -455,6 +512,14 @@
               <td class="px-4 py-3 text-muted">ABAP, molta consulenza</td>
               <td class="px-4 py-3 text-muted">Apex più configurazione a clic</td>
               <td class="px-4 py-3 text-muted">Low-code più scripting</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-muted">Campi / viste / regole a runtime</td>
+              <td class="bg-[#22b8cf0d] px-4 py-3 text-text">Sì, da DB/API su un core che possiedi</td>
+              <td class="px-4 py-3 text-muted">Studio (Enterprise); il codice richiede riavvio</td>
+              <td class="px-4 py-3 text-muted">Configurazione più transport</td>
+              <td class="px-4 py-3 text-muted">Sì, dichiarativo (proprietario)</td>
+              <td class="px-4 py-3 text-muted">Sì, low-code (proprietario)</td>
             </tr>
             <tr>
               <td class="px-4 py-3 font-medium text-muted">API e integrazione</td>
