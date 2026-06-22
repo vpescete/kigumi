@@ -290,7 +290,7 @@ fn base_router() -> Router<AppState> {
         .route("/api/modules/:name/install", post(module_install_handler))
         .route("/api/modules/:name/uninstall", post(module_uninstall_handler))
         .route("/api/:name/_fields", post(add_field_handler))
-        .route("/api/:name/_view", post(add_view_handler))
+        .route("/api/:name/_view", get(list_view_handler).post(add_view_handler))
         .route("/api/:name/view", get(view_handler))
 }
 
@@ -755,6 +755,39 @@ async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -
     } else {
         json_response(apply_view_overrides(&json, &overrides))
     }
+}
+
+/// The runtime view overrides configured on a model (admin only) — the inverse of the contract's
+/// post-pass: needed to UNDO an override (a hidden field is dropped from the contract, so the form
+/// cannot show a control for it; this is how a Studio UI lists hidden fields to offer "Show").
+async fn list_view_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "viewing overrides requires the admin group").into_response();
+    }
+    let rows = state
+        .view_overrides
+        .read()
+        .ok()
+        .and_then(|m| m.get(&name).cloned())
+        .unwrap_or_default();
+    let items: Vec<Json2> = rows
+        .iter()
+        .map(|o| {
+            serde_json::json!({
+                "field": o.field,
+                "label": o.label,
+                "widget": o.widget,
+                "invisible": o.invisible,
+                "readonly": o.readonly,
+            })
+        })
+        .collect();
+    json_response(serde_json::Value::Array(items).to_string())
 }
 
 /// Override a field's UI on a model (admin only): relabel / hide / lock / re-widget at runtime, no

@@ -453,6 +453,20 @@ export async function setView(
   )
 }
 
+export type ViewOverrideRow = {
+  field: string
+  label: string | null
+  widget: string | null
+  invisible: boolean
+  readonly: boolean
+}
+
+/** The view overrides configured on a model (admin only) — needed to surface hidden fields, which the
+ * contract drops, so a Studio UI can offer to show them again. */
+export async function viewOverrides(model: string): Promise<ViewOverrideRow[]> {
+  return asJson<ViewOverrideRow[]>(await request(`/api/${model}/_view`))
+}
+
 /** Grants (or updates) a runtime DB ACL for (model, group). DB ACLs only widen the static baseline. */
 export async function setAcl(acl: {
   model: string

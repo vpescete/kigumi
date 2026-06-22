@@ -3,7 +3,7 @@
 // Kept presentation-only so both the form and a wizard render fields identically.
 
 import { useEffect, useMemo, useState } from 'react'
-import { Image as ImageIcon, Lock, LockOpen, X } from 'lucide-react'
+import { EyeOff, Image as ImageIcon, Lock, LockOpen, Pencil, X } from 'lucide-react'
 import * as api from '../api'
 import { Combobox, cx, focusRing } from '../ui'
 import { evalDomain } from '../domain'
@@ -106,9 +106,13 @@ export function notebookPages(contract: api.Contract): api.ViewPage[] {
   return o2m.length ? [{ title: 'Details', fields: o2m }] : []
 }
 
-/** Customize mode: an admin affordance to override a field's UI at runtime (lock / unlock). Its
- * presence on FieldCell turns on the per-field control; absent => the field renders unchanged. */
-export type CustomizeApi = { onSetReadonly: (field: string, readonly: boolean) => void }
+/** Customize mode: admin affordances to override a field's UI at runtime (lock / hide / relabel). Its
+ * presence on FieldCell turns on the per-field controls; absent => the field renders unchanged. */
+export type CustomizeApi = {
+  onSetReadonly: (field: string, readonly: boolean) => void
+  onHide: (field: string) => void
+  onRelabel: (field: string, currentLabel: string) => void
+}
 
 /** A single labelled field: read-only display (resolving Many2one to a name) or an editable input,
  * honoring invisible_when / readonly_when. Returns null when the field is dynamically invisible. */
@@ -141,15 +145,35 @@ export function FieldCell({
           {field.required && <span className="text-danger"> *</span>}
         </span>
         {customize && (
-          <button
-            type="button"
-            onClick={() => customize.onSetReadonly(field.name, !field.readonly)}
-            title={field.readonly ? 'Unlock — make editable' : 'Lock — make read-only'}
-            aria-label={field.readonly ? 'Unlock field' : 'Lock field'}
-            className={cx('rounded p-0.5 text-muted transition-colors hover:text-accent', focusRing)}
-          >
-            {field.readonly ? <Lock size={12} /> : <LockOpen size={12} />}
-          </button>
+          <span className="inline-flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => customize.onSetReadonly(field.name, !field.readonly)}
+              title={field.readonly ? 'Unlock — make editable' : 'Lock — make read-only'}
+              aria-label={field.readonly ? 'Unlock field' : 'Lock field'}
+              className={cx('rounded p-0.5 text-muted transition-colors hover:text-accent', focusRing)}
+            >
+              {field.readonly ? <Lock size={12} /> : <LockOpen size={12} />}
+            </button>
+            <button
+              type="button"
+              onClick={() => customize.onHide(field.name)}
+              title="Hide field"
+              aria-label="Hide field"
+              className={cx('rounded p-0.5 text-muted transition-colors hover:text-accent', focusRing)}
+            >
+              <EyeOff size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => customize.onRelabel(field.name, field.label)}
+              title="Relabel field"
+              aria-label="Relabel field"
+              className={cx('rounded p-0.5 text-muted transition-colors hover:text-accent', focusRing)}
+            >
+              <Pencil size={12} />
+            </button>
+          </span>
         )}
       </div>
       {readonly ? (

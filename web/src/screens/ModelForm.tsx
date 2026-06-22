@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus, Printer, Save, SlidersHorizontal, Wand2 } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff, Plus, Printer, Save, SlidersHorizontal, Wand2 } from 'lucide-react'
 import * as api from '../api'
 import { canRun } from '../api'
 import { useAuth } from '../auth'
 import type { Column } from '../ui'
-import { Button, Card, confirm, DataTable, ErrorState, Menu, type MenuGroup, PageHeader, Skeleton, Tabs, useToast } from '../ui'
+import { Button, Card, confirm, DataTable, Dialog, ErrorState, Menu, type MenuGroup, PageHeader, Skeleton, Tabs, useToast } from '../ui'
 import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
 import { SERVICE_ACTIONS, type ServiceAction } from '../registries/serviceActions'
 import { EditableRelation, editableChildFields, toCommands, toLines, type Line } from './EditableRelation'
@@ -67,6 +67,9 @@ export function ModelForm() {
   const [wizard, setWizard] = useState<WizardSpec | null>(null)
   const [addFieldOpen, setAddFieldOpen] = useState(false)
   const [customizing, setCustomizing] = useState(false)
+  // Hidden fields (dropped from the contract) and the field being relabeled — both only used in Customize.
+  const [hidden, setHidden] = useState<api.ViewOverrideRow[]>([])
+  const [relabelTarget, setRelabelTarget] = useState<{ field: string; label: string } | null>(null)
   // When true, the next in-app navigation is NOT blocked (used for the post-save redirect).
   const skipGuardRef = useRef(false)
   // Serializes Customize toggles: a setView + refetch must finish before the next, or two concurrent
@@ -99,15 +102,17 @@ export function ModelForm() {
     }
   }, [model, id, isNew])
 
-  // Studio: persist a per-field view override (lock/unlock) and refetch the contract so it shows.
-  // Layout metadata, not record data — it never touches values/dirty/save.
-  const setFieldReadonly = useCallback(
-    async (field: string, readonly: boolean): Promise<void> => {
+  // Studio: persist a per-field view override (lock / hide / relabel) and refetch the contract + the
+  // hidden-fields list so the change shows. Layout metadata, not record data — never touches save.
+  // Serialized behind a ref so rapid toggles cannot race two load() refetches.
+  const applyOverride = useCallback(
+    async (field: string, patch: { readonly?: boolean; invisible?: boolean; label?: string }): Promise<void> => {
       if (customizeBusyRef.current) return
       customizeBusyRef.current = true
       try {
-        await api.setView(model, { field, readonly })
+        await api.setView(model, { field, ...patch })
         await load()
+        setHidden((await api.viewOverrides(model)).filter((o) => o.invisible))
       } catch (e: unknown) {
         toast.error(e instanceof api.ApiError ? e.message : 'Customize failed')
       } finally {
@@ -116,6 +121,27 @@ export function ModelForm() {
     },
     [model, load, toast],
   )
+
+  // Load the hidden-fields list when Customize opens (the contract drops hidden fields, so they need a
+  // separate fetch to be shown/un-hidden); clear it when Customize closes or the model changes.
+  useEffect(() => {
+    if (!customizing) {
+      setHidden([])
+      return
+    }
+    let cancelled = false
+    void api
+      .viewOverrides(model)
+      .then((rows) => {
+        if (!cancelled) setHidden(rows.filter((o) => o.invisible))
+      })
+      .catch(() => {
+        if (!cancelled) setHidden([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [customizing, model])
 
   useEffect(() => {
     skipGuardRef.current = false // re-arm the nav guard for the freshly loaded record
@@ -339,9 +365,37 @@ export function ModelForm() {
           relOptions={relOptions}
           onChange={setField}
           context={{ model, recordId: isNew ? null : Number(id) }}
-          customize={isAdmin && customizing ? { onSetReadonly: setFieldReadonly } : undefined}
+          customize={
+            isAdmin && customizing
+              ? {
+                  onSetReadonly: (f, ro) => void applyOverride(f, { readonly: ro }),
+                  onHide: (f) => void applyOverride(f, { invisible: true }),
+                  onRelabel: (f, label) => setRelabelTarget({ field: f, label }),
+                }
+              : undefined
+          }
         />
       </Card>
+
+      {isAdmin && customizing && hidden.length > 0 && (
+        <Card className="mb-5 p-4">
+          <div className="t-label text-muted mb-2.5 flex items-center gap-1.5">
+            <EyeOff size={13} /> Hidden fields — click to show
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {hidden.map((h) => (
+              <button
+                key={h.field}
+                type="button"
+                onClick={() => void applyOverride(h.field, { invisible: false })}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface2 px-2.5 py-1 text-sm text-text transition-colors hover:border-accent/40"
+              >
+                <Eye size={13} className="text-muted" /> {h.label || h.field}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {!isNew && pages.length > 0 && (
         <Card className="mb-5 p-5">
@@ -382,7 +436,63 @@ export function ModelForm() {
           }}
         />
       )}
+      {relabelTarget && (
+        <RelabelDialog
+          target={relabelTarget}
+          onClose={() => setRelabelTarget(null)}
+          onSubmit={(label) => {
+            const field = relabelTarget.field
+            setRelabelTarget(null)
+            void applyOverride(field, { label })
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/** A one-field dialog to relabel a field's UI caption (Studio Customize). */
+function RelabelDialog({
+  target,
+  onClose,
+  onSubmit,
+}: {
+  target: { field: string; label: string }
+  onClose: () => void
+  onSubmit: (label: string) => void
+}) {
+  const [label, setLabel] = useState(target.label)
+  const trimmed = label.trim()
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Relabel "${target.field}"`}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={() => onSubmit(trimmed)} disabled={!trimmed || trimmed === target.label}>
+            Relabel
+          </Button>
+        </>
+      }
+    >
+      <label className="block">
+        <span className="t-caption mb-1.5 block text-muted">Label</span>
+        <input
+          className="w-full rounded-md border border-input-border bg-input px-3 text-text shadow-xs focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:shadow-focus"
+          style={{ height: 'var(--control-h)' }}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && trimmed && trimmed !== target.label) onSubmit(trimmed)
+          }}
+        />
+      </label>
+    </Dialog>
   )
 }
 
