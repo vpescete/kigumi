@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Printer, Save, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeft, Plus, Printer, Save, SlidersHorizontal } from 'lucide-react'
 import * as api from '../api'
 import { canRun } from '../api'
 import { useAuth } from '../auth'
@@ -15,6 +15,7 @@ import { ReportViewer } from './ReportViewer'
 import { WizardModal } from './WizardModal'
 import { WIZARDS, type WizardSpec } from '../registries/wizards'
 import { Chatter } from './Chatter'
+import { AddFieldDialog } from './AddFieldDialog'
 
 type FormValues = Record<string, unknown>
 
@@ -47,6 +48,7 @@ export function ModelForm() {
   const { model = '', id = 'new' } = useParams()
   const nav = useNavigate()
   const { identity } = useAuth()
+  const isAdmin = identity?.groups.includes('admin') ?? false
   const toast = useToast()
   const isNew = id === 'new'
 
@@ -63,6 +65,7 @@ export function ModelForm() {
   const [busy, setBusy] = useState(false)
   const [report, setReport] = useState<api.ReportMeta | null>(null)
   const [wizard, setWizard] = useState<WizardSpec | null>(null)
+  const [addFieldOpen, setAddFieldOpen] = useState(false)
   // When true, the next in-app navigation is NOT blocked (used for the post-save redirect).
   const skipGuardRef = useRef(false)
 
@@ -281,6 +284,12 @@ export function ModelForm() {
             ) : ops.length > 1 ? (
               <Menu label="Actions" icon={<SlidersHorizontal size={15} />} groups={opGroups} disabled={busy} />
             ) : null}
+            {/* Studio: extend the model itself (admin only) — adds a real column at runtime, no recompile. */}
+            {isAdmin && (
+              <Button variant="outline" icon={<Plus size={16} />} onClick={() => setAddFieldOpen(true)} disabled={busy}>
+                Add field
+              </Button>
+            )}
             <Button variant="primary" icon={<Save size={16} />} onClick={save} disabled={busy || !dirty}>
               {busy ? 'Saving…' : 'Save'}
             </Button>
@@ -328,6 +337,17 @@ export function ModelForm() {
 
       {report && <ReportViewer model={model} id={Number(id)} report={report} onClose={() => setReport(null)} />}
       {wizard && <WizardModal spec={wizard} hostModel={model} hostId={Number(id)} onClose={() => setWizard(null)} onApplied={load} />}
+      {addFieldOpen && (
+        <AddFieldDialog
+          model={model}
+          existing={contract.fields.map((f) => f.name)}
+          onClose={() => setAddFieldOpen(false)}
+          onAdded={async () => {
+            setAddFieldOpen(false)
+            await load()
+          }}
+        />
+      )}
     </div>
   )
 }
