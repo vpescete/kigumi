@@ -1550,6 +1550,64 @@ impl Db {
         Ok(priced)
     }
 
+    /// Derives each `sale.order` line's effective `tax_rate` from its referenced `account.tax` and writes
+    /// it through the SECURED update path, so the line/order tax computes cascade (price_tax, price_total,
+    /// amount_tax, amount_total). The rate is materialized on the line because a stored same-record compute
+    /// cannot read the related tax row at write time — this is the tax analogue of `apply_pricelist`.
+    /// v1: percentage taxes only (a fixed or inactive tax yields rate 0). Gated on order WRITE; runs under
+    /// the caller's ctx (lines must be visible/permitted). Returns the number of lines processed.
+    pub async fn apply_taxes(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        order_id: i64,
+    ) -> Result<u64, DbError> {
+        let order_model = resolve_registered("sale.order").map_err(DbError::BadInput)?;
+        let line_model = resolve_registered("sale.order.line").map_err(DbError::BadInput)?;
+
+        if !check_access(Operation::Write, order_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "apply_taxes" });
+        }
+        self.find_one_secured(&order_model, ctx, acls, rules, order_id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
+
+        let lines = self
+            .find_secured(&line_model, ctx, acls, rules, Some(&Domain::field("order_id").eq(order_id)))
+            .await?;
+        let mut applied = 0u64;
+        for line in &lines {
+            let Some(lid) = line.get("id").and_then(|v| v.as_i64()) else { continue };
+            let rate = match line.get("tax_id").and_then(|v| v.as_i64()) {
+                Some(tid) => self.tax_rate_of(tid).await?,
+                None => rust_decimal::Decimal::ZERO,
+            };
+            let payload = serde_json::json!({ "tax_rate": rate.to_string() });
+            self.update_secured(&line_model, ctx, acls, rules, lid, payload.as_object().unwrap()).await?;
+            applied += 1;
+        }
+        Ok(applied)
+    }
+
+    /// The effective percentage rate for an `account.tax` id: its `amount` when it is an active percentage
+    /// tax, else 0 (a fixed or inactive tax does not map onto the per-line percentage compute in v1).
+    async fn tax_rate_of(&self, tax_id: i64) -> Result<rust_decimal::Decimal, DbError> {
+        use rust_decimal::Decimal;
+        let row = sqlx::query("SELECT amount_type, amount, active FROM account_tax WHERE id = $1")
+            .bind(tax_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else { return Ok(Decimal::ZERO) };
+        let active: bool = row.try_get("active").unwrap_or(true);
+        let amount_type: String = row.try_get("amount_type").unwrap_or_default();
+        if active && amount_type == "percent" {
+            Ok(row.try_get::<Option<Decimal>, _>("amount")?.unwrap_or_default())
+        } else {
+            Ok(Decimal::ZERO)
+        }
+    }
+
     /// Applies the `sale.order.discount` wizard: writes its `discount` percent onto every line of its
     /// target order (the line/order compute cascade then re-rolls subtotals/totals). Gated on the REAL
     /// effect — WRITE on `sale.order` — since the wizard row itself is only read. Runs under the caller

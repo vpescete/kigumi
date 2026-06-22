@@ -426,6 +426,7 @@ fn build_data_router(
         .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
         // Re-price a sale order's lines from its pricelist.
         .route("/api/:name/:id/apply_pricelist", post(apply_pricelist_handler))
+        .route("/api/:name/:id/apply_taxes", post(apply_taxes_handler))
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
         // Apply the discount wizard: write its discount onto the target order's lines.
@@ -1299,6 +1300,30 @@ async fn apply_pricelist_handler(
     match backend.db.apply_pricelist(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(n) => json_response(serde_json::json!({ "priced": n }).to_string()),
         Err(e) => write_error("apply_pricelist", e),
+    }
+}
+
+/// Derive each line's `tax_rate` from its `account.tax` (the runtime tax engine). Pinned to sale.order,
+/// like apply_pricelist.
+async fn apply_taxes_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    if name != "sale.order" {
+        return (StatusCode::BAD_REQUEST, "apply_taxes is only valid on sale.order").into_response();
+    }
+    if let Err(r) = resolve_model(&state, &name) {
+        return r;
+    }
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.apply_taxes(&ctx, &backend.acls(), &backend.rules(), id).await {
+        Ok(n) => json_response(serde_json::json!({ "taxed": n }).to_string()),
+        Err(e) => write_error("apply_taxes", e),
     }
 }
 
