@@ -342,6 +342,18 @@ export async function callEndpoint<T = Record<string, unknown>>(
   return asJson<T>(await request(`/api/${model}/${id}/${path}`, { method: 'POST' }))
 }
 
+/** Product onchange for an order/invoice line: returns the values to default (name, price_unit,
+ * product_uom_qty, uom_id) when a product is picked, so the client fills the line without typing. */
+export async function onchangeProduct(lineModel: string, productId: number): Promise<Record<string, unknown>> {
+  const res = await request(`/api/${lineModel}/_onchange`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ product_id: productId }),
+  })
+  const { values } = await asJson<{ values: Record<string, unknown> }>(res)
+  return values
+}
+
 // ---- Attachments (image / file fields) ----
 
 /** Uploads a file as an attachment on a record; returns the new attachment id (used as an Image FK). */

@@ -1608,6 +1608,39 @@ impl Db {
         }
     }
 
+    /// The values an order/invoice line should default when its product is set: the product's name, its
+    /// effective unit price (template list_price + variant price_extra), quantity 1, and unit of measure.
+    /// A SECURED read of the product (delegated template fields included), so a caller who cannot read it
+    /// gets a clean error rather than leaked data. Returns a JSON object the frontend merges into the line.
+    pub async fn product_onchange_values(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        product_id: i64,
+    ) -> Result<serde_json::Value, DbError> {
+        use rust_decimal::Decimal;
+        let product_model = resolve_registered("product.product").map_err(DbError::BadInput)?;
+        let p = self
+            .find_one_secured(&product_model, ctx, acls, rules, product_id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("product not found or not permitted".to_string()))?;
+        let dec = |k: &str| -> Decimal {
+            p.get(k).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or_default()
+        };
+        let price = dec("list_price") + dec("price_extra");
+        let mut values = serde_json::Map::new();
+        if let Some(name) = p.get("name").filter(|v| !v.is_null()) {
+            values.insert("name".to_string(), name.clone());
+        }
+        values.insert("price_unit".to_string(), serde_json::json!(price.to_string()));
+        values.insert("product_uom_qty".to_string(), serde_json::json!("1"));
+        if let Some(uom) = p.get("uom_id").filter(|v| !v.is_null()) {
+            values.insert("uom_id".to_string(), uom.clone());
+        }
+        Ok(serde_json::Value::Object(values))
+    }
+
     /// Applies the `sale.order.discount` wizard: writes its `discount` percent onto every line of its
     /// target order (the line/order compute cascade then re-rolls subtotals/totals). Gated on the REAL
     /// effect — WRITE on `sale.order` — since the wizard row itself is only read. Runs under the caller

@@ -65,8 +65,27 @@ export function EditableRelation({
   const cols = child.list.columns.filter((c) => c.name !== field.inverse)
   const fieldOf = (name: string): api.FieldMeta | undefined => child.fields.find((f) => f.name === name)
 
-  const setCell = (key: string, name: string, value: unknown): void =>
-    onChange(lines.map((ln) => (ln._key === key ? { ...ln, [name]: value } : ln)))
+  const setCell = (key: string, name: string, value: unknown): void => {
+    const next = lines.map((ln) => (ln._key === key ? { ...ln, [name]: value } : ln))
+    onChange(next)
+    // Product onchange: picking a product defaults the line's name / price / qty / uom from the product,
+    // so the user does not type them. An existing quantity is preserved.
+    if (name === 'product_id' && typeof value === 'number') {
+      void api
+        .onchangeProduct(child.model, value)
+        .then((values) =>
+          onChange(
+            next.map((ln) => {
+              if (ln._key !== key) return ln
+              const merged = { ...ln, ...values }
+              if (ln.product_uom_qty) merged.product_uom_qty = ln.product_uom_qty
+              return merged
+            }),
+          ),
+        )
+        .catch(() => undefined)
+    }
+  }
   const remove = (key: string): void => onChange(lines.filter((ln) => ln._key !== key))
   const add = (): void => onChange([...lines, { _key: newKey() }])
 
