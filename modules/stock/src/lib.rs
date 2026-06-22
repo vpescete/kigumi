@@ -101,6 +101,11 @@ pub struct StockPicking {
     #[field(label = "Company", target = "res.company")]
     company_id: Many2one,
 
+    // When a transfer is validated short, the unfulfilled remainder spills into a new draft transfer
+    // linked back here.
+    #[field(label = "Back Order of", target = "stock.picking")]
+    backorder_id: Many2one,
+
     #[field(label = "Moves", target = "stock.move", inverse = "picking_id")]
     move_ids: One2many,
 }
@@ -117,6 +122,11 @@ pub struct StockMove {
 
     #[field(label = "Quantity", required, default = "0")]
     product_uom_qty: Decimal,
+
+    // The quantity actually processed at validation. 0 means "process the full ordered quantity" (the
+    // all-or-nothing default); a smaller value validates a partial transfer and backorders the rest.
+    #[field(label = "Done", default = "0")]
+    quantity_done: Decimal,
 
     #[field(label = "Source Location", required, target = "stock.location")]
     location_id: Many2one,

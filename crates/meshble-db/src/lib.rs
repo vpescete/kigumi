@@ -2051,7 +2051,7 @@ impl Db {
             return Err(DbError::Conflict("the transfer was already validated".to_string()));
         }
 
-        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, location_id, location_dest_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
+        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, quantity_done, location_id, location_dest_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
             .bind(picking_id)
             .fetch_all(&mut *tx)
             .await?;
@@ -2060,26 +2060,60 @@ impl Db {
         if moves.is_empty() {
             return Err(DbError::BadInput("cannot validate a transfer with no moves".to_string()));
         }
+        use rust_decimal::Decimal;
         let mut products: Vec<i64> = Vec::new();
+        // (product, remainder, src, dst) for each move not fully processed → a backorder after commit.
+        let mut backorders: Vec<(i64, Decimal, i64, i64)> = Vec::new();
         for m in &moves {
             let move_id: i64 = m.try_get("id")?;
             let product_id: i64 = m.try_get("product_id")?;
-            let qty: rust_decimal::Decimal = m.try_get("product_uom_qty")?;
+            let ordered: Decimal = m.try_get("product_uom_qty")?;
+            let done_field: Decimal = m.try_get("quantity_done")?;
             let src: i64 = m.try_get("location_id")?;
             let dst: i64 = m.try_get("location_dest_id")?;
-            // Source loses qty, destination gains it — one parameterized upsert per side.
-            for (loc, delta) in [(src, -qty), (dst, qty)] {
-                sqlx::query(
-                    "INSERT INTO stock_quant (product_id, location_id, quantity) VALUES ($1, $2, $3) \
-                     ON CONFLICT (product_id, location_id) DO UPDATE SET quantity = stock_quant.quantity + $3",
-                )
-                .bind(product_id)
-                .bind(loc)
-                .bind(delta)
+            // quantity_done == 0 (the default) means "do the full ordered quantity" (all-or-nothing);
+            // a positive value validates exactly that much and backorders the rest.
+            let mut done = if done_field > Decimal::ZERO { done_field } else { ordered };
+            // Over-delivery guard: a move OUT of an INTERNAL location cannot take more than is on hand
+            // there, so stock never goes negative. An external source (supplier/customer) is not clamped.
+            let src_usage: Option<String> = sqlx::query_scalar("SELECT usage FROM stock_location WHERE id = $1")
+                .bind(src)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if src_usage.as_deref() == Some("internal") {
+                let on_hand: Decimal = sqlx::query_scalar("SELECT quantity FROM stock_quant WHERE product_id = $1 AND location_id = $2")
+                    .bind(product_id)
+                    .bind(src)
+                    .fetch_optional(&mut *tx)
+                    .await?
+                    .unwrap_or_default();
+                if done > on_hand {
+                    done = on_hand;
+                }
+            }
+            // Source loses `done`, destination gains it — one parameterized upsert per side.
+            if done > Decimal::ZERO {
+                for (loc, delta) in [(src, -done), (dst, done)] {
+                    sqlx::query(
+                        "INSERT INTO stock_quant (product_id, location_id, quantity) VALUES ($1, $2, $3) \
+                         ON CONFLICT (product_id, location_id) DO UPDATE SET quantity = stock_quant.quantity + $3",
+                    )
+                    .bind(product_id)
+                    .bind(loc)
+                    .bind(delta)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
+            sqlx::query("UPDATE stock_move SET state = 'done', quantity_done = $2 WHERE id = $1")
+                .bind(move_id)
+                .bind(done)
                 .execute(&mut *tx)
                 .await?;
+            let remainder = ordered - done;
+            if remainder > Decimal::ZERO {
+                backorders.push((product_id, remainder, src, dst));
             }
-            sqlx::query("UPDATE stock_move SET state = 'done' WHERE id = $1").bind(move_id).execute(&mut *tx).await?;
             products.push(product_id);
         }
         // De-duplicate once (a product may appear on several moves) for the on-hand recompute below.
@@ -2106,6 +2140,31 @@ impl Db {
         }
 
         tx.commit().await?;
+
+        // Spill any unfulfilled remainder into a new DRAFT backorder transfer, created via the ORM (so it
+        // gets its defaults + nested moves). Mirrors create_sale_invoice's documented non-atomicity: if
+        // this fails the original transfer is still validated, the remainder just is not backordered.
+        if !backorders.is_empty() {
+            let elevated = ctx.sudo();
+            let ptype = picking.get("picking_type").and_then(|v| v.as_str()).unwrap_or("internal");
+            let ploc = picking.get("location_id").and_then(|v| v.as_i64());
+            let pdest = picking.get("location_dest_id").and_then(|v| v.as_i64());
+            let bo_moves: Vec<serde_json::Value> = backorders
+                .iter()
+                .map(|(product_id, remainder, src, dst)| {
+                    serde_json::json!({
+                        "product_id": product_id, "product_uom_qty": remainder.to_string(),
+                        "location_id": src, "location_dest_id": dst
+                    })
+                })
+                .collect();
+            let bo_payload = serde_json::json!({
+                "picking_type": ptype, "location_id": ploc, "location_dest_id": pdest,
+                "backorder_id": picking_id, "move_ids": bo_moves
+            });
+            self.insert_secured(&picking_model, &elevated, &[], &[], bo_payload.as_object().unwrap()).await?;
+        }
+
         Ok(number)
     }
 
