@@ -439,10 +439,20 @@ export async function addField(
   )
 }
 
-/** Overrides a field's UI on a model (relabel / hide / lock / re-widget). Omit a key to leave it. */
+/** Overrides a field's UI on a model (relabel / hide / lock / re-widget, or a conditional domain).
+ * Omit a key to leave it; the `*_when` domains are validated against the model server-side. */
 export async function setView(
   model: string,
-  override: { field: string; label?: string; widget?: FieldWidget; invisible?: boolean; readonly?: boolean },
+  override: {
+    field: string
+    label?: string
+    widget?: FieldWidget
+    invisible?: boolean
+    readonly?: boolean
+    // null clears a stored condition; undefined (omitted) leaves it unchanged.
+    invisible_when?: DomainNode | null
+    readonly_when?: DomainNode | null
+  },
 ): Promise<void> {
   await expectOk(
     await request(`/api/${model}/_view`, {
@@ -460,6 +470,8 @@ export type ViewOverrideRow = {
   widget: string | null
   invisible: boolean
   readonly: boolean
+  invisible_when: DomainNode | null
+  readonly_when: DomainNode | null
 }
 
 /** The view overrides configured on a model (admin only) — needed to surface hidden fields, which the

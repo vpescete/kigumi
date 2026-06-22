@@ -3,7 +3,7 @@
 // Kept presentation-only so both the form and a wizard render fields identically.
 
 import { useEffect, useMemo, useState } from 'react'
-import { EyeOff, Image as ImageIcon, Lock, LockOpen, Pencil, X } from 'lucide-react'
+import { EyeOff, Image as ImageIcon, Lock, LockOpen, Pencil, SlidersHorizontal, X } from 'lucide-react'
 import * as api from '../api'
 import { Combobox, cx, focusRing } from '../ui'
 import { evalDomain } from '../domain'
@@ -114,6 +114,7 @@ export type CustomizeApi = {
   onSetReadonly: (field: string, readonly: boolean) => void
   onHide: (field: string) => void
   onRelabel: (field: string, currentLabel: string) => void
+  onConditions: (field: string) => void
 }
 
 /** A single labelled field: read-only display (resolving Many2one to a name) or an editable input,
@@ -174,6 +175,15 @@ export function FieldCell({
               className={cx('rounded p-0.5 text-muted transition-colors hover:text-accent', focusRing)}
             >
               <Pencil size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => customize.onConditions(field.name)}
+              title="Conditional visibility / lock"
+              aria-label="Field conditions"
+              className={cx('rounded p-0.5 text-muted transition-colors hover:text-accent', focusRing)}
+            >
+              <SlidersHorizontal size={12} />
             </button>
           </span>
         )}

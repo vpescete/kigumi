@@ -191,6 +191,15 @@ fn apply_view_overrides(contract: &str, overrides: &[ViewOverride]) -> String {
             if o.readonly {
                 obj.insert("readonly".into(), Json2::Bool(true));
             }
+            // Conditional domains: inject the stored JSON AST as `invisible_when`/`readonly_when` so the
+            // frontend evaluates them per record (the same keys a compile-time UI rule would emit).
+            for (col, dom) in [("invisible_when", &o.invisible_when), ("readonly_when", &o.readonly_when)] {
+                if let Some(d) = dom {
+                    if let Ok(ast) = serde_json::from_str::<Json2>(d) {
+                        obj.insert(col.into(), ast);
+                    }
+                }
+            }
         }
     };
     if let Some(arr) = v.get_mut("fields").and_then(|f| f.as_array_mut()) {
@@ -791,6 +800,11 @@ async fn list_view_handler(State(state): State<AppState>, Path(name): Path<Strin
         .ok()
         .and_then(|m| m.get(&name).cloned())
         .unwrap_or_default();
+    // The conditional domains are stored as JSON text; emit them as parsed AST (or null) so the UI can
+    // pre-fill an editor.
+    let cond = |s: &Option<String>| -> Json2 {
+        s.as_deref().and_then(|d| serde_json::from_str::<Json2>(d).ok()).unwrap_or(Json2::Null)
+    };
     let items: Vec<Json2> = rows
         .iter()
         .map(|o| {
@@ -800,16 +814,19 @@ async fn list_view_handler(State(state): State<AppState>, Path(name): Path<Strin
                 "widget": o.widget,
                 "invisible": o.invisible,
                 "readonly": o.readonly,
+                "invisible_when": cond(&o.invisible_when),
+                "readonly_when": cond(&o.readonly_when),
             })
         })
         .collect();
     json_response(serde_json::Value::Array(items).to_string())
 }
 
-/// Override a field's UI on a model (admin only): relabel / hide / lock / re-widget at runtime, no
-/// recompile. Body: `{field, label?, widget?, invisible?, readonly?}`. Upserts the `ir_ui_view` row
-/// and reloads the live map; the change shows on the next `view` fetch. Pure UI metadata — it cannot
-/// grant access (that is the ACL/rule layer) or change storage (that is a custom field).
+/// Override a field's UI on a model (admin only): relabel / hide / lock / re-widget, or make it
+/// conditionally invisible/readonly via a domain, at runtime, no recompile. Body: `{field, label?,
+/// widget?, invisible?, readonly?, invisible_when?, readonly_when?}` where the `*_when` values are JSON
+/// domain ASTs (validated against the model). Upserts the `ir_ui_view` row and reloads the live map.
+/// Pure UI metadata — it cannot grant access (the ACL/rule layer) or change storage (a custom field).
 async fn add_view_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
     let ctx = match authenticate(backend, &headers) {
@@ -833,10 +850,69 @@ async fn add_view_handler(State(state): State<AppState>, Path(name): Path<String
     if !known {
         return (StatusCode::BAD_REQUEST, format!("unknown field '{field}' on {name}")).into_response();
     }
-    let label = str_field(&body, "label");
-    let widget = str_field(&body, "widget");
-    let flag = |k: &str| body.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
-    match backend.db.set_view_override(&name, field, label, widget, flag("invisible"), flag("readonly")).await {
+    // The override row is a full upsert, but a client sends a PARTIAL patch (e.g. just `readonly`), so
+    // merge over the existing override: a key present in the body wins, an absent key keeps its stored
+    // value (otherwise hiding a field would wipe an earlier relabel, etc.).
+    let existing = state
+        .view_overrides
+        .read()
+        .ok()
+        .and_then(|m| m.get(&name).and_then(|v| v.iter().find(|o| o.field == field).cloned()));
+    let label = if body.get("label").is_some() {
+        str_field(&body, "label").map(str::to_string)
+    } else {
+        existing.as_ref().and_then(|e| e.label.clone())
+    };
+    let widget = if body.get("widget").is_some() {
+        str_field(&body, "widget").map(str::to_string)
+    } else {
+        existing.as_ref().and_then(|e| e.widget.clone())
+    };
+    let bool_field = |k: &str, prev: bool| match body.get(k) {
+        Some(v) => v.as_bool().unwrap_or(false),
+        None => prev,
+    };
+    let invisible = bool_field("invisible", existing.as_ref().map(|e| e.invisible).unwrap_or(false));
+    let readonly = bool_field("readonly", existing.as_ref().map(|e| e.readonly).unwrap_or(false));
+    // Conditional domains: a present value is parsed + validated against the model (an unknown field
+    // would otherwise break the field's render); a null clears it; an absent key keeps the stored one.
+    let parse_cond = |key: &str, prev: Option<String>| -> Result<Option<String>, Response> {
+        if body.get(key).is_none() {
+            return Ok(prev);
+        }
+        match body.get(key).filter(|v| !v.is_null()) {
+            None => Ok(None),
+            Some(d) => {
+                let json = d.to_string();
+                Domain::from_json(&json)
+                    .and_then(|dm| dm.validate(&model))
+                    .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid {key}: {e:?}")).into_response())?;
+                Ok(Some(json))
+            }
+        }
+    };
+    let invisible_when = match parse_cond("invisible_when", existing.as_ref().and_then(|e| e.invisible_when.clone())) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let readonly_when = match parse_cond("readonly_when", existing.as_ref().and_then(|e| e.readonly_when.clone())) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    match backend
+        .db
+        .set_view_override(
+            &name,
+            field,
+            label.as_deref(),
+            widget.as_deref(),
+            invisible,
+            readonly,
+            invisible_when.as_deref(),
+            readonly_when.as_deref(),
+        )
+        .await
+    {
         Ok(_) => {
             refresh_view_overrides(&state.view_overrides, &backend.db).await;
             json_response(serde_json::json!({ "view": { "model": name, "field": field } }).to_string())
@@ -2278,6 +2354,8 @@ mod tests {
                 widget: None,
                 invisible: false,
                 readonly: true,
+                invisible_when: Some("{\"field\":\"state\",\"op\":\"=\",\"value\":\"done\"}".into()),
+                readonly_when: None,
             },
             ViewOverride {
                 model: "sale.order".into(),
@@ -2286,6 +2364,8 @@ mod tests {
                 widget: None,
                 invisible: true,
                 readonly: false,
+                invisible_when: None,
+                readonly_when: None,
             },
         ];
         let out = apply_view_overrides(contract, &overrides);
@@ -2296,6 +2376,8 @@ mod tests {
         assert_eq!(fields[0]["name"], "state");
         assert_eq!(fields[0]["label"], "Status");
         assert_eq!(fields[0]["readonly"], true);
+        // The conditional domain is injected as a parsed AST the frontend can evaluate.
+        assert_eq!(fields[0]["invisible_when"], serde_json::json!({"field":"state","op":"=","value":"done"}));
         let cols = v["list"]["columns"].as_array().unwrap();
         assert_eq!(cols.len(), 1);
         assert_eq!(cols[0]["name"], "state");

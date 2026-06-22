@@ -16,6 +16,7 @@ import { WizardModal } from './WizardModal'
 import { WIZARDS, type WizardSpec } from '../registries/wizards'
 import { Chatter } from './Chatter'
 import { AddFieldDialog } from './AddFieldDialog'
+import type { DomainNode } from '../domain'
 
 type FormValues = Record<string, unknown>
 
@@ -67,9 +68,12 @@ export function ModelForm() {
   const [wizard, setWizard] = useState<WizardSpec | null>(null)
   const [addFieldOpen, setAddFieldOpen] = useState(false)
   const [customizing, setCustomizing] = useState(false)
-  // Hidden fields (dropped from the contract) and the field being relabeled — both only used in Customize.
-  const [hidden, setHidden] = useState<api.ViewOverrideRow[]>([])
+  // The model's view overrides (Customize): hidden fields are derived from these, and the conditions
+  // dialog pre-fills from them. `relabelTarget`/`conditionsTarget` track the field being edited.
+  const [overrides, setOverrides] = useState<api.ViewOverrideRow[]>([])
   const [relabelTarget, setRelabelTarget] = useState<{ field: string; label: string } | null>(null)
+  const [conditionsTarget, setConditionsTarget] = useState<string | null>(null)
+  const hidden = overrides.filter((o) => o.invisible)
   // When true, the next in-app navigation is NOT blocked (used for the post-save redirect).
   const skipGuardRef = useRef(false)
   // Serializes Customize toggles: a setView + refetch must finish before the next, or two concurrent
@@ -106,13 +110,22 @@ export function ModelForm() {
   // hidden-fields list so the change shows. Layout metadata, not record data — never touches save.
   // Serialized behind a ref so rapid toggles cannot race two load() refetches.
   const applyOverride = useCallback(
-    async (field: string, patch: { readonly?: boolean; invisible?: boolean; label?: string }): Promise<void> => {
+    async (
+      field: string,
+      patch: {
+        readonly?: boolean
+        invisible?: boolean
+        label?: string
+        invisible_when?: DomainNode | null
+        readonly_when?: DomainNode | null
+      },
+    ): Promise<void> => {
       if (customizeBusyRef.current) return
       customizeBusyRef.current = true
       try {
         await api.setView(model, { field, ...patch })
         await load()
-        setHidden((await api.viewOverrides(model)).filter((o) => o.invisible))
+        setOverrides(await api.viewOverrides(model))
       } catch (e: unknown) {
         toast.error(e instanceof api.ApiError ? e.message : 'Customize failed')
       } finally {
@@ -126,17 +139,17 @@ export function ModelForm() {
   // separate fetch to be shown/un-hidden); clear it when Customize closes or the model changes.
   useEffect(() => {
     if (!customizing) {
-      setHidden([])
+      setOverrides([])
       return
     }
     let cancelled = false
     void api
       .viewOverrides(model)
       .then((rows) => {
-        if (!cancelled) setHidden(rows.filter((o) => o.invisible))
+        if (!cancelled) setOverrides(rows)
       })
       .catch(() => {
-        if (!cancelled) setHidden([])
+        if (!cancelled) setOverrides([])
       })
     return () => {
       cancelled = true
@@ -371,6 +384,7 @@ export function ModelForm() {
                   onSetReadonly: (f, ro) => void applyOverride(f, { readonly: ro }),
                   onHide: (f) => void applyOverride(f, { invisible: true }),
                   onRelabel: (f, label) => setRelabelTarget({ field: f, label }),
+                  onConditions: (f) => setConditionsTarget(f),
                 }
               : undefined
           }
@@ -447,6 +461,18 @@ export function ModelForm() {
           }}
         />
       )}
+      {conditionsTarget && (
+        <ConditionsDialog
+          field={conditionsTarget}
+          current={overrides.find((o) => o.field === conditionsTarget) ?? null}
+          onClose={() => setConditionsTarget(null)}
+          onSubmit={(invisibleWhen, readonlyWhen) => {
+            const field = conditionsTarget
+            setConditionsTarget(null)
+            void applyOverride(field, { invisible_when: invisibleWhen, readonly_when: readonlyWhen })
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -492,6 +518,81 @@ function RelabelDialog({
           }}
         />
       </label>
+    </Dialog>
+  )
+}
+
+const COND_TEXTAREA =
+  'w-full rounded-md border border-input-border bg-input px-3 py-2 font-mono text-[12.5px] text-text shadow-xs ' +
+  'focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-offset-2 ' +
+  'focus-visible:ring-offset-bg focus-visible:shadow-focus'
+
+/** Edits a field's conditional visibility/lock domains (Studio Customize). A domain is the same JSON
+ * AST the rule engine uses; the frontend evaluates it per record, so the field hides/locks dynamically. */
+function ConditionsDialog({
+  field,
+  current,
+  onClose,
+  onSubmit,
+}: {
+  field: string
+  current: api.ViewOverrideRow | null
+  onClose: () => void
+  onSubmit: (invisibleWhen: DomainNode | null, readonlyWhen: DomainNode | null) => void
+}) {
+  const dump = (d: DomainNode | null | undefined): string => (d ? JSON.stringify(d) : '')
+  const [inv, setInv] = useState(dump(current?.invisible_when))
+  const [ro, setRo] = useState(dump(current?.readonly_when))
+  const [err, setErr] = useState<string | null>(null)
+
+  const parse = (s: string): DomainNode | null => {
+    if (!s.trim()) return null
+    const p: unknown = JSON.parse(s)
+    if (typeof p !== 'object' || p === null) throw new Error('not an object')
+    return p as DomainNode
+  }
+
+  function submit(): void {
+    try {
+      const invDom = parse(inv)
+      const roDom = parse(ro)
+      onSubmit(invDom, roDom)
+    } catch {
+      setErr('Each condition must be a valid JSON domain object, e.g. { "field": "state", "op": "=", "value": "draft" }')
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Conditions for "${field}"`}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={submit}>
+            Apply
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <p className="t-caption text-muted">
+          A domain is a JSON condition over the record. When it holds, the field is hidden / locked. Leave blank to
+          clear. Example: <span className="t-mono text-text">{'{ "field": "state", "op": "=", "value": "done" }'}</span>
+        </p>
+        <label className="block">
+          <span className="t-caption mb-1.5 block text-muted">Invisible when</span>
+          <textarea className={COND_TEXTAREA} rows={3} value={inv} onChange={(e) => setInv(e.target.value)} placeholder="(always visible)" />
+        </label>
+        <label className="block">
+          <span className="t-caption mb-1.5 block text-muted">Read-only when</span>
+          <textarea className={COND_TEXTAREA} rows={3} value={ro} onChange={(e) => setRo(e.target.value)} placeholder="(editable)" />
+        </label>
+        {err && <p className="t-caption text-danger">{err}</p>}
+      </div>
     </Dialog>
   )
 }
