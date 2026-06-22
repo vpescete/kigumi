@@ -76,7 +76,12 @@ export function useDismiss(ref: RefObject<HTMLElement>, active: boolean, onDismi
       if (e.key === 'Escape') onDismiss()
     }
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onDismiss()
+      const target = e.target as Node | null
+      // A nested popover (e.g. a Combobox option) selects on mousedown and removes itself; React 18 has
+      // already flushed that re-render by the time this document handler runs, so the target is detached.
+      // A detached target was inside our own subtree — never treat it as an outside click.
+      if (!target || !target.isConnected) return
+      if (ref.current && !ref.current.contains(target)) onDismiss()
     }
     document.addEventListener('keydown', onKey)
     document.addEventListener('mousedown', onDown)

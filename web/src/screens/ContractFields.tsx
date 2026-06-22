@@ -88,7 +88,9 @@ function sheetGroups(contract: api.Contract): SheetGroup[] {
           .filter((s): s is Slot => s !== null),
       }))
       .filter((g) => g.slots.length > 0)
-    const orphans = contract.fields.filter((f) => f.widget !== 'one2many' && f.required && !f.readonly && !placed.has(f.name))
+    // Editable scalar fields the declared view does not place (e.g. a runtime custom field) go to
+    // "Other", so they are never silently hidden from the form.
+    const orphans = contract.fields.filter((f) => f.widget !== 'one2many' && !f.readonly && !placed.has(f.name))
     if (orphans.length) groups.push({ title: 'Other', slots: orphans.map((f) => ({ field: f, full: isWide(f) })) })
     return groups
   }
