@@ -3,7 +3,7 @@
 // Kept presentation-only so both the form and a wizard render fields identically.
 
 import { useEffect, useMemo, useState } from 'react'
-import { Image as ImageIcon, X } from 'lucide-react'
+import { Image as ImageIcon, Lock, LockOpen, X } from 'lucide-react'
 import * as api from '../api'
 import { Combobox, cx, focusRing } from '../ui'
 import { evalDomain } from '../domain'
@@ -108,6 +108,10 @@ export function notebookPages(contract: api.Contract): api.ViewPage[] {
 
 /** A single labelled field: read-only display (resolving Many2one to a name) or an editable input,
  * honoring invisible_when / readonly_when. Returns null when the field is dynamically invisible. */
+/** Customize mode: an admin affordance to override a field's UI at runtime (lock / unlock). Its
+ * presence on FieldCell turns on the per-field control; absent => the field renders unchanged. */
+export type CustomizeApi = { onSetReadonly: (field: string, readonly: boolean) => void }
+
 export function FieldCell({
   field,
   values,
@@ -116,6 +120,7 @@ export function FieldCell({
   onChange,
   full,
   context,
+  customize,
 }: {
   field: api.FieldMeta
   values: Record<string, unknown>
@@ -124,14 +129,28 @@ export function FieldCell({
   onChange: (name: string, value: unknown) => void
   full?: boolean
   context?: FieldContext
+  customize?: CustomizeApi
 }) {
   if (evalDomain(field.invisible_when, values)) return null
   const readonly = field.readonly || evalDomain(field.readonly_when, values)
   return (
     <div className={full ? 'md:col-span-2' : ''}>
-      <div className="t-label text-muted mb-1.5">
-        {field.label}
-        {field.required && <span className="text-danger"> *</span>}
+      <div className="t-label text-muted mb-1.5 flex items-center gap-1.5">
+        <span>
+          {field.label}
+          {field.required && <span className="text-danger"> *</span>}
+        </span>
+        {customize && (
+          <button
+            type="button"
+            onClick={() => customize.onSetReadonly(field.name, !field.readonly)}
+            title={field.readonly ? 'Unlock — make editable' : 'Lock — make read-only'}
+            aria-label={field.readonly ? 'Unlock field' : 'Lock field'}
+            className={cx('rounded p-0.5 text-muted transition-colors hover:text-accent', focusRing)}
+          >
+            {field.readonly ? <Lock size={12} /> : <LockOpen size={12} />}
+          </button>
+        )}
       </div>
       {readonly ? (
         <div className="t-body text-text py-1.5">{displayValue(values[field.name], field.widget, field, resolve)}</div>
@@ -155,12 +174,14 @@ export function ContractFields({
   relOptions,
   onChange,
   context,
+  customize,
 }: {
   contract: api.Contract
   values: Record<string, unknown>
   relOptions: Record<string, RelOption[]>
   onChange: (name: string, value: unknown) => void
   context?: FieldContext
+  customize?: CustomizeApi
 }) {
   const resolve = useResolver(contract, relOptions)
   const groups = useMemo(() => sheetGroups(contract), [contract])
@@ -185,6 +206,7 @@ export function ContractFields({
                 onChange={onChange}
                 full={s.full}
                 context={context}
+                customize={customize}
               />
             ))}
           </div>

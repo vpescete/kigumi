@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus, Printer, Save, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeft, Plus, Printer, Save, SlidersHorizontal, Wand2 } from 'lucide-react'
 import * as api from '../api'
 import { canRun } from '../api'
 import { useAuth } from '../auth'
@@ -66,6 +66,7 @@ export function ModelForm() {
   const [report, setReport] = useState<api.ReportMeta | null>(null)
   const [wizard, setWizard] = useState<WizardSpec | null>(null)
   const [addFieldOpen, setAddFieldOpen] = useState(false)
+  const [customizing, setCustomizing] = useState(false)
   // When true, the next in-app navigation is NOT blocked (used for the post-save redirect).
   const skipGuardRef = useRef(false)
 
@@ -94,6 +95,20 @@ export function ModelForm() {
       setError(err instanceof Error ? err.message : 'Failed to load')
     }
   }, [model, id, isNew])
+
+  // Studio: persist a per-field view override (lock/unlock) and refetch the contract so it shows.
+  // Layout metadata, not record data — it never touches values/dirty/save.
+  const setFieldReadonly = useCallback(
+    async (field: string, readonly: boolean): Promise<void> => {
+      try {
+        await api.setView(model, { field, readonly })
+        await load()
+      } catch (e: unknown) {
+        toast.error(e instanceof api.ApiError ? e.message : 'Customize failed')
+      }
+    },
+    [model, load, toast],
+  )
 
   useEffect(() => {
     skipGuardRef.current = false // re-arm the nav guard for the freshly loaded record
@@ -290,6 +305,17 @@ export function ModelForm() {
                 Add field
               </Button>
             )}
+            {/* Studio: customize the form layout (lock/unlock fields) live. */}
+            {isAdmin && (
+              <Button
+                variant={customizing ? 'primary' : 'outline'}
+                icon={<Wand2 size={16} />}
+                onClick={() => setCustomizing((v) => !v)}
+                disabled={busy}
+              >
+                {customizing ? 'Done' : 'Customize'}
+              </Button>
+            )}
             <Button variant="primary" icon={<Save size={16} />} onClick={save} disabled={busy || !dirty}>
               {busy ? 'Saving…' : 'Save'}
             </Button>
@@ -306,6 +332,7 @@ export function ModelForm() {
           relOptions={relOptions}
           onChange={setField}
           context={{ model, recordId: isNew ? null : Number(id) }}
+          customize={isAdmin && customizing ? { onSetReadonly: setFieldReadonly } : undefined}
         />
       </Card>
 
