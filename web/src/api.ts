@@ -3,6 +3,8 @@
 // CRUD/actions against /api/:name. In dev, Vite proxies /api and /auth to `meshble serve` (:8099),
 // so paths stay same-origin. Tokens live in localStorage; a 401 triggers one transparent refresh.
 
+import type { DomainNode } from './domain'
+
 const TOKENS_KEY = 'meshble.tokens'
 
 type Tokens = { access: string; refresh: string }
@@ -32,6 +34,28 @@ export class ApiError extends Error {
 }
 
 // ---- Contract types (the shape the server emits at /api/:name/view) ----
+
+// The runtime field types the server can actually CREATE via /_fields (server `parse_custom_kind`).
+// Scalar only — relations/selection are rejected; `bool` (not boolean), `decimal` distinct from `float`.
+export type FieldKind = 'text' | 'integer' | 'float' | 'decimal' | 'bool' | 'date' | 'datetime'
+
+// The widgets a view override may re-assign (the renderer's vocabulary). `widget` on FieldMeta stays a
+// bare string — this union only types the optional override input.
+export type FieldWidget =
+  | 'char'
+  | 'text'
+  | 'html'
+  | 'integer'
+  | 'float'
+  | 'monetary'
+  | 'boolean'
+  | 'selection'
+  | 'many2one'
+  | 'many2many'
+  | 'one2many'
+  | 'date'
+  | 'datetime'
+  | 'image'
 
 export type FieldMeta = {
   name: string
@@ -394,4 +418,73 @@ export async function setFollow(model: string, id: number, follow: boolean): Pro
     body: '{}',
   })
   await expectOk(res, 'follow failed')
+}
+
+// ---- Studio: runtime declarative changes (admin only; the server re-checks the admin group) ----
+// Each is a thin POST that echoes a tiny ack; callers refresh by re-running `contract(model)`.
+
+/** Adds a custom field to a model at runtime: a real column + a contract entry, no recompile. */
+export async function addField(
+  model: string,
+  field: { name: string; label: string; kind: FieldKind },
+): Promise<void> {
+  await expectOk(
+    await request(`/api/${model}/_fields`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(field),
+    }),
+    'add field failed',
+  )
+}
+
+/** Overrides a field's UI on a model (relabel / hide / lock / re-widget). Omit a key to leave it. */
+export async function setView(
+  model: string,
+  override: { field: string; label?: string; widget?: FieldWidget; invisible?: boolean; readonly?: boolean },
+): Promise<void> {
+  await expectOk(
+    await request(`/api/${model}/_view`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(override),
+    }),
+    'set view failed',
+  )
+}
+
+/** Grants (or updates) a runtime DB ACL for (model, group). DB ACLs only widen the static baseline. */
+export async function setAcl(acl: {
+  model: string
+  group: string
+  read: boolean
+  write: boolean
+  create: boolean
+  delete: boolean
+}): Promise<void> {
+  await expectOk(
+    await request('/api/_acl', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(acl),
+    }),
+    'set acl failed',
+  )
+}
+
+/** Adds a runtime record rule. `groups`/`ops` are CSV strings (blank groups = global); `domain` is the AST. */
+export async function setRule(rule: {
+  model: string
+  domain: DomainNode
+  groups?: string
+  ops?: string
+}): Promise<void> {
+  await expectOk(
+    await request('/api/_rule', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(rule),
+    }),
+    'set rule failed',
+  )
 }
