@@ -107,6 +107,18 @@ pub struct AccountMove {
     // Entry total = Σ debit (== Σ credit when balanced) — the invoice/document amount. Stored aggregate.
     #[field(label = "Total", compute = "compute_move_total", depends = "line_ids.debit", currency = "currency_id", store)]
     amount_total: Decimal,
+
+    // Settlement (M-pay): the open balance still due and the payment status. `amount_residual` is seeded
+    // = amount_total when an invoice is created, then decremented by each registered payment; it is a
+    // plain stored field (not a compute) because it tracks money received, not the GL line sum.
+    #[field(label = "Payment Status", default = "not_paid", selection = "not_paid:Not Paid,partial:Partially Paid,paid:Paid")]
+    payment_state: Selection,
+
+    #[field(label = "Amount Due", currency = "currency_id", default = "0")]
+    amount_residual: Decimal,
+
+    #[field(label = "Reconciled", default = "false")]
+    reconciled: Bool,
 }
 
 /// A journal item (Odoo's `account.move.line`): one posting to a GL account. A line is a debit XOR a

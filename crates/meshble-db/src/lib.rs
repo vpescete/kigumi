@@ -1892,12 +1892,119 @@ impl Db {
 
         let move_payload = serde_json::json!({
             "move_type": "out_invoice", "journal_id": journal, "partner_id": partner,
-            "currency_id": currency, "company_id": company, "line_ids": lines
+            "currency_id": currency, "company_id": company, "line_ids": lines,
+            // Settlement starts fully open; register_payment draws this down.
+            "amount_residual": total.to_string()
         });
         let move_id =
             self.insert_secured(&move_model, &elevated, &[], &[], move_payload.as_object().unwrap()).await?;
         self.post_move(&elevated, &[], &[], move_id).await?;
         Ok(move_id)
+    }
+
+    /// Registers a (full or partial) payment against a posted customer invoice / vendor bill: atomically
+    /// draws down the invoice's open `amount_residual` (a guarded SQL decrement that both validates — no
+    /// over-payment, no concurrent double-spend — and records `payment_state`/`reconciled`), then books a
+    /// balanced 2-line payment entry through the given bank/cash journal, posted elevated. Gated on the
+    /// caller's WRITE of account.move. Returns the posted payment move id.
+    /// KNOWN LIMITATION (deferred, mirrors create_sale_invoice): the residual draw-down and the payment
+    /// move are not one transaction, so a failure between them can desync (residual drawn, no move).
+    pub async fn register_payment(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        invoice_id: i64,
+        amount: rust_decimal::Decimal,
+        journal_id: i64,
+    ) -> Result<i64, DbError> {
+        use rust_decimal::Decimal;
+        let move_model = resolve_registered("account.move").map_err(DbError::BadInput)?;
+        let journal_model = resolve_registered("account.journal").map_err(DbError::BadInput)?;
+        let account_model = resolve_registered("account.account").map_err(DbError::BadInput)?;
+
+        if !check_access(Operation::Write, move_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: move_model.name.to_string(), operation: "register_payment" });
+        }
+        if amount <= Decimal::ZERO {
+            return Err(DbError::BadInput("payment amount must be positive".to_string()));
+        }
+        let inv = self
+            .find_one_secured(&move_model, ctx, acls, rules, invoice_id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("invoice not found or not permitted".to_string()))?;
+        if inv.get("state").and_then(|v| v.as_str()) != Some("posted") {
+            return Err(DbError::BadInput("only a posted invoice can be paid".to_string()));
+        }
+        let is_customer = match inv.get("move_type").and_then(|v| v.as_str()).unwrap_or("") {
+            "out_invoice" => true,
+            "in_invoice" => false,
+            _ => return Err(DbError::BadInput("payments apply to customer invoices or vendor bills".to_string())),
+        };
+        let partner = inv.get("partner_id").and_then(|v| v.as_i64());
+        let currency = inv.get("currency_id").and_then(|v| v.as_i64());
+        let company = inv.get("company_id").and_then(|v| v.as_i64());
+
+        // Money account = the bank/cash journal's default account; counterpart = the receivable
+        // (customer) / payable (vendor) the invoice settles, resolved company-deterministically.
+        let elevated = ctx.sudo();
+        let journal = self
+            .find_one_secured(&journal_model, &elevated, &[], &[], journal_id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("journal not found".to_string()))?;
+        match journal.get("journal_type").and_then(|v| v.as_str()).unwrap_or("") {
+            "bank" | "cash" => {}
+            _ => return Err(DbError::BadInput("a payment needs a bank or cash journal".to_string())),
+        }
+        let money = journal
+            .get("default_account_id")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| DbError::BadInput("the payment journal has no default account".to_string()))?;
+        let counter_type = if is_customer { "receivable" } else { "payable" };
+        let counterpart = self
+            .first_match(&account_model, &elevated, "account_type", counter_type, company)
+            .await?
+            .ok_or_else(|| DbError::BadInput(format!("no {counter_type} account configured")))?;
+
+        // Atomically draw down the open residual — validates AND records the new settlement state in one
+        // guarded statement (no posted-line write; `amount_residual` is the move's own field). The CASE
+        // reads the OLD residual (Postgres evaluates SET RHS against the pre-update row).
+        let row = sqlx::query(
+            "UPDATE account_move \
+             SET amount_residual = amount_residual - $2, \
+                 payment_state = CASE WHEN amount_residual - $2 <= 0 THEN 'paid' ELSE 'partial' END, \
+                 reconciled = (amount_residual - $2 <= 0) \
+             WHERE id = $1 AND amount_residual >= $2 \
+             RETURNING id",
+        )
+        .bind(invoice_id)
+        .bind(amount)
+        .fetch_optional(&self.pool)
+        .await?;
+        if row.is_none() {
+            return Err(DbError::BadInput("payment exceeds the invoice's open balance".to_string()));
+        }
+
+        // Book the balanced payment entry: customer pays in → debit bank / credit receivable; vendor bill
+        // paid → credit bank / debit payable.
+        let amt = amount.to_string();
+        let (bank_d, bank_c, ctr_d, ctr_c) = if is_customer {
+            (amt.clone(), "0".to_string(), "0".to_string(), amt.clone())
+        } else {
+            ("0".to_string(), amt.clone(), amt.clone(), "0".to_string())
+        };
+        let lines = serde_json::json!([
+            { "account_id": money, "name": "Payment", "debit": bank_d, "credit": bank_c, "partner_id": partner, "company_id": company },
+            { "account_id": counterpart, "name": "Payment", "debit": ctr_d, "credit": ctr_c, "partner_id": partner, "company_id": company }
+        ]);
+        let pay_payload = serde_json::json!({
+            "move_type": "entry", "journal_id": journal_id, "partner_id": partner,
+            "currency_id": currency, "company_id": company, "line_ids": lines
+        });
+        let pay_id =
+            self.insert_secured(&move_model, &elevated, &[], &[], pay_payload.as_object().unwrap()).await?;
+        self.post_move(&elevated, &[], &[], pay_id).await?;
+        Ok(pay_id)
     }
 
     /// Validates a `stock.picking` (draft → done): in ONE transaction, atomically moves each line's

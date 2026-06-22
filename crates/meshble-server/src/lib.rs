@@ -427,6 +427,7 @@ fn build_data_router(
         // Re-price a sale order's lines from its pricelist.
         .route("/api/:name/:id/apply_pricelist", post(apply_pricelist_handler))
         .route("/api/:name/:id/apply_taxes", post(apply_taxes_handler))
+        .route("/api/:name/:id/register_payment", post(register_payment_handler))
         .route("/api/:name/_onchange", post(onchange_handler))
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
@@ -1325,6 +1326,37 @@ async fn apply_taxes_handler(
     match backend.db.apply_taxes(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(n) => json_response(serde_json::json!({ "taxed": n }).to_string()),
         Err(e) => write_error("apply_taxes", e),
+    }
+}
+
+/// Register a (full or partial) payment against a posted invoice. Pinned to account.move. Body:
+/// `{amount, journal_id}` (a bank/cash journal). Returns the posted payment move id.
+async fn register_payment_handler(State(state): State<AppState>, Path((name, id)): Path<(String, i64)>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
+    if name != "account.move" {
+        return (StatusCode::BAD_REQUEST, "register_payment is only valid on account.move").into_response();
+    }
+    if let Err(r) = resolve_model(&state, &name) {
+        return r;
+    }
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let amount_str = match body.get("amount") {
+        Some(Json2::String(s)) => s.clone(),
+        Some(Json2::Number(n)) => n.to_string(),
+        _ => return (StatusCode::BAD_REQUEST, "'amount' is required").into_response(),
+    };
+    let Ok(amount) = amount_str.parse::<rust_decimal::Decimal>() else {
+        return (StatusCode::BAD_REQUEST, "'amount' is not a number").into_response();
+    };
+    let Some(journal_id) = body.get("journal_id").and_then(|v| v.as_i64()) else {
+        return (StatusCode::BAD_REQUEST, "'journal_id' is required").into_response();
+    };
+    match backend.db.register_payment(&ctx, &backend.acls(), &backend.rules(), id, amount, journal_id).await {
+        Ok(pid) => json_response(serde_json::json!({ "payment": pid }).to_string()),
+        Err(e) => write_error("register_payment", e),
     }
 }
 
