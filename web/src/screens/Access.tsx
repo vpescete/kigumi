@@ -3,7 +3,7 @@
 // Create-only: the server exposes no list endpoint for runtime ACLs/rules yet, so this page configures,
 // it does not enumerate. Admin-gated client-side (the endpoints re-check the admin group server-side).
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Info, KeyRound, Shield } from 'lucide-react'
 import * as api from '../api'
 import type { DomainNode } from '../domain'
@@ -38,6 +38,8 @@ export function Access() {
   const [ruleOps, setRuleOps] = useState('r')
   const [ruleDomain, setRuleDomain] = useState('')
   const [ruleBusy, setRuleBusy] = useState(false)
+  const aclSubmitting = useRef(false)
+  const ruleSubmitting = useRef(false)
 
   useEffect(() => {
     void (async () => {
@@ -52,7 +54,8 @@ export function Access() {
   }, [])
 
   async function submitAcl(): Promise<void> {
-    if (!aclModel || !aclGroup) return
+    if (!aclModel || !aclGroup || aclSubmitting.current) return
+    aclSubmitting.current = true
     setAclBusy(true)
     try {
       await api.setAcl({ model: aclModel, group: aclGroup, ...perms })
@@ -60,19 +63,23 @@ export function Access() {
     } catch (e: unknown) {
       toast.error(e instanceof api.ApiError ? e.message : 'Could not grant access')
     } finally {
+      aclSubmitting.current = false
       setAclBusy(false)
     }
   }
 
   async function submitRule(): Promise<void> {
-    if (!ruleModel) return
+    if (!ruleModel || ruleSubmitting.current) return
     let domain: DomainNode
     try {
-      domain = JSON.parse(ruleDomain) as DomainNode
+      const parsed: unknown = JSON.parse(ruleDomain)
+      if (typeof parsed !== 'object' || parsed === null) throw new Error('not an object')
+      domain = parsed as DomainNode
     } catch {
-      toast.error('Domain must be valid JSON')
+      toast.error('Domain must be a valid JSON object, e.g. { "field": "state", "op": "=", "value": "sale" }')
       return
     }
+    ruleSubmitting.current = true
     setRuleBusy(true)
     try {
       await api.setRule({
@@ -86,6 +93,7 @@ export function Access() {
     } catch (e: unknown) {
       toast.error(e instanceof api.ApiError ? e.message : 'Could not add the rule')
     } finally {
+      ruleSubmitting.current = false
       setRuleBusy(false)
     }
   }

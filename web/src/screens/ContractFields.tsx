@@ -106,12 +106,12 @@ export function notebookPages(contract: api.Contract): api.ViewPage[] {
   return o2m.length ? [{ title: 'Details', fields: o2m }] : []
 }
 
-/** A single labelled field: read-only display (resolving Many2one to a name) or an editable input,
- * honoring invisible_when / readonly_when. Returns null when the field is dynamically invisible. */
 /** Customize mode: an admin affordance to override a field's UI at runtime (lock / unlock). Its
  * presence on FieldCell turns on the per-field control; absent => the field renders unchanged. */
 export type CustomizeApi = { onSetReadonly: (field: string, readonly: boolean) => void }
 
+/** A single labelled field: read-only display (resolving Many2one to a name) or an editable input,
+ * honoring invisible_when / readonly_when. Returns null when the field is dynamically invisible. */
 export function FieldCell({
   field,
   values,

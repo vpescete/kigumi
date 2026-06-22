@@ -69,6 +69,9 @@ export function ModelForm() {
   const [customizing, setCustomizing] = useState(false)
   // When true, the next in-app navigation is NOT blocked (used for the post-save redirect).
   const skipGuardRef = useRef(false)
+  // Serializes Customize toggles: a setView + refetch must finish before the next, or two concurrent
+  // load() calls race on setContract.
+  const customizeBusyRef = useRef(false)
 
   const load = useCallback(async (): Promise<void> => {
     setError(null)
@@ -100,11 +103,15 @@ export function ModelForm() {
   // Layout metadata, not record data — it never touches values/dirty/save.
   const setFieldReadonly = useCallback(
     async (field: string, readonly: boolean): Promise<void> => {
+      if (customizeBusyRef.current) return
+      customizeBusyRef.current = true
       try {
         await api.setView(model, { field, readonly })
         await load()
       } catch (e: unknown) {
         toast.error(e instanceof api.ApiError ? e.message : 'Customize failed')
+      } finally {
+        customizeBusyRef.current = false
       }
     },
     [model, load, toast],

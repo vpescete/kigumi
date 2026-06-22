@@ -2,7 +2,7 @@
 // refetches the contract so the new field renders with no recompile. Scalar kinds only — the server
 // rejects relations/selection; the kind list here is exactly the server's create-kind vocabulary.
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import * as api from '../api'
 import { Button, Combobox, Dialog, type ComboOption, useToast } from '../ui'
 
@@ -39,13 +39,15 @@ export function AddFieldDialog({ model, existing, onClose, onAdded }: AddFieldDi
   const [label, setLabel] = useState('')
   const [kind, setKind] = useState<api.FieldKind>('text')
   const [busy, setBusy] = useState(false)
+  const submitting = useRef(false)
 
   const duplicate = existing.includes(name)
   const nameValid = NAME_RE.test(name) && !duplicate
   const canSave = nameValid && !busy
 
   async function submit(): Promise<void> {
-    if (!canSave) return
+    if (!canSave || submitting.current) return // synchronous guard: ignore a double-click within a frame
+    submitting.current = true
     setBusy(true)
     try {
       await api.addField(model, { name, label: label.trim() || name, kind })
@@ -54,6 +56,7 @@ export function AddFieldDialog({ model, existing, onClose, onAdded }: AddFieldDi
     } catch (e: unknown) {
       toast.error(e instanceof api.ApiError ? e.message : 'Could not add the field')
     } finally {
+      submitting.current = false
       setBusy(false)
     }
   }
