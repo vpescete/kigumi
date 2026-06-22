@@ -35,9 +35,9 @@ export class ApiError extends Error {
 
 // ---- Contract types (the shape the server emits at /api/:name/view) ----
 
-// The runtime field types the server can actually CREATE via /_fields (server `parse_custom_kind`).
-// Scalar only — relations/selection are rejected; `bool` (not boolean), `decimal` distinct from `float`.
-export type FieldKind = 'text' | 'integer' | 'float' | 'decimal' | 'bool' | 'date' | 'datetime'
+// The runtime field types the server can CREATE via /_fields. Scalars, plus `many2one` (a link to a
+// record — needs a `relation` target model). `bool` (not boolean), `decimal` distinct from `float`.
+export type FieldKind = 'text' | 'integer' | 'float' | 'decimal' | 'bool' | 'date' | 'datetime' | 'many2one'
 
 // The widgets a view override may re-assign (the renderer's vocabulary). `widget` on FieldMeta stays a
 // bare string — this union only types the optional override input.
@@ -423,10 +423,11 @@ export async function setFollow(model: string, id: number, follow: boolean): Pro
 // ---- Studio: runtime declarative changes (admin only; the server re-checks the admin group) ----
 // Each is a thin POST that echoes a tiny ack; callers refresh by re-running `contract(model)`.
 
-/** Adds a custom field to a model at runtime: a real column + a contract entry, no recompile. */
+/** Adds a custom field to a model at runtime: a real column + a contract entry, no recompile.
+ * `relation` is the target model, required when `kind` is 'many2one'. */
 export async function addField(
   model: string,
-  field: { name: string; label: string; kind: FieldKind },
+  field: { name: string; label: string; kind: FieldKind; relation?: string },
 ): Promise<void> {
   await expectOk(
     await request(`/api/${model}/_fields`, {

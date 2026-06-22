@@ -95,11 +95,15 @@ fn parse_custom_kind(kind: &str) -> Option<FieldKind> {
     }
 }
 
-/// Builds a `'static` `FieldDef` from a runtime custom-field row (scalar kinds only). Strings are
-/// leaked, like the runtime ACL/rule strings — loaded once and held for the process lifetime.
+/// Builds a `'static` `FieldDef` from a runtime custom-field row. Strings are leaked, like the runtime
+/// ACL/rule strings — loaded once and held for the process lifetime. `many2one` carries its target in
+/// `relation`; all other kinds are scalars.
 fn custom_field_def(cf: &CustomField) -> Option<FieldDef> {
-    let kind = parse_custom_kind(&cf.kind)?;
     let leak = |s: &str| -> &'static str { Box::leak(s.to_string().into_boxed_str()) };
+    let kind = match cf.kind.as_str() {
+        "many2one" => FieldKind::Many2one { target: leak(cf.relation.as_deref()?) },
+        other => parse_custom_kind(other)?,
+    };
     Some(FieldDef {
         name: leak(&cf.name),
         label: leak(&cf.label),
@@ -715,8 +719,21 @@ async fn add_field_handler(State(state): State<AppState>, Path(name): Path<Strin
     let label = str_field(&body, "label").unwrap_or(fname);
     let required = obj.get("required").and_then(|v| v.as_bool()).unwrap_or(false);
     let default = str_field(&body, "default");
-    let Some(kind) = parse_custom_kind(kind_str) else {
-        return (StatusCode::BAD_REQUEST, format!("unsupported kind '{kind_str}' (text|integer|float|decimal|bool|date|datetime)")).into_response();
+    // many2one carries a target model in `relation` and gets a bigint FK column; scalars map directly.
+    let relation = str_field(&body, "relation");
+    let col_type = if kind_str == "many2one" {
+        let Some(target) = relation else {
+            return (StatusCode::BAD_REQUEST, "a many2one field needs a 'relation' (the target model)").into_response();
+        };
+        if resolve_model(&state, target).is_err() {
+            return (StatusCode::BAD_REQUEST, format!("unknown target model '{target}'")).into_response();
+        }
+        pg_column_type(&FieldKind::Many2one { target: "" })
+    } else {
+        let Some(kind) = parse_custom_kind(kind_str) else {
+            return (StatusCode::BAD_REQUEST, format!("unsupported kind '{kind_str}' (text|integer|float|decimal|bool|date|datetime|many2one)")).into_response();
+        };
+        pg_column_type(&kind)
     };
     if !is_safe_ident(fname) {
         return (StatusCode::BAD_REQUEST, "field name must be lowercase letters, digits and underscore").into_response();
@@ -724,8 +741,7 @@ async fn add_field_handler(State(state): State<AppState>, Path(name): Path<Strin
     if model.fields.iter().any(|f| f.name == fname) {
         return (StatusCode::BAD_REQUEST, format!("field '{fname}' already exists on {name}")).into_response();
     }
-    let col_type = pg_column_type(&kind);
-    match backend.db.add_custom_field(&name, fname, label, kind_str, required, default, model.table, col_type).await {
+    match backend.db.add_custom_field(&name, fname, label, kind_str, required, default, relation, model.table, col_type).await {
         Ok(_) => {
             refresh_custom_fields(&state.custom_fields, &backend.db).await;
             json_response(serde_json::json!({ "added": fname, "model": name }).to_string())

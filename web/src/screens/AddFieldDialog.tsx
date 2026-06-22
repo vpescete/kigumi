@@ -2,7 +2,7 @@
 // refetches the contract so the new field renders with no recompile. Scalar kinds only — the server
 // rejects relations/selection; the kind list here is exactly the server's create-kind vocabulary.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as api from '../api'
 import { Button, Combobox, Dialog, type ComboOption, useToast } from '../ui'
 
@@ -14,6 +14,7 @@ const KINDS: ComboOption[] = [
   { value: 'bool', label: 'Checkbox' },
   { value: 'date', label: 'Date' },
   { value: 'datetime', label: 'Date & time' },
+  { value: 'many2one', label: 'Link to a record (many2one)' },
 ]
 
 // Mirrors the server's is_safe_ident: lowercase start, then letters/digits/underscore. Validated here
@@ -38,19 +39,34 @@ export function AddFieldDialog({ model, existing, onClose, onAdded }: AddFieldDi
   const [name, setName] = useState('')
   const [label, setLabel] = useState('')
   const [kind, setKind] = useState<api.FieldKind>('text')
+  const [relation, setRelation] = useState<string | null>(null)
+  const [models, setModels] = useState<ComboOption[]>([])
   const [busy, setBusy] = useState(false)
   const submitting = useRef(false)
 
+  useEffect(() => {
+    void api
+      .modelNames()
+      .then((names) => setModels([...names].sort().map((n) => ({ value: n, label: n }))))
+      .catch(() => setModels([]))
+  }, [])
+
   const duplicate = existing.includes(name)
   const nameValid = NAME_RE.test(name) && !duplicate
-  const canSave = nameValid && !busy
+  const relationOk = kind !== 'many2one' || !!relation
+  const canSave = nameValid && relationOk && !busy
 
   async function submit(): Promise<void> {
     if (!canSave || submitting.current) return // synchronous guard: ignore a double-click within a frame
     submitting.current = true
     setBusy(true)
     try {
-      await api.addField(model, { name, label: label.trim() || name, kind })
+      await api.addField(model, {
+        name,
+        label: label.trim() || name,
+        kind,
+        relation: kind === 'many2one' ? (relation ?? undefined) : undefined,
+      })
       toast.success(`Field "${name}" added`)
       await onAdded()
     } catch (e: unknown) {
@@ -114,6 +130,18 @@ export function AddFieldDialog({ model, existing, onClose, onAdded }: AddFieldDi
             allowClear={false}
           />
         </label>
+        {kind === 'many2one' && (
+          <label className="block">
+            <span className="t-caption mb-1.5 block text-muted">Links to</span>
+            <Combobox
+              value={relation}
+              onChange={(v) => setRelation(v as string | null)}
+              options={models}
+              placeholder="Select the target model…"
+            />
+            <span className="t-caption mt-1 block text-muted">A bigint foreign-key column to the chosen model.</span>
+          </label>
+        )}
       </div>
     </Dialog>
   )
