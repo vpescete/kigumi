@@ -342,6 +342,17 @@ export async function callEndpoint<T = Record<string, unknown>>(
   return asJson<T>(await request(`/api/${model}/${id}/${path}`, { method: 'POST' }))
 }
 
+/** Registers a (full or partial) payment against a posted invoice; returns the payment move id. */
+export async function registerPayment(moveId: number, amount: string, journalId: number): Promise<number> {
+  const res = await request(`/api/account.move/${moveId}/register_payment`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ amount, journal_id: journalId }),
+  })
+  const { payment } = await asJson<{ payment: number }>(res)
+  return payment
+}
+
 /** Product onchange for an order/invoice line: returns the values to default (name, price_unit,
  * product_uom_qty, uom_id) when a product is picked, so the client fills the line without typing. */
 export async function onchangeProduct(lineModel: string, productId: number): Promise<Record<string, unknown>> {

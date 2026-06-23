@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Eye, EyeOff, Plus, Printer, Save, SlidersHorizontal, Wand2 } from 'lucide-react'
+import { ArrowLeft, CreditCard, Eye, EyeOff, Plus, Printer, Save, SlidersHorizontal, Wand2 } from 'lucide-react'
 import * as api from '../api'
 import { canRun } from '../api'
 import { useAuth } from '../auth'
 import type { Column } from '../ui'
-import { Button, Card, confirm, DataTable, Dialog, ErrorState, Menu, type MenuGroup, PageHeader, Skeleton, Tabs, useToast } from '../ui'
+import { Button, Card, Combobox, type ComboOption, confirm, DataTable, Dialog, ErrorState, Menu, type MenuGroup, PageHeader, Skeleton, Tabs, useToast } from '../ui'
 import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
 import { SERVICE_ACTIONS, type ServiceAction } from '../registries/serviceActions'
 import { EditableRelation, editableChildFields, toCommands, toLines, type Line } from './EditableRelation'
@@ -73,7 +73,17 @@ export function ModelForm() {
   const [overrides, setOverrides] = useState<api.ViewOverrideRow[]>([])
   const [relabelTarget, setRelabelTarget] = useState<{ field: string; label: string } | null>(null)
   const [conditionsTarget, setConditionsTarget] = useState<string | null>(null)
+  const [paymentOpen, setPaymentOpen] = useState(false)
   const hidden = overrides.filter((o) => o.invisible)
+
+  // A posted invoice/bill with an open balance can take a payment.
+  const payableInvoice =
+    model === 'account.move' &&
+    !isNew &&
+    !!record &&
+    ['out_invoice', 'in_invoice'].includes(String(record.move_type)) &&
+    record.state === 'posted' &&
+    Number(record.amount_residual ?? 0) > 0
   // When true, the next in-app navigation is NOT blocked (used for the post-save redirect).
   const skipGuardRef = useRef(false)
   // Serializes Customize toggles: a setView + refetch must finish before the next, or two concurrent
@@ -345,6 +355,11 @@ export function ModelForm() {
             ) : ops.length > 1 ? (
               <Menu label="Actions" icon={<SlidersHorizontal size={15} />} groups={opGroups} disabled={busy} />
             ) : null}
+            {payableInvoice && (
+              <Button variant="outline" icon={<CreditCard size={16} />} onClick={() => setPaymentOpen(true)} disabled={busy}>
+                Register payment
+              </Button>
+            )}
             {/* Studio: extend the model itself (admin only) — adds a real column at runtime, no recompile. */}
             {isAdmin && (
               <Button variant="outline" icon={<Plus size={16} />} onClick={() => setAddFieldOpen(true)} disabled={busy}>
@@ -473,7 +488,105 @@ export function ModelForm() {
           }}
         />
       )}
+      {paymentOpen && record && (
+        <PaymentDialog
+          moveId={Number(id)}
+          residual={String(record.amount_residual ?? '0')}
+          onClose={() => setPaymentOpen(false)}
+          onPaid={async () => {
+            setPaymentOpen(false)
+            await load()
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/** Registers a full or partial payment against a posted invoice (Studio Customize's sibling on the
+ * accounting side). Defaults to the open balance; the journal is a bank/cash journal. */
+function PaymentDialog({
+  moveId,
+  residual,
+  onClose,
+  onPaid,
+}: {
+  moveId: number
+  residual: string
+  onClose: () => void
+  onPaid: () => void | Promise<void>
+}) {
+  const toast = useToast()
+  const [amount, setAmount] = useState(residual)
+  const [journal, setJournal] = useState<number | null>(null)
+  const [journals, setJournals] = useState<ComboOption[]>([])
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    void api
+      .list('account.journal', { limit: 100 })
+      .then((p) =>
+        setJournals(
+          p.data
+            .filter((j) => ['bank', 'cash'].includes(String(j.journal_type)))
+            .map((j) => ({ value: j.id, label: String(j.name ?? j.code ?? j.id) })),
+        ),
+      )
+      .catch(() => setJournals([]))
+  }, [])
+
+  const amt = Number(amount)
+  const canPay = amt > 0 && amt <= Number(residual) && journal != null && !busy
+
+  async function submit(): Promise<void> {
+    if (!canPay || journal == null) return
+    setBusy(true)
+    try {
+      await api.registerPayment(moveId, amount, journal)
+      toast.success(`Payment of ${amount} registered`)
+      await onPaid()
+    } catch (e: unknown) {
+      toast.error(e instanceof api.ApiError ? e.message : 'Could not register the payment')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Register payment"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={submit} disabled={!canPay}>
+            {busy ? 'Registering…' : 'Register'}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <label className="block">
+          <span className="t-caption mb-1.5 block text-muted">Amount</span>
+          <input
+            className="w-full rounded-md border border-input-border bg-input px-3 text-text shadow-xs focus:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:shadow-focus"
+            style={{ height: 'var(--control-h)' }}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            inputMode="decimal"
+            autoFocus
+          />
+          <span className="t-caption mt-1 block text-muted">Open balance: {residual}</span>
+        </label>
+        <label className="block">
+          <span className="t-caption mb-1.5 block text-muted">Journal</span>
+          <Combobox value={journal} onChange={(v) => setJournal(typeof v === 'number' ? v : null)} options={journals} placeholder="Bank or cash journal…" />
+        </label>
+      </div>
+    </Dialog>
   )
 }
 
