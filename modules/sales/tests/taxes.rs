@@ -76,14 +76,16 @@ async fn apply_taxes_derives_the_rate_from_account_tax() {
     assert_eq!(money(&after, "amount_tax"), 22.0, "tax now rolled into the order");
     assert_eq!(money(&after, "amount_total"), 122.0);
 
-    // A fixed-amount tax does NOT map onto the percentage compute in v1 → rate 0.
+    // A fixed-per-unit tax now computes a REAL amount through the engine (it no longer collapses to 0):
+    // 5 per unit x qty 1 = 5. This supersedes the old "fixed => rate 0" behavior.
     let fixed = db.insert_secured(&tax, &su, &[], &[], json!({
         "name": "Eco fee", "type_tax_use": "sale", "amount_type": "fixed", "amount": "5", "active": true
     }).as_object().unwrap()).await.unwrap();
     db.update_secured(&line, &su, &[], &[], l["id"].as_i64().unwrap(), json!({ "tax_id": fixed }).as_object().unwrap()).await.unwrap();
     db.apply_taxes(&seller, acls, rules, oid).await.unwrap();
     let after2 = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
-    assert_eq!(money(&after2, "amount_tax"), 0.0, "fixed tax yields rate 0 in v1");
+    assert_eq!(money(&after2, "amount_tax"), 5.0, "a fixed tax now yields a real per-unit amount");
+    assert_eq!(money(&after2, "amount_total"), 105.0);
 
     for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

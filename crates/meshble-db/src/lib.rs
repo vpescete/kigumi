@@ -1565,15 +1565,34 @@ impl Db {
         rules: &[RecordRule],
         order_id: i64,
     ) -> Result<u64, DbError> {
+        use rust_decimal::Decimal;
         let order_model = resolve_registered("sale.order").map_err(DbError::BadInput)?;
         let line_model = resolve_registered("sale.order.line").map_err(DbError::BadInput)?;
+        let breakdown_model = resolve_registered("sale.order.line.tax").map_err(DbError::BadInput)?;
 
         if !check_access(Operation::Write, order_model.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "apply_taxes" });
         }
-        self.find_one_secured(&order_model, ctx, acls, rules, order_id)
+        let order = self
+            .find_one_secured(&order_model, ctx, acls, rules, order_id)
             .await?
             .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
+
+        // Round per-tax amounts to the order currency's decimal places (default 2).
+        let dp: u32 = match order.get("currency_id").and_then(|v| v.as_i64()) {
+            Some(cur) => sqlx::query_scalar::<_, Option<i64>>("SELECT decimal_places FROM res_currency WHERE id = $1")
+                .bind(cur)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten()
+                .unwrap_or(2) as u32,
+            None => 2,
+        };
+        // Fiscal-position rewrite map (src tax -> Some(dest) / None = drop), if the order has one.
+        let fmap = match order.get("fiscal_position_id").and_then(|v| v.as_i64()) {
+            Some(pid) => self.fiscal_map_for(pid).await?,
+            None => BTreeMap::new(),
+        };
 
         let lines = self
             .find_secured(&line_model, ctx, acls, rules, Some(&Domain::field("order_id").eq(order_id)))
@@ -1581,33 +1600,110 @@ impl Db {
         let mut applied = 0u64;
         for line in &lines {
             let Some(lid) = line.get("id").and_then(|v| v.as_i64()) else { continue };
-            let rate = match line.get("tax_id").and_then(|v| v.as_i64()) {
-                Some(tid) => self.tax_rate_of(tid).await?,
-                None => rust_decimal::Decimal::ZERO,
+            let dec = |k: &str| -> Decimal {
+                line.get(k).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or_default()
             };
-            let payload = serde_json::json!({ "tax_rate": rate.to_string() });
+            let qty = dec("product_uom_qty");
+            let line_net = qty * dec("price_unit") * (Decimal::ONE - dec("discount") / Decimal::from(100));
+
+            // The tax set is the Many2many membership; an empty set falls back to the legacy single tax_id.
+            let mut tax_ids: Vec<i64> = sqlx::query_scalar("SELECT tax_id FROM sale_order_line_tax_rel WHERE line_id = $1")
+                .bind(lid)
+                .fetch_all(&self.pool)
+                .await?;
+            if tax_ids.is_empty() {
+                if let Some(t) = line.get("tax_id").and_then(|v| v.as_i64()) {
+                    tax_ids.push(t);
+                }
+            }
+            // Remap through the fiscal position (NULL dest drops the tax); dedup, preserving order, so a
+            // tax never applies twice. tax_ids (the user's original selection) is left untouched.
+            let mut mapped: Vec<i64> = Vec::new();
+            for t in &tax_ids {
+                let dest = match fmap.get(t) {
+                    Some(Some(d)) => Some(*d),
+                    Some(None) => None,
+                    None => Some(*t),
+                };
+                if let Some(d) = dest {
+                    if !mapped.contains(&d) {
+                        mapped.push(d);
+                    }
+                }
+            }
+            let specs = self.resolve_tax_specs(&mapped).await?;
+            let (subtotal, results) = tax::compute_tax_lines(line_net, qty, &specs, dp);
+
+            // Replace the line's breakdown rows (idempotent: a re-run re-derives from tax_ids).
+            sqlx::query("DELETE FROM sale_order_line_tax WHERE line_id = $1")
+                .bind(lid)
+                .execute(&self.pool)
+                .await?;
+            for r in &results {
+                let payload = serde_json::json!({
+                    "line_id": lid, "sequence": r.sequence, "tax_id": r.tax_id, "tax_group_id": r.group_id,
+                    "base_amount": r.base.to_string(), "tax_amount": r.tax_amount.to_string(),
+                    "is_price_include": r.is_price_include
+                });
+                self.insert_secured(&breakdown_model, ctx, acls, rules, payload.as_object().unwrap()).await?;
+            }
+            // Back-compat blended rate (only consulted by the line's fallback compute when the breakdown is
+            // empty, which it now is not). Updating the line also rolls the new tax up into the order totals.
+            let total_tax: Decimal = results.iter().map(|r| r.tax_amount).sum();
+            let blended = if subtotal != Decimal::ZERO {
+                (total_tax / subtotal * Decimal::from(100)).round_dp(4)
+            } else {
+                Decimal::ZERO
+            };
+            let payload = serde_json::json!({ "tax_rate": blended.to_string() });
             self.update_secured(&line_model, ctx, acls, rules, lid, payload.as_object().unwrap()).await?;
             applied += 1;
         }
         Ok(applied)
     }
 
-    /// The effective percentage rate for an `account.tax` id: its `amount` when it is an active percentage
-    /// tax, else 0 (a fixed or inactive tax does not map onto the per-line percentage compute in v1).
-    async fn tax_rate_of(&self, tax_id: i64) -> Result<rust_decimal::Decimal, DbError> {
+    /// Resolves account.tax ids into engine specs, preserving the given order and dropping inactive taxes.
+    async fn resolve_tax_specs(&self, tax_ids: &[i64]) -> Result<Vec<tax::TaxSpec>, DbError> {
         use rust_decimal::Decimal;
-        let row = sqlx::query("SELECT amount_type, amount, active FROM account_tax WHERE id = $1")
-            .bind(tax_id)
+        let mut specs = Vec::new();
+        for &tid in tax_ids {
+            let row = sqlx::query(
+                "SELECT amount_type, amount, price_include, include_base_amount, sequence, tax_group_id, active \
+                 FROM account_tax WHERE id = $1",
+            )
+            .bind(tid)
             .fetch_optional(&self.pool)
             .await?;
-        let Some(row) = row else { return Ok(Decimal::ZERO) };
-        let active: bool = row.try_get("active").unwrap_or(true);
-        let amount_type: String = row.try_get("amount_type").unwrap_or_default();
-        if active && amount_type == "percent" {
-            Ok(row.try_get::<Option<Decimal>, _>("amount")?.unwrap_or_default())
-        } else {
-            Ok(Decimal::ZERO)
+            let Some(row) = row else { continue };
+            if !row.try_get::<Option<bool>, _>("active").ok().flatten().unwrap_or(true) {
+                continue;
+            }
+            specs.push(tax::TaxSpec {
+                tax_id: tid,
+                group_id: row.try_get::<Option<i64>, _>("tax_group_id").ok().flatten(),
+                amount_type: row.try_get::<Option<String>, _>("amount_type").ok().flatten().unwrap_or_else(|| "percent".to_string()),
+                amount: row.try_get::<Option<Decimal>, _>("amount").ok().flatten().unwrap_or_default(),
+                price_include: row.try_get::<Option<bool>, _>("price_include").ok().flatten().unwrap_or(false),
+                include_base_amount: row.try_get::<Option<bool>, _>("include_base_amount").ok().flatten().unwrap_or(false),
+                sequence: row.try_get::<Option<i64>, _>("sequence").ok().flatten().unwrap_or(10),
+            });
         }
+        Ok(specs)
+    }
+
+    /// The fiscal position's source-to-destination tax rewrite map (NULL dest = drop the source tax).
+    async fn fiscal_map_for(&self, position_id: i64) -> Result<BTreeMap<i64, Option<i64>>, DbError> {
+        let rows = sqlx::query("SELECT tax_src_id, tax_dest_id FROM account_fiscal_position_tax WHERE position_id = $1")
+            .bind(position_id)
+            .fetch_all(&self.pool)
+            .await?;
+        let mut map = BTreeMap::new();
+        for r in &rows {
+            let src: i64 = r.try_get("tax_src_id")?;
+            let dest: Option<i64> = r.try_get("tax_dest_id")?;
+            map.insert(src, dest);
+        }
+        Ok(map)
     }
 
     /// The values an order/invoice line should default when its product is set: the product's name, its
