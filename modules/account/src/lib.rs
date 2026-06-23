@@ -82,6 +82,11 @@ pub struct AccountMove {
     #[field(label = "Date")]
     date: Date,
 
+    // Due date for aging (M-aged): when the open balance is expected. Seeded = invoice date at creation
+    // (no payment-terms engine yet); null rows age as "current".
+    #[field(label = "Due Date")]
+    invoice_date_due: Date,
+
     // Odoo's field is `ref`, a Rust keyword; the internal name is `reference`.
     #[field(label = "Reference")]
     reference: Text,

@@ -54,6 +54,7 @@ function Section({ title, rows, amount }: { title: string; rows: Row[]; amount: 
 
 export function Reports() {
   const [rows, setRows] = useState<Row[] | null>(null)
+  const [aged, setAged] = useState<api.AgedRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -61,6 +62,7 @@ export function Reports() {
       .reportTrialBalance()
       .then(setRows)
       .catch((e: unknown) => setError(e instanceof api.ApiError && e.status === 403 ? 'forbidden' : e instanceof Error ? e.message : 'Failed to load'))
+    void api.reportAged('receivable').then(setAged).catch(() => setAged([]))
   }, [])
 
   if (error === 'forbidden') {
@@ -162,6 +164,54 @@ export function Reports() {
     </div>
   )
 
+  const agedCols: { key: keyof api.AgedRow; label: string }[] = [
+    { key: 'current', label: 'Current' },
+    { key: 'b1_30', label: '1-30' },
+    { key: 'b31_60', label: '31-60' },
+    { key: 'b61_90', label: '61-90' },
+    { key: 'b90_plus', label: '90+' },
+    { key: 'total', label: 'Total' },
+  ]
+  const agedTotal = (key: keyof api.AgedRow): number => (aged ?? []).reduce((t, r) => t + (Number(r[key]) || 0), 0)
+  const agedTable = (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[13px]">
+        <thead>
+          <tr className="border-b border-border t-label text-muted">
+            <th className="px-3 py-2 text-left font-medium">Partner</th>
+            {agedCols.map((c) => (
+              <th key={c.key} className="px-3 py-2 text-right font-medium">{c.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/60">
+          {(aged ?? []).length === 0 ? (
+            <tr><td colSpan={7} className="px-3 py-6 text-center text-muted">No open receivables.</td></tr>
+          ) : (
+            (aged ?? []).map((r) => (
+              <tr key={r.partner_id ?? r.partner_name}>
+                <td className="px-3 py-1.5 text-text">{r.partner_name ?? `#${r.partner_id}`}</td>
+                {agedCols.map((c) => (
+                  <td key={c.key} className="px-3 py-1.5 text-right"><Num value={Number(r[c.key]) || 0} bold={c.key === 'total'} /></td>
+                ))}
+              </tr>
+            ))
+          )}
+        </tbody>
+        {(aged ?? []).length > 0 && (
+          <tfoot>
+            <tr className="border-t border-border bg-surface2">
+              <td className="px-3 py-2 t-label text-text">Totals</td>
+              {agedCols.map((c) => (
+                <td key={c.key} className="px-3 py-2 text-right"><Num value={agedTotal(c.key)} bold /></td>
+              ))}
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  )
+
   return (
     <div>
       <PageHeader title="Reports" subtitle="Posted journal entries, as financial statements" />
@@ -176,6 +226,7 @@ export function Reports() {
               { id: 'tb', label: 'Trial balance', content: trialBalance },
               { id: 'pnl', label: 'Profit & loss', content: pnl },
               { id: 'bs', label: 'Balance sheet', content: balanceSheet },
+              { id: 'aged', label: 'Aged receivable', content: agedTable },
             ]}
           />
         </Card>

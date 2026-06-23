@@ -1914,9 +1914,12 @@ impl Db {
             "partner_id": partner, "company_id": company
         }));
 
+        // Accounting date + due date both default to today (no payment-terms engine in v1).
+        let today = self.today().await?;
         let move_payload = serde_json::json!({
             "move_type": "out_invoice", "journal_id": journal, "partner_id": partner,
             "currency_id": currency, "company_id": company, "line_ids": lines,
+            "date": today, "invoice_date_due": today,
             // Settlement starts fully open; register_payment draws this down.
             "amount_residual": total.to_string()
         });
@@ -2070,6 +2073,59 @@ impl Db {
                     "debit": debit.to_string(),
                     "credit": credit.to_string(),
                     "balance": (debit - credit).to_string(),
+                })
+            })
+            .collect())
+    }
+
+    /// Aged receivable / payable: open posted invoices (`amount_residual > 0`) of `move_type`
+    /// ("out_invoice" = receivable, "in_invoice" = payable), grouped by partner and bucketed by days
+    /// past their due date (current / 1-30 / 31-60 / 61-90 / 90+). A null due date ages as current.
+    /// Read-gated on account.move. v1: ages against today, single currency.
+    pub async fn aged_balance(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        _rules: &[RecordRule],
+        move_type: &str,
+    ) -> Result<Vec<serde_json::Value>, DbError> {
+        let move_model = resolve_registered("account.move").map_err(DbError::BadInput)?;
+        if !check_access(Operation::Read, move_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: move_model.name.to_string(), operation: "aged_balance" });
+        }
+        let rows = sqlx::query(
+            "SELECT m.partner_id, p.name AS partner_name, \
+                    COALESCE(SUM(m.amount_residual) FILTER (WHERE m.invoice_date_due IS NULL OR m.invoice_date_due >= current_date), 0) AS bucket_current, \
+                    COALESCE(SUM(m.amount_residual) FILTER (WHERE current_date - m.invoice_date_due BETWEEN 1 AND 30), 0) AS b1_30, \
+                    COALESCE(SUM(m.amount_residual) FILTER (WHERE current_date - m.invoice_date_due BETWEEN 31 AND 60), 0) AS b31_60, \
+                    COALESCE(SUM(m.amount_residual) FILTER (WHERE current_date - m.invoice_date_due BETWEEN 61 AND 90), 0) AS b61_90, \
+                    COALESCE(SUM(m.amount_residual) FILTER (WHERE current_date - m.invoice_date_due > 90), 0) AS b90_plus, \
+                    COALESCE(SUM(m.amount_residual), 0) AS total \
+             FROM account_move m \
+             LEFT JOIN res_partner p ON p.id = m.partner_id \
+             WHERE m.state = 'posted' AND m.move_type = $1 AND m.amount_residual > 0 \
+             GROUP BY m.partner_id, p.name \
+             ORDER BY p.name",
+        )
+        .bind(move_type)
+        .fetch_all(&self.pool)
+        .await?;
+        use rust_decimal::Decimal;
+        let d = |r: &sqlx::postgres::PgRow, c: &str| -> String {
+            r.try_get::<Decimal, _>(c).unwrap_or_default().to_string()
+        };
+        Ok(rows
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "partner_id": r.try_get::<Option<i64>, _>("partner_id").ok().flatten(),
+                    "partner_name": r.try_get::<Option<String>, _>("partner_name").ok().flatten(),
+                    "current": d(r, "bucket_current"),
+                    "b1_30": d(r, "b1_30"),
+                    "b31_60": d(r, "b31_60"),
+                    "b61_90": d(r, "b61_90"),
+                    "b90_plus": d(r, "b90_plus"),
+                    "total": d(r, "total"),
                 })
             })
             .collect())

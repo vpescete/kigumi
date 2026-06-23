@@ -429,6 +429,7 @@ fn build_data_router(
         .route("/api/:name/:id/apply_taxes", post(apply_taxes_handler))
         .route("/api/:name/:id/register_payment", post(register_payment_handler))
         .route("/api/reports/trial_balance", get(trial_balance_handler))
+        .route("/api/reports/aged/:kind", get(aged_handler))
         .route("/api/:name/_onchange", post(onchange_handler))
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
@@ -1372,6 +1373,25 @@ async fn trial_balance_handler(State(state): State<AppState>, headers: HeaderMap
     match backend.db.trial_balance(&ctx, &backend.acls(), &backend.rules()).await {
         Ok(rows) => json_response(serde_json::json!({ "rows": rows }).to_string()),
         Err(e) => write_error("trial_balance", e),
+    }
+}
+
+/// Aged balance report: open invoices bucketed by age past due, grouped by partner. `kind` =
+/// receivable (customer) or payable (vendor).
+async fn aged_handler(State(state): State<AppState>, Path(kind): Path<String>, headers: HeaderMap) -> Response {
+    let move_type = match kind.as_str() {
+        "receivable" => "out_invoice",
+        "payable" => "in_invoice",
+        _ => return (StatusCode::BAD_REQUEST, "kind must be 'receivable' or 'payable'").into_response(),
+    };
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.aged_balance(&ctx, &backend.acls(), &backend.rules(), move_type).await {
+        Ok(rows) => json_response(serde_json::json!({ "rows": rows }).to_string()),
+        Err(e) => write_error("aged_balance", e),
     }
 }
 

@@ -359,6 +359,23 @@ export async function reportTrialBalance(): Promise<TrialBalanceRow[]> {
   return rows
 }
 
+export type AgedRow = {
+  partner_id: number | null
+  partner_name: string | null
+  current: string
+  b1_30: string
+  b31_60: string
+  b61_90: string
+  b90_plus: string
+  total: string
+}
+
+/** Aged open balances by partner, bucketed by days past due. `kind` = 'receivable' or 'payable'. */
+export async function reportAged(kind: 'receivable' | 'payable'): Promise<AgedRow[]> {
+  const { rows } = await asJson<{ rows: AgedRow[] }>(await request(`/api/reports/aged/${kind}`))
+  return rows
+}
+
 /** Registers a (full or partial) payment against a posted invoice; returns the payment move id. */
 export async function registerPayment(moveId: number, amount: string, journalId: number): Promise<number> {
   const res = await request(`/api/account.move/${moveId}/register_payment`, {
