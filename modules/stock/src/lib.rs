@@ -278,7 +278,7 @@ mod tests {
         assert_eq!(StockLocation::descriptor().name, "stock.location");
         assert_eq!(StockLocation::descriptor().fields.len(), 5);
         assert_eq!(StockWarehouse::descriptor().name, "stock.warehouse");
-        assert_eq!(StockQuant::descriptor().fields.len(), 3);
+        assert_eq!(StockQuant::descriptor().fields.len(), 4);
     }
 
     #[test]

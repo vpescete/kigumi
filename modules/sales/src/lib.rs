@@ -1153,8 +1153,8 @@ mod tests {
         // The macro must produce the SAME descriptor as the hand-written version.
         let d = SaleOrder::descriptor();
         assert_eq!(d.name, "sale.order");
-        // name, partner_id, company_id, line_ids, state, invoice_status, currency_id, pricelist_id, amount_untaxed, amount_tax, amount_total
-        assert_eq!(d.fields.len(), 11);
+        // name, partner_id, company_id, line_ids, state, invoice_status, currency_id, pricelist_id, payment_term_id, amount_untaxed, amount_tax, amount_total
+        assert_eq!(d.fields.len(), 12);
         let total = d.fields.iter().find(|f| f.name == "amount_total").unwrap();
         assert!(total.stored, "computed with `store` must be stored");
         assert_eq!(total.compute, Some("compute_amount"));
