@@ -54,6 +54,10 @@ pub struct SaleOrder {
     #[field(label = "Payment Terms", target = "account.payment.term")]
     payment_term_id: Many2one,
 
+    // Optional fiscal position; `apply_taxes` remaps each line's taxes through it before computing.
+    #[field(label = "Fiscal Position", target = "account.fiscal.position")]
+    fiscal_position_id: Many2one,
+
     // The amount split, each an exact aggregate over the lines (One2many cascade).
     #[field(label = "Untaxed Amount", compute = "compute_amount_untaxed", depends = "line_ids.price_subtotal", currency = "currency_id", store)]
     amount_untaxed: Decimal,
@@ -127,6 +131,10 @@ pub struct ProductTemplate {
 
     #[field(label = "Cost", default = "0", tracked)]
     standard_price: Decimal,
+
+    // Default customer taxes; an order line seeds its `tax_ids` from these when the product is picked.
+    #[field(label = "Customer Taxes", target = "account.tax", relation = "product_template_tax_rel", column = "product_id", target_column = "tax_id")]
+    taxes_id: Many2many,
 
     // Rich text (Odoo's product description is HTML): sanitized on write, rendered as an html widget.
     #[field(label = "Description")]
@@ -355,17 +363,85 @@ pub struct AccountTax {
     #[field(label = "Tax Scope", default = "sale", selection = "sale:Sales,purchase:Purchases,none:None")]
     type_tax_use: Selection,
 
-    #[field(label = "Tax Computation", default = "percent", selection = "percent:Percentage of Price,fixed:Fixed")]
+    // `division` = price-included percentage (the price already contains the tax). The engine in
+    // `apply_taxes` back-computes the net so subtotal + tax == the gross price exactly.
+    #[field(label = "Tax Computation", default = "percent", selection = "percent:Percentage of Price,fixed:Fixed,division:Percentage of Price Tax Included")]
     amount_type: Selection,
 
     #[field(label = "Amount", default = "0")]
     amount: Decimal,
+
+    // Apply order within a line's tax set; lower runs first (matters for compounding).
+    #[field(label = "Sequence", default = "10")]
+    sequence: Integer,
+
+    // The tax is included in the unit price (the engine extracts it) rather than added on top.
+    #[field(label = "Included in Price", default = "false")]
+    price_include: Bool,
+
+    // After this tax computes, fold its amount into the base of the taxes that follow (compound taxes).
+    #[field(label = "Affect Base of Subsequent", default = "false")]
+    include_base_amount: Bool,
+
+    // Reporting/rollup bucket. The invoice emits one GL tax line per group.
+    #[field(label = "Tax Group", target = "account.tax.group")]
+    tax_group_id: Many2one,
 
     #[field(label = "Company", target = "res.company")]
     company_id: Many2one,
 
     #[field(label = "Active", default = "true")]
     active: Bool,
+}
+
+/// A tax group (Odoo's `account.tax.group`): the rollup bucket for taxes on an invoice — the GL emits one
+/// tax line per group, and reports total tax per group. Kept in the sales module alongside `account.tax`.
+#[model(name = "account.tax.group", table = "account_tax_group")]
+pub struct AccountTaxGroup {
+    #[field(label = "Name", required)]
+    name: Text,
+
+    #[field(label = "Sequence", default = "10")]
+    sequence: Integer,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+}
+
+/// A fiscal position (Odoo's `account.fiscal.position`): a set of tax-rewrite rules applied per order
+/// (e.g. domestic VAT to export 0%). `apply_taxes` remaps each line's source taxes to their destination
+/// before computing. v1: order-level only (a partner default and country auto-apply need a partner FK +
+/// res.country, both deferred). Kept in sales so the order FK stays inside the sales dependency set.
+#[model(name = "account.fiscal.position", table = "account_fiscal_position")]
+pub struct AccountFiscalPosition {
+    #[field(label = "Name", required)]
+    name: Text,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+
+    #[field(label = "Mappings", target = "account.fiscal.position.tax", inverse = "position_id")]
+    tax_ids: One2many,
+
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+}
+
+/// One source-to-destination tax rewrite within a fiscal position. A NULL destination drops the source
+/// tax entirely (e.g. an export position removing domestic VAT).
+#[model(name = "account.fiscal.position.tax", table = "account_fiscal_position_tax")]
+pub struct AccountFiscalPositionTax {
+    #[field(label = "Fiscal Position", required, target = "account.fiscal.position")]
+    position_id: Many2one,
+
+    #[field(label = "Tax on Product", required, target = "account.tax")]
+    tax_src_id: Many2one,
+
+    #[field(label = "Tax to Apply", target = "account.tax")]
+    tax_dest_id: Many2one,
 }
 
 /// A payment term (Odoo's `account.payment.term`, single-line subset): the invoice due date is the
@@ -423,26 +499,61 @@ pub struct SaleOrderLine {
     #[field(label = "Disc.%", default = "0")]
     discount: Decimal,
 
-    // The named tax that applies (reference), plus the effective rate the computes use. The rate is a
-    // plain stored field (the tax_id -> tax_rate sync is onchange territory, deferred); a stored compute
-    // cannot read a related row at write time, so the rate lives on the line.
+    // Taxes are a Many2many (the user's selection, the audit + re-derivation source). `apply_taxes` reads
+    // it (a stored compute cannot), runs the engine, and materializes the per-tax breakdown into
+    // `tax_line_ids` + a back-compat blended `tax_rate`. The line computes read the breakdown One2many
+    // (which IS loadable in a stored compute), falling back to `tax_rate` for un-applied legacy rows.
+    #[field(label = "Taxes", target = "account.tax", relation = "sale_order_line_tax_rel", column = "line_id", target_column = "tax_id")]
+    tax_ids: Many2many,
+
+    #[field(label = "Tax Breakdown", target = "sale.order.line.tax", inverse = "line_id")]
+    tax_line_ids: One2many,
+
+    // Legacy single-tax reference + blended effective rate (kept for back-compat; superseded by tax_ids).
     #[field(label = "Tax", target = "account.tax")]
     tax_id: Many2one,
 
     #[field(label = "Tax Rate %", default = "0")]
     tax_rate: Decimal,
 
-    #[field(label = "Subtotal", compute = "compute_line_subtotal", depends = "product_uom_qty,price_unit,discount", store)]
+    #[field(label = "Subtotal", compute = "compute_line_subtotal", depends = "product_uom_qty,price_unit,discount,tax_line_ids.tax_amount", store)]
     price_subtotal: Decimal,
 
-    #[field(label = "Tax", compute = "compute_line_tax", depends = "product_uom_qty,price_unit,discount,tax_rate", store)]
+    #[field(label = "Tax", compute = "compute_line_tax", depends = "product_uom_qty,price_unit,discount,tax_rate,tax_line_ids.tax_amount", store)]
     price_tax: Decimal,
 
-    #[field(label = "Total", compute = "compute_line_total", depends = "product_uom_qty,price_unit,discount,tax_rate", store)]
+    #[field(label = "Total", compute = "compute_line_total", depends = "product_uom_qty,price_unit,discount,tax_rate,tax_line_ids.tax_amount", store)]
     price_total: Decimal,
 
     #[field(label = "Margin", compute = "compute_line_margin", depends = "price_unit,purchase_price,product_uom_qty,discount", store)]
     margin: Decimal,
+}
+
+/// One materialized per-tax row of a sale order line (the output of `apply_taxes`' engine): the tax that
+/// applied, its rollup group, the base it was computed on, and the resulting amount. The line's stored
+/// computes aggregate `tax_amount` over these rows; the invoice rolls them up per group into GL lines.
+#[model(name = "sale.order.line.tax", table = "sale_order_line_tax")]
+pub struct SaleOrderLineTax {
+    #[field(label = "Line", required, target = "sale.order.line")]
+    line_id: Many2one,
+
+    #[field(label = "Sequence", default = "10")]
+    sequence: Integer,
+
+    #[field(label = "Tax", target = "account.tax")]
+    tax_id: Many2one,
+
+    #[field(label = "Tax Group", target = "account.tax.group")]
+    tax_group_id: Many2one,
+
+    #[field(label = "Base", default = "0")]
+    base_amount: Decimal,
+
+    #[field(label = "Tax Amount", default = "0")]
+    tax_amount: Decimal,
+
+    #[field(label = "Included in Price", default = "false")]
+    is_price_include: Bool,
 }
 
 use rust_decimal::Decimal;
@@ -471,18 +582,42 @@ fn compute_amount_tax(i: &ComputeInput) -> Value {
 fn compute_margin(i: &ComputeInput) -> Value {
     Value::Decimal(i.sum_decimal("line_ids", "margin"))
 }
-/// A line's subtotal = the discounted net (quantity × unit price × (1 - discount%)).
+/// The tax this line carries: the sum of its materialized breakdown rows (`apply_taxes` output) when any
+/// exist, else a same-record FALLBACK of net × tax_rate% so an un-applied legacy row (tax_rate set, no
+/// breakdown) keeps its old numbers. Reads only loadable inputs (own scalars + One2many children).
+fn line_tax_amount(i: &ComputeInput) -> Decimal {
+    if i.count("tax_line_ids") == 0 {
+        line_net(i) * (i.decimal("tax_rate") / Decimal::from(100))
+    } else {
+        i.sum_decimal("tax_line_ids", "tax_amount")
+    }
+}
+/// The portion of a line's tax that is INCLUDED in the price (price-included taxes). Subtracted from the
+/// gross net to get the subtotal. Zero for exclusive taxes and for legacy fallback lines (no breakdown).
+fn line_included_tax(i: &ComputeInput) -> Decimal {
+    i.children("tax_line_ids")
+        .iter()
+        .filter(|c| matches!(c.get("is_price_include"), Some(Value::Bool(true))))
+        .map(|c| match c.get("tax_amount") {
+            Some(Value::Decimal(d)) => *d,
+            Some(Value::Int(n)) => Decimal::from(*n),
+            _ => Decimal::ZERO,
+        })
+        .sum()
+}
+/// A line's untaxed subtotal = the discounted net, less any price-INCLUDED tax (exclusive/legacy: the
+/// included portion is 0, so subtotal == net, byte-identical to before).
 fn compute_line_subtotal(i: &ComputeInput) -> Value {
-    Value::Decimal(line_net(i))
+    Value::Decimal(line_net(i) - line_included_tax(i))
 }
-/// A line's tax amount = its discounted net × tax rate%. Computed from raw inputs (no chaining off
-/// the computed subtotal — every same-record compute reads the pre-write snapshot).
+/// A line's tax amount (breakdown sum, or the legacy net × rate% fallback).
 fn compute_line_tax(i: &ComputeInput) -> Value {
-    Value::Decimal(line_net(i) * (i.decimal("tax_rate") / Decimal::from(100)))
+    Value::Decimal(line_tax_amount(i))
 }
-/// A line's taxed total = net × (1 + tax rate%).
+/// A line's taxed total = subtotal + tax. For a price-included line this equals the gross net (the price
+/// already contained the tax); for an exclusive/legacy line it is net + tax, as before.
 fn compute_line_total(i: &ComputeInput) -> Value {
-    Value::Decimal(line_net(i) * (Decimal::ONE + i.decimal("tax_rate") / Decimal::from(100)))
+    Value::Decimal(line_net(i) - line_included_tax(i) + line_tax_amount(i))
 }
 /// A line's margin = (unit price − cost) × quantity × (1 - discount%). From the raw inputs (no chaining).
 fn compute_line_margin(i: &ComputeInput) -> Value {
@@ -521,6 +656,8 @@ pub fn resolved_sale_order() -> ResolvedModel {
 pub static ACLS: &[Acl] = &[
     Acl { model: "sale.order", group: "sales.user", read: true, write: true, create: true, delete: false },
     Acl { model: "sale.order.line", group: "sales.user", read: true, write: true, create: true, delete: true },
+    // Tax breakdown: materialized by apply_taxes under the caller, read for the line rollup (full CRUD).
+    Acl { model: "sale.order.line.tax", group: "sales.user", read: true, write: true, create: true, delete: true },
     // Catalog reference data (categories, units): read by everyone in sales, maintained by managers.
     Acl { model: "product.category", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "product.category", group: "sales.manager", read: true, write: true, create: true, delete: true },
@@ -542,6 +679,13 @@ pub static ACLS: &[Acl] = &[
     // Taxes: read by everyone in sales (referenced on lines), maintained by managers.
     Acl { model: "account.tax", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "account.tax", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    // Tax groups + fiscal positions: read by everyone in sales (referenced), configured by managers.
+    Acl { model: "account.tax.group", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "account.tax.group", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "account.fiscal.position", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "account.fiscal.position", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    Acl { model: "account.fiscal.position.tax", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "account.fiscal.position.tax", group: "sales.manager", read: true, write: true, create: true, delete: true },
     // Payment terms: read by everyone in sales (referenced on orders), maintained by managers.
     Acl { model: "account.payment.term", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "account.payment.term", group: "sales.manager", read: true, write: true, create: true, delete: true },
@@ -1153,8 +1297,8 @@ mod tests {
         // The macro must produce the SAME descriptor as the hand-written version.
         let d = SaleOrder::descriptor();
         assert_eq!(d.name, "sale.order");
-        // name, partner_id, company_id, line_ids, state, invoice_status, currency_id, pricelist_id, payment_term_id, amount_untaxed, amount_tax, amount_total
-        assert_eq!(d.fields.len(), 12);
+        // name, partner_id, company_id, line_ids, state, invoice_status, currency_id, pricelist_id, payment_term_id, fiscal_position_id, amount_untaxed, amount_tax, amount_total
+        assert_eq!(d.fields.len(), 13);
         let total = d.fields.iter().find(|f| f.name == "amount_total").unwrap();
         assert!(total.stored, "computed with `store` must be stored");
         assert_eq!(total.compute, Some("compute_amount"));
