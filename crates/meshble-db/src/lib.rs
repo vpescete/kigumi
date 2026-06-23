@@ -158,9 +158,16 @@ impl Db {
         Ok(())
     }
 
-    /// Drops the model's table if it exists. CASCADE so dependent objects (e.g. Many2many junction
-    /// tables that FK into it) are removed too — this is a teardown/test helper, not a data path.
+    /// Drops the model's table (and its own Many2many junction tables) if they exist. A teardown/test
+    /// helper, not a data path. NB `DROP TABLE ... CASCADE` on the model only drops the junction's FK
+    /// CONSTRAINT, not the junction TABLE — so the junctions are dropped explicitly here, else their
+    /// membership rows would leak across a drop/recreate (e.g. between tests sharing one database).
     pub async fn drop_table(&self, model: &ResolvedModel) -> Result<(), DbError> {
+        for f in &model.fields {
+            if let FieldKind::Many2many { relation, .. } = f.kind {
+                sqlx::query(&format!("DROP TABLE IF EXISTS {relation} CASCADE")).execute(&self.pool).await?;
+            }
+        }
         let sql = format!("DROP TABLE IF EXISTS {} CASCADE", model.table);
         sqlx::query(&sql).execute(&self.pool).await?;
         Ok(())
