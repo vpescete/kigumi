@@ -1966,8 +1966,20 @@ impl Db {
             "partner_id": partner, "company_id": company
         }));
 
-        // Accounting date + due date both default to today (no payment-terms engine in v1).
+        // Accounting date is today; the due date is today + the order's payment term (days), if any.
         let today = self.today().await?;
+        let due_date = match order.get("payment_term_id").and_then(|v| v.as_i64()) {
+            Some(term_id) => sqlx::query_scalar::<_, Option<String>>(
+                "SELECT ($1::date + days::int)::text FROM account_payment_term WHERE id = $2 AND active",
+            )
+            .bind(&today)
+            .bind(term_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .flatten()
+            .unwrap_or_else(|| today.clone()),
+            None => today.clone(),
+        };
         // FX memo: the invoice total in the company's currency at today's rate (= total when same).
         let amount_total_company = match (company, currency) {
             (Some(co), Some(cur)) => {
@@ -1986,7 +1998,7 @@ impl Db {
         let move_payload = serde_json::json!({
             "move_type": "out_invoice", "journal_id": journal, "partner_id": partner,
             "currency_id": currency, "company_id": company, "line_ids": lines,
-            "date": today, "invoice_date_due": today,
+            "date": today, "invoice_date_due": due_date,
             // Settlement starts fully open; register_payment draws this down.
             "amount_residual": total.to_string(), "amount_total_company": amount_total_company.to_string()
         });

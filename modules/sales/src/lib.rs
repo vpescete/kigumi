@@ -50,6 +50,10 @@ pub struct SaleOrder {
     #[field(label = "Pricelist", target = "product.pricelist")]
     pricelist_id: Many2one,
 
+    // Optional payment term; `create_sale_invoice` sets the invoice due date to today + term.days.
+    #[field(label = "Payment Terms", target = "account.payment.term")]
+    payment_term_id: Many2one,
+
     // The amount split, each an exact aggregate over the lines (One2many cascade).
     #[field(label = "Untaxed Amount", compute = "compute_amount_untaxed", depends = "line_ids.price_subtotal", currency = "currency_id", store)]
     amount_untaxed: Decimal,
@@ -364,6 +368,25 @@ pub struct AccountTax {
     active: Bool,
 }
 
+/// A payment term (Odoo's `account.payment.term`, single-line subset): the invoice due date is the
+/// invoice date plus `days`. Referenced by `sale.order`; an absent term means due == invoice date.
+/// Kept in the sales module alongside `account.tax` so `sale.order` can reference it without the
+/// account module being in its dependency closure (the FK target table must exist when the column is added).
+#[model(name = "account.payment.term", table = "account_payment_term")]
+pub struct AccountPaymentTerm {
+    #[field(label = "Name", required)]
+    name: Text,
+
+    #[field(label = "Days", default = "0")]
+    days: Integer,
+
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+}
+
 /// A line of a sale order: a product, a quantity, a unit price. `price_subtotal` and `margin` are
 /// stored same-record computes; the order rolls them up into `amount_total` / `margin` through the
 /// aggregate cascade (`recompute_parent`).
@@ -519,6 +542,9 @@ pub static ACLS: &[Acl] = &[
     // Taxes: read by everyone in sales (referenced on lines), maintained by managers.
     Acl { model: "account.tax", group: "sales.user", read: true, write: false, create: false, delete: false },
     Acl { model: "account.tax", group: "sales.manager", read: true, write: true, create: true, delete: true },
+    // Payment terms: read by everyone in sales (referenced on orders), maintained by managers.
+    Acl { model: "account.payment.term", group: "sales.user", read: true, write: false, create: false, delete: false },
+    Acl { model: "account.payment.term", group: "sales.manager", read: true, write: true, create: true, delete: true },
     // Purchase orders + lines. v1 pragmatic: managed by the sales groups (a small team); dedicated
     // purchase.user/manager groups are a later refinement.
     Acl { model: "purchase.order", group: "sales.user", read: true, write: true, create: true, delete: false },
