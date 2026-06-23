@@ -43,6 +43,24 @@ pub struct ResCurrency {
     active: Bool,
 }
 
+/// A dated exchange rate (Odoo's `res.currency.rate`): `rate` units of `currency_id` per 1 unit of the
+/// base/company currency, effective from `name` (the date). Conversion uses the latest rate on or before
+/// the target date; the base currency simply has no rate rows (implicitly 1.0).
+#[model(name = "res.currency.rate", table = "res_currency_rate")]
+pub struct ResCurrencyRate {
+    #[field(label = "Currency", required, target = "res.currency")]
+    currency_id: Many2one,
+
+    #[field(label = "Date", required)]
+    name: Date,
+
+    #[field(label = "Rate", required, default = "1")]
+    rate: Decimal,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
+}
+
 /// Partner: a company or an individual — customers, suppliers, contacts. Referenced widely.
 #[model(name = "res.partner", table = "res_partner")]
 pub struct ResPartner {

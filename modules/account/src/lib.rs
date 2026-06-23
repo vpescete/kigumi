@@ -113,6 +113,12 @@ pub struct AccountMove {
     #[field(label = "Total", compute = "compute_move_total", depends = "line_ids.debit", currency = "currency_id", store)]
     amount_total: Decimal,
 
+    // The total converted to the company's currency at the invoice date (M-fx memo): equals amount_total
+    // for a same-currency invoice, else the rate-converted value. A denormalized memo, NOT a second
+    // balanced ledger — the GL itself still posts in the invoice currency.
+    #[field(label = "Total (company)", default = "0")]
+    amount_total_company: Decimal,
+
     // Settlement (M-pay): the open balance still due and the payment status. `amount_residual` is seeded
     // = amount_total when an invoice is created, then decremented by each registered payment; it is a
     // plain stored field (not a compute) because it tracks money received, not the GL line sum.

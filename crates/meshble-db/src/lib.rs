@@ -1695,6 +1695,58 @@ impl Db {
         Ok(applied)
     }
 
+    /// The exchange rate for `currency` effective on or before `as_of` (units of the currency per 1 base
+    /// unit): the latest `res.currency.rate` row. A currency with NO rate rows is the base currency (1.0);
+    /// a currency that HAS rates but none on or before `as_of` is an unknown historical rate → error
+    /// (never silently 1.0 for a foreign currency).
+    async fn currency_rate(&self, currency: i64, as_of: &str) -> Result<rust_decimal::Decimal, DbError> {
+        use rust_decimal::Decimal;
+        let latest: Option<Decimal> = sqlx::query_scalar(
+            "SELECT rate FROM res_currency_rate WHERE currency_id = $1 AND name <= $2::date ORDER BY name DESC LIMIT 1",
+        )
+        .bind(currency)
+        .bind(as_of)
+        .fetch_optional(&self.pool)
+        .await?;
+        if let Some(r) = latest {
+            return Ok(r);
+        }
+        let has_any: Option<i64> = sqlx::query_scalar("SELECT 1 FROM res_currency_rate WHERE currency_id = $1 LIMIT 1")
+            .bind(currency)
+            .fetch_optional(&self.pool)
+            .await?;
+        if has_any.is_some() {
+            Err(DbError::BadInput(format!("no exchange rate for currency {currency} on or before {as_of}")))
+        } else {
+            Ok(Decimal::ONE)
+        }
+    }
+
+    /// Converts `amount` from `from_currency` to `to_currency` at the rates effective on `as_of`, rounded
+    /// to the to-currency's decimal places. Two-hop through the base currency (Odoo's `_convert`).
+    pub async fn convert_amount(
+        &self,
+        amount: rust_decimal::Decimal,
+        from_currency: i64,
+        to_currency: i64,
+        as_of: &str,
+    ) -> Result<rust_decimal::Decimal, DbError> {
+        if from_currency == to_currency {
+            return Ok(amount);
+        }
+        let from_rate = self.currency_rate(from_currency, as_of).await?;
+        let to_rate = self.currency_rate(to_currency, as_of).await?;
+        if from_rate.is_zero() {
+            return Err(DbError::BadInput("source currency rate is zero".to_string()));
+        }
+        let dp: Option<i64> = sqlx::query_scalar::<_, Option<i64>>("SELECT decimal_places FROM res_currency WHERE id = $1")
+            .bind(to_currency)
+            .fetch_optional(&self.pool)
+            .await?
+            .flatten();
+        Ok((amount * to_rate / from_rate).round_dp(dp.unwrap_or(2).max(0) as u32))
+    }
+
     /// The company's fiscal lock date as an ISO `YYYY-MM-DD` string, or None if it has none. Read with a
     /// direct query (the lock is a posting guard, not user-scoped data).
     async fn company_lock_date(&self, company_id: i64) -> Result<Option<String>, DbError> {
@@ -1916,12 +1968,27 @@ impl Db {
 
         // Accounting date + due date both default to today (no payment-terms engine in v1).
         let today = self.today().await?;
+        // FX memo: the invoice total in the company's currency at today's rate (= total when same).
+        let amount_total_company = match (company, currency) {
+            (Some(co), Some(cur)) => {
+                let co_cur: Option<i64> = sqlx::query_scalar::<_, Option<i64>>("SELECT currency_id FROM res_company WHERE id = $1")
+                    .bind(co)
+                    .fetch_optional(&self.pool)
+                    .await?
+                    .flatten();
+                match co_cur {
+                    Some(cc) => self.convert_amount(total, cur, cc, &today).await?,
+                    None => total,
+                }
+            }
+            _ => total,
+        };
         let move_payload = serde_json::json!({
             "move_type": "out_invoice", "journal_id": journal, "partner_id": partner,
             "currency_id": currency, "company_id": company, "line_ids": lines,
             "date": today, "invoice_date_due": today,
             // Settlement starts fully open; register_payment draws this down.
-            "amount_residual": total.to_string()
+            "amount_residual": total.to_string(), "amount_total_company": amount_total_company.to_string()
         });
         let move_id =
             self.insert_secured(&move_model, &elevated, &[], &[], move_payload.as_object().unwrap()).await?;
