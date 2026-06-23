@@ -2218,6 +2218,88 @@ impl Db {
     /// cannot double-apply. v1 allows negative stock (no reservation). Gated on the caller's WRITE of
     /// the picking; the quant mutations are a system effect run inside the transaction. Returns the
     /// assigned transfer number.
+    /// Reserves stock for a draft transfer's internal-source moves: for each move still short of its
+    /// demand, claims up to the available (unreserved) on-hand at its source, recording the claim on both
+    /// the source quant (`reserved_quantity`) and the move (`reserved_qty`). The quant row is locked
+    /// `FOR UPDATE` — the serialization point that stops two concurrent reservations of the same quant
+    /// from over-committing. Idempotent: a re-run only tops up the still-unreserved delta of each move.
+    /// Returns the number of moves that gained some reservation. Gated on the caller's picking WRITE.
+    pub async fn reserve_picking(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        picking_id: i64,
+    ) -> Result<i64, DbError> {
+        use rust_decimal::Decimal;
+        let picking_model = resolve_registered("stock.picking").map_err(DbError::BadInput)?;
+        if !check_access(Operation::Write, picking_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: picking_model.name.to_string(), operation: "reserve" });
+        }
+        let picking = self
+            .find_one_secured(&picking_model, ctx, acls, rules, picking_id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("transfer not found or not permitted".to_string()))?;
+        let state = picking.get("state").and_then(|v| v.as_str()).unwrap_or("");
+        if state != "draft" {
+            return Err(DbError::BadInput(format!("only a draft transfer can be reserved (state is '{state}')")));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, reserved_qty, location_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
+            .bind(picking_id)
+            .fetch_all(&mut *tx)
+            .await?;
+        let mut reserved_moves = 0i64;
+        for m in &moves {
+            let move_id: i64 = m.try_get("id")?;
+            let product_id: i64 = m.try_get("product_id")?;
+            let ordered: Decimal = m.try_get("product_uom_qty")?;
+            let already: Decimal = m.try_get("reserved_qty")?;
+            let src: i64 = m.try_get("location_id")?;
+            // Only internal sources hold reservable stock (a supplier/customer source has none).
+            let src_usage: Option<String> = sqlx::query_scalar("SELECT usage FROM stock_location WHERE id = $1")
+                .bind(src)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if src_usage.as_deref() != Some("internal") {
+                continue;
+            }
+            let want = ordered - already;
+            if want <= Decimal::ZERO {
+                continue;
+            }
+            // Lock the quant row: another reserve of the same (product, location) blocks here.
+            let row = sqlx::query("SELECT quantity, COALESCE(reserved_quantity, 0) AS reserved_quantity FROM stock_quant WHERE product_id = $1 AND location_id = $2 FOR UPDATE")
+                .bind(product_id)
+                .bind(src)
+                .fetch_optional(&mut *tx)
+                .await?;
+            let Some(row) = row else { continue }; // no quant row → nothing on hand → reserve nothing
+            let on_hand: Decimal = row.try_get("quantity")?;
+            let reserved: Decimal = row.try_get("reserved_quantity")?;
+            let free = on_hand - reserved;
+            let grant = if want < free { want } else { free };
+            if grant <= Decimal::ZERO {
+                continue;
+            }
+            sqlx::query("UPDATE stock_quant SET reserved_quantity = reserved_quantity + $3 WHERE product_id = $1 AND location_id = $2")
+                .bind(product_id)
+                .bind(src)
+                .bind(grant)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("UPDATE stock_move SET reserved_qty = reserved_qty + $2 WHERE id = $1")
+                .bind(move_id)
+                .bind(grant)
+                .execute(&mut *tx)
+                .await?;
+            reserved_moves += 1;
+        }
+        tx.commit().await?;
+        Ok(reserved_moves)
+    }
+
     pub async fn validate_picking(
         &self,
         ctx: &Ctx,
@@ -2254,7 +2336,7 @@ impl Db {
             return Err(DbError::Conflict("the transfer was already validated".to_string()));
         }
 
-        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, quantity_done, location_id, location_dest_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
+        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, quantity_done, reserved_qty, location_id, location_dest_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
             .bind(picking_id)
             .fetch_all(&mut *tx)
             .await?;
@@ -2272,41 +2354,63 @@ impl Db {
             let product_id: i64 = m.try_get("product_id")?;
             let ordered: Decimal = m.try_get("product_uom_qty")?;
             let done_field: Decimal = m.try_get("quantity_done")?;
+            let move_reserved: Decimal = m.try_get("reserved_qty")?;
             let src: i64 = m.try_get("location_id")?;
             let dst: i64 = m.try_get("location_dest_id")?;
             // quantity_done == 0 (the default) means "do the full ordered quantity" (all-or-nothing);
             // a positive value validates exactly that much and backorders the rest.
             let mut done = if done_field > Decimal::ZERO { done_field } else { ordered };
-            // Over-delivery guard: a move OUT of an INTERNAL location cannot take more than is on hand
-            // there, so stock never goes negative. An external source (supplier/customer) is not clamped.
+            // Over-delivery guard: a move OUT of an INTERNAL location can take only what is AVAILABLE
+            // there — on-hand minus what OTHER moves have reserved, plus back this move's own
+            // reservation (so a pre-reserved move can still deliver what it claimed). Stock never goes
+            // negative. An external source (supplier/customer) is not clamped.
             let src_usage: Option<String> = sqlx::query_scalar("SELECT usage FROM stock_location WHERE id = $1")
                 .bind(src)
                 .fetch_optional(&mut *tx)
                 .await?;
             if src_usage.as_deref() == Some("internal") {
-                let on_hand: Decimal = sqlx::query_scalar("SELECT quantity FROM stock_quant WHERE product_id = $1 AND location_id = $2")
+                let row = sqlx::query("SELECT quantity, COALESCE(reserved_quantity, 0) AS reserved_quantity FROM stock_quant WHERE product_id = $1 AND location_id = $2")
                     .bind(product_id)
                     .bind(src)
                     .fetch_optional(&mut *tx)
-                    .await?
-                    .unwrap_or_default();
-                if done > on_hand {
-                    done = on_hand;
+                    .await?;
+                let (on_hand, reserved) = match row {
+                    Some(r) => (r.try_get::<Decimal, _>("quantity")?, r.try_get::<Decimal, _>("reserved_quantity")?),
+                    None => (Decimal::ZERO, Decimal::ZERO),
+                };
+                let available = on_hand - reserved + move_reserved;
+                if done > available {
+                    done = available;
+                }
+                if done < Decimal::ZERO {
+                    done = Decimal::ZERO;
                 }
             }
-            // Source loses `done`, destination gains it — one parameterized upsert per side.
+            // Source loses `done` and frees this move's reservation in full (the move is now done and
+            // will never deliver again — any unused reservation must not leak; the backorder re-reserves
+            // from scratch). Destination simply gains `done`. GREATEST floors reserved at 0.
             if done > Decimal::ZERO {
-                for (loc, delta) in [(src, -done), (dst, done)] {
-                    sqlx::query(
-                        "INSERT INTO stock_quant (product_id, location_id, quantity) VALUES ($1, $2, $3) \
-                         ON CONFLICT (product_id, location_id) DO UPDATE SET quantity = stock_quant.quantity + $3",
-                    )
-                    .bind(product_id)
-                    .bind(loc)
-                    .bind(delta)
-                    .execute(&mut *tx)
-                    .await?;
-                }
+                sqlx::query(
+                    "INSERT INTO stock_quant (product_id, location_id, quantity, reserved_quantity) VALUES ($1, $2, $3, 0) \
+                     ON CONFLICT (product_id, location_id) DO UPDATE SET \
+                       quantity = stock_quant.quantity + $3, \
+                       reserved_quantity = GREATEST(0, stock_quant.reserved_quantity - $4)",
+                )
+                .bind(product_id)
+                .bind(src)
+                .bind(-done)
+                .bind(move_reserved)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    "INSERT INTO stock_quant (product_id, location_id, quantity, reserved_quantity) VALUES ($1, $2, $3, 0) \
+                     ON CONFLICT (product_id, location_id) DO UPDATE SET quantity = stock_quant.quantity + $3",
+                )
+                .bind(product_id)
+                .bind(dst)
+                .bind(done)
+                .execute(&mut *tx)
+                .await?;
             }
             sqlx::query("UPDATE stock_move SET state = 'done', quantity_done = $2 WHERE id = $1")
                 .bind(move_id)

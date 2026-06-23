@@ -71,6 +71,11 @@ pub struct StockQuant {
 
     #[field(label = "Quantity", default = "0")]
     quantity: Decimal,
+
+    // How much of `quantity` is claimed by draft transfers (reserve_picking). available = quantity -
+    // reserved_quantity; validating a move frees the reservation it held as the goods leave.
+    #[field(label = "Reserved", default = "0")]
+    reserved_quantity: Decimal,
 }
 
 // stock.picking carries a chatter thread (transfer history) and a tracked state.
@@ -127,6 +132,11 @@ pub struct StockMove {
     // all-or-nothing default); a smaller value validates a partial transfer and backorders the rest.
     #[field(label = "Done", default = "0")]
     quantity_done: Decimal,
+
+    // How much on-hand this move has claimed at its source via reserve_picking. Validating the move
+    // frees this exact amount from the source quant's reserved_quantity as the goods move out.
+    #[field(label = "Reserved", default = "0")]
+    reserved_qty: Decimal,
 
     #[field(label = "Source Location", required, target = "stock.location")]
     location_id: Many2one,

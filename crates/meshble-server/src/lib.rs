@@ -442,6 +442,7 @@ fn build_data_router(
         // Generate a posted customer invoice (account.move) from a confirmed sale order.
         .route("/api/:name/:id/create_invoice", post(create_invoice_handler))
         .route("/api/:name/:id/validate", post(validate_picking_handler))
+        .route("/api/:name/:id/reserve", post(reserve_picking_handler))
         .route("/api/:name/:id/create_delivery", post(create_delivery_handler))
         .route("/api/:name/:id/create_receipt", post(create_receipt_handler))
         // Attachments (ir.attachment): files on a record. List/download need host read; upload/delete
@@ -1498,6 +1499,30 @@ async fn validate_picking_handler(
     match backend.db.validate_picking(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(number) => json_response(serde_json::json!({ "validated": number }).to_string()),
         Err(e) => write_error("validate", e),
+    }
+}
+
+/// Reserves available stock for a draft `stock.picking`'s internal-source moves. v1: pinned to
+/// stock.picking. Authorization (WRITE on stock.picking) lives in the db layer.
+async fn reserve_picking_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    if name != "stock.picking" {
+        return (StatusCode::BAD_REQUEST, "reserve is only valid on stock.picking").into_response();
+    }
+    if let Err(r) = resolve_model(&state, &name) {
+        return r;
+    }
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.reserve_picking(&ctx, &backend.acls(), &backend.rules(), id).await {
+        Ok(reserved) => json_response(serde_json::json!({ "reserved": reserved }).to_string()),
+        Err(e) => write_error("reserve", e),
     }
 }
 
