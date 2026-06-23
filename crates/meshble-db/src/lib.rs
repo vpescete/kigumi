@@ -1606,7 +1606,8 @@ impl Db {
             let qty = dec("product_uom_qty");
             let line_net = qty * dec("price_unit") * (Decimal::ONE - dec("discount") / Decimal::from(100));
 
-            // The tax set is the Many2many membership; an empty set falls back to the legacy single tax_id.
+            // The tax set, in resolution order: the line's Many2many membership, else the legacy single
+            // tax_id, else the product's default taxes (Odoo's product.taxes_id flowing to the line).
             let mut tax_ids: Vec<i64> = sqlx::query_scalar("SELECT tax_id FROM sale_order_line_tax_rel WHERE line_id = $1")
                 .bind(lid)
                 .fetch_all(&self.pool)
@@ -1614,6 +1615,17 @@ impl Db {
             if tax_ids.is_empty() {
                 if let Some(t) = line.get("tax_id").and_then(|v| v.as_i64()) {
                     tax_ids.push(t);
+                }
+            }
+            if tax_ids.is_empty() {
+                if let Some(pid) = line.get("product_id").and_then(|v| v.as_i64()) {
+                    tax_ids = sqlx::query_scalar(
+                        "SELECT r.tax_id FROM product_template_tax_rel r \
+                         JOIN product_product p ON p.product_tmpl_id = r.product_id WHERE p.id = $1",
+                    )
+                    .bind(pid)
+                    .fetch_all(&self.pool)
+                    .await?;
                 }
             }
             // Remap through the fiscal position (NULL dest drops the tax); dedup, preserving order, so a
