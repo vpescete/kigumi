@@ -1695,6 +1695,16 @@ impl Db {
         Ok(applied)
     }
 
+    /// The company's fiscal lock date as an ISO `YYYY-MM-DD` string, or None if it has none. Read with a
+    /// direct query (the lock is a posting guard, not user-scoped data).
+    async fn company_lock_date(&self, company_id: i64) -> Result<Option<String>, DbError> {
+        Ok(sqlx::query_scalar::<_, Option<String>>("SELECT fiscalyear_lock_date::text FROM res_company WHERE id = $1")
+            .bind(company_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .flatten())
+    }
+
     /// Posts an `account.move` (draft → posted): re-checks the balanced-entry invariant, numbers the
     /// entry from its journal's sequence (`sequence_code`, falling back to the journal `code`), and
     /// flips state to posted. Cross-record (reads the journal), so a service method — not a pure action.
@@ -1720,6 +1730,20 @@ impl Db {
         let state = mv.get("state").and_then(|v| v.as_str()).unwrap_or("");
         if state != "draft" {
             return Err(DbError::BadInput(format!("only a draft entry can be posted (state is '{state}')")));
+        }
+
+        // Fiscal lock: an entry dated on or before its company's lock date cannot be posted. ISO date
+        // strings compare lexically. A move with no date or no company, or a company with no lock, is free.
+        if let (Some(md), Some(cid)) =
+            (mv.get("date").and_then(|v| v.as_str()), mv.get("company_id").and_then(|v| v.as_i64()))
+        {
+            if let Some(lock) = self.company_lock_date(cid).await? {
+                if md <= lock.as_str() {
+                    return Err(DbError::BadInput(format!(
+                        "cannot post an entry dated {md}: on or before the fiscal lock date {lock}"
+                    )));
+                }
+            }
         }
 
         // Re-check the balance at post time (defense in depth — create already enforced it).

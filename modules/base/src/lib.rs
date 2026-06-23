@@ -93,6 +93,11 @@ pub struct ResCompany {
     #[field(label = "Partner", target = "res.partner")]
     partner_id: Many2one,
 
+    // Fiscal lock (M-lock): no journal entry dated on or before this date can be posted (set by an
+    // admin via a sudo write). Optional — null means no lock.
+    #[field(label = "Lock Date")]
+    fiscalyear_lock_date: Date,
+
     #[field(label = "Active")]
     active: Bool,
 }
