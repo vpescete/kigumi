@@ -1950,22 +1950,6 @@ impl Db {
             return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "create_invoice" });
         }
 
-        // Balanced invoice: income credit (untaxed) + tax credit (if any) + receivable debit (total).
-        let mut lines = vec![serde_json::json!({
-            "account_id": income, "name": "Untaxed Amount", "debit": "0", "credit": untaxed.to_string(),
-            "partner_id": partner, "company_id": company
-        })];
-        if let Some(tax_account) = tax_account {
-            lines.push(serde_json::json!({
-                "account_id": tax_account, "name": "Taxes", "debit": "0", "credit": tax.to_string(),
-                "partner_id": partner, "company_id": company
-            }));
-        }
-        lines.push(serde_json::json!({
-            "account_id": receivable, "name": "Receivable", "debit": total.to_string(), "credit": "0",
-            "partner_id": partner, "company_id": company
-        }));
-
         // Accounting date is today; the due date is today + the order's payment term (days), if any.
         let today = self.today().await?;
         let due_date = match order.get("payment_term_id").and_then(|v| v.as_i64()) {
@@ -1980,27 +1964,57 @@ impl Db {
             .unwrap_or_else(|| today.clone()),
             None => today.clone(),
         };
-        // FX memo: the invoice total in the company's currency at today's rate (= total when same).
-        let amount_total_company = match (company, currency) {
-            (Some(co), Some(cur)) => {
-                let co_cur: Option<i64> = sqlx::query_scalar::<_, Option<i64>>("SELECT currency_id FROM res_company WHERE id = $1")
-                    .bind(co)
-                    .fetch_optional(&self.pool)
-                    .await?
-                    .flatten();
-                match co_cur {
-                    Some(cc) => self.convert_amount(total, cur, cc, &today).await?,
-                    None => total,
-                }
-            }
-            _ => total,
+        // Resolve the company currency once. FX applies only when it differs from the invoice currency;
+        // same / absent currency is identity, so the single-currency path is byte-for-byte unchanged.
+        let co_cur: Option<i64> = match company {
+            Some(co) => sqlx::query_scalar::<_, Option<i64>>("SELECT currency_id FROM res_company WHERE id = $1")
+                .bind(co)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten(),
+            None => None,
         };
+        let fx = match (currency, co_cur) {
+            (Some(c), Some(cc)) if c != cc => Some((c, cc)),
+            _ => None,
+        };
+        // Company-currency value of each part, at today's rate. The receivable is the SUM of the
+        // already-rounded parts (untaxed_co + tax_co), NEVER an independent convert(total) — that is the
+        // only way Σdebit == Σcredit holds exactly after per-line rounding, so check_balanced can't trip.
+        let (untaxed_co, tax_co) = match fx {
+            Some((c, cc)) => (
+                self.convert_amount(untaxed, c, cc, &today).await?,
+                self.convert_amount(tax, c, cc, &today).await?,
+            ),
+            None => (untaxed, tax),
+        };
+        let receivable_co = untaxed_co + tax_co;
+
+        // Balanced invoice: income credit (untaxed) + tax credit (if any) + receivable debit, all in the
+        // company currency. `amount_currency` carries the signed invoice-currency amount (+ debit, −
+        // credit) as the FX memo; it is zero only in the single-currency case (untaxed_co == untaxed).
+        let mut lines = vec![serde_json::json!({
+            "account_id": income, "name": "Untaxed Amount", "debit": "0", "credit": untaxed_co.to_string(),
+            "amount_currency": (-untaxed).to_string(), "partner_id": partner, "company_id": company
+        })];
+        if let Some(tax_account) = tax_account {
+            lines.push(serde_json::json!({
+                "account_id": tax_account, "name": "Taxes", "debit": "0", "credit": tax_co.to_string(),
+                "amount_currency": (-tax).to_string(), "partner_id": partner, "company_id": company
+            }));
+        }
+        lines.push(serde_json::json!({
+            "account_id": receivable, "name": "Receivable", "debit": receivable_co.to_string(), "credit": "0",
+            "amount_currency": total.to_string(), "partner_id": partner, "company_id": company
+        }));
+
         let move_payload = serde_json::json!({
             "move_type": "out_invoice", "journal_id": journal, "partner_id": partner,
             "currency_id": currency, "company_id": company, "line_ids": lines,
             "date": today, "invoice_date_due": due_date,
-            // Settlement starts fully open; register_payment draws this down.
-            "amount_residual": total.to_string(), "amount_total_company": amount_total_company.to_string()
+            // Residual stays in INVOICE currency (the foreign amount owed); the company-currency total is
+            // the receivable's company debit. register_payment draws the residual down.
+            "amount_residual": total.to_string(), "amount_total_company": receivable_co.to_string()
         });
         let move_id =
             self.insert_secured(&move_model, &elevated, &[], &[], move_payload.as_object().unwrap()).await?;
@@ -2092,17 +2106,59 @@ impl Db {
         }
 
         // Book the balanced payment entry: customer pays in → debit bank / credit receivable; vendor bill
-        // paid → credit bank / debit payable.
-        let amt = amount.to_string();
-        let (bank_d, bank_c, ctr_d, ctr_c) = if is_customer {
-            (amt.clone(), "0".to_string(), "0".to_string(), amt.clone())
-        } else {
-            ("0".to_string(), amt.clone(), amt.clone(), "0".to_string())
+        // paid → credit bank / debit payable. Multi-currency: the bank movement is valued at TODAY's rate
+        // while the counterpart is relieved at the invoice-date rate (what sits on the books); the
+        // difference is the realized FX gain/loss, booked to a 3rd line so the company-currency entry
+        // balances. Same / absent company currency ⇒ both equal `amount`, no FX line — the exact
+        // single-currency 2-liner (plus the additive amount_currency memo).
+        let today = self.today().await?;
+        let invoice_date = inv.get("date").and_then(|v| v.as_str()).unwrap_or(today.as_str()).to_string();
+        let co_cur: Option<i64> = match company {
+            Some(co) => sqlx::query_scalar::<_, Option<i64>>("SELECT currency_id FROM res_company WHERE id = $1")
+                .bind(co)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten(),
+            None => None,
         };
-        let lines = serde_json::json!([
-            { "account_id": money, "name": "Payment", "debit": bank_d, "credit": bank_c, "partner_id": partner, "company_id": company },
-            { "account_id": counterpart, "name": "Payment", "debit": ctr_d, "credit": ctr_c, "partner_id": partner, "company_id": company }
-        ]);
+        let fx = match (currency, co_cur) {
+            (Some(c), Some(cc)) if c != cc => Some((c, cc)),
+            _ => None,
+        };
+        let (money_company, counter_company) = match fx {
+            Some((c, cc)) => (
+                self.convert_amount(amount, c, cc, &today).await?,
+                self.convert_amount(amount, c, cc, &invoice_date).await?,
+            ),
+            None => (amount, amount),
+        };
+
+        // amount_currency: + on the debit side, − on the credit side (the FX-memo sign convention).
+        let (bank_d, bank_c, bank_cur, ctr_d, ctr_c, ctr_cur) = if is_customer {
+            (money_company, Decimal::ZERO, amount, Decimal::ZERO, counter_company, -amount)
+        } else {
+            (Decimal::ZERO, money_company, -amount, counter_company, Decimal::ZERO, amount)
+        };
+        let mut lines = vec![
+            serde_json::json!({ "account_id": money, "name": "Payment", "debit": bank_d.to_string(), "credit": bank_c.to_string(), "amount_currency": bank_cur.to_string(), "partner_id": partner, "company_id": company }),
+            serde_json::json!({ "account_id": counterpart, "name": "Payment", "debit": ctr_d.to_string(), "credit": ctr_c.to_string(), "amount_currency": ctr_cur.to_string(), "partner_id": partner, "company_id": company }),
+        ];
+        // FX plug: the line that keeps Σdebit == Σcredit in company currency (the realized gain/loss).
+        // v1 books both gain and loss to the income account; dedicated gain/loss accounts are a follow-up.
+        let imbalance = (bank_d + ctr_d) - (bank_c + ctr_c);
+        if imbalance != Decimal::ZERO {
+            let fx_account = self
+                .first_match(&account_model, &elevated, "account_type", "income", company)
+                .await?
+                .ok_or_else(|| DbError::BadInput("no income account configured for FX gain/loss".to_string()))?;
+            let (fx_d, fx_c) = if imbalance > Decimal::ZERO {
+                (Decimal::ZERO, imbalance)
+            } else {
+                (-imbalance, Decimal::ZERO)
+            };
+            lines.push(serde_json::json!({ "account_id": fx_account, "name": "Exchange difference", "debit": fx_d.to_string(), "credit": fx_c.to_string(), "amount_currency": "0", "partner_id": partner, "company_id": company }));
+        }
+        let lines = serde_json::Value::Array(lines);
         let pay_payload = serde_json::json!({
             "move_type": "entry", "journal_id": journal_id, "partner_id": partner,
             "currency_id": currency, "company_id": company, "line_ids": lines

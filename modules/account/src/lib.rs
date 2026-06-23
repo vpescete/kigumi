@@ -154,6 +154,12 @@ pub struct AccountMoveLine {
     #[field(label = "Credit", default = "0")]
     credit: Decimal,
 
+    // Signed foreign-currency memo (Odoo's sign convention: + on the debit side, − on the credit side).
+    // debit/credit stay the authoritative company-currency amounts; this records the original invoice
+    // currency. Zero in single-currency entries (invoice currency == company currency).
+    #[field(label = "Amount in Currency", default = "0")]
+    amount_currency: Decimal,
+
     #[field(label = "Balance", compute = "compute_line_balance", depends = "debit,credit")]
     balance: Decimal,
 
