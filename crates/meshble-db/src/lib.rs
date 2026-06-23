@@ -2007,6 +2007,50 @@ impl Db {
         Ok(pay_id)
     }
 
+    /// Trial balance: per-account totals (debit, credit, balance) over POSTED journal entries — the
+    /// foundation report the frontend folds into a P&L and a balance sheet. Only accounts with posted
+    /// activity appear, ordered by code. Gated on account.account READ. v1: all companies (multi-company
+    /// scoping is a follow-up). Returns one JSON object per account.
+    pub async fn trial_balance(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        _rules: &[RecordRule],
+    ) -> Result<Vec<serde_json::Value>, DbError> {
+        let account_model = resolve_registered("account.account").map_err(DbError::BadInput)?;
+        if !check_access(Operation::Read, account_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: account_model.name.to_string(), operation: "trial_balance" });
+        }
+        let rows = sqlx::query(
+            "SELECT a.id, a.code, a.name, a.account_type, \
+                    COALESCE(SUM(l.debit), 0) AS debit, COALESCE(SUM(l.credit), 0) AS credit \
+             FROM account_account a \
+             JOIN account_move_line l ON l.account_id = a.id \
+             JOIN account_move m ON m.id = l.move_id AND m.state = 'posted' \
+             GROUP BY a.id, a.code, a.name, a.account_type \
+             ORDER BY a.code",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        use rust_decimal::Decimal;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                let debit: Decimal = r.try_get("debit").unwrap_or_default();
+                let credit: Decimal = r.try_get("credit").unwrap_or_default();
+                serde_json::json!({
+                    "account_id": r.try_get::<i64, _>("id").unwrap_or_default(),
+                    "code": r.try_get::<Option<String>, _>("code").ok().flatten(),
+                    "name": r.try_get::<Option<String>, _>("name").ok().flatten(),
+                    "account_type": r.try_get::<Option<String>, _>("account_type").ok().flatten(),
+                    "debit": debit.to_string(),
+                    "credit": credit.to_string(),
+                    "balance": (debit - credit).to_string(),
+                })
+            })
+            .collect())
+    }
+
     /// Validates a `stock.picking` (draft → done): in ONE transaction, atomically moves each line's
     /// quantity from its source to its destination quant (`ON CONFLICT (product_id, location_id)`
     /// upsert), marks the moves done, numbers the transfer from a per-type sequence (IN/OUT/INT), and

@@ -13,6 +13,7 @@ import { ModelForm } from './screens/ModelForm'
 import { ThemeStudio } from './screens/ThemeStudio'
 import { Modules } from './screens/Modules'
 import { Access } from './screens/Access'
+import { Reports } from './screens/Reports'
 import './index.css'
 import './type.css'
 
@@ -36,6 +37,7 @@ const router = createBrowserRouter([
       { path: 'theme-studio', element: <ThemeStudio /> },
       { path: 'modules', element: <Modules /> },
       { path: 'access', element: <Access /> },
+      { path: 'reports', element: <Reports /> },
     ],
   },
 ])

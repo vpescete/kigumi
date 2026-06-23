@@ -342,6 +342,23 @@ export async function callEndpoint<T = Record<string, unknown>>(
   return asJson<T>(await request(`/api/${model}/${id}/${path}`, { method: 'POST' }))
 }
 
+export type TrialBalanceRow = {
+  account_id: number
+  code: string | null
+  name: string | null
+  account_type: string | null
+  debit: string
+  credit: string
+  balance: string
+}
+
+/** Per-account debit/credit/balance over posted entries — the data behind the trial balance, P&L and
+ * balance sheet. */
+export async function reportTrialBalance(): Promise<TrialBalanceRow[]> {
+  const { rows } = await asJson<{ rows: TrialBalanceRow[] }>(await request('/api/reports/trial_balance'))
+  return rows
+}
+
 /** Registers a (full or partial) payment against a posted invoice; returns the payment move id. */
 export async function registerPayment(moveId: number, amount: string, journalId: number): Promise<number> {
   const res = await request(`/api/account.move/${moveId}/register_payment`, {

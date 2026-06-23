@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
+  BarChart3,
   Blocks,
   Box,
   ChevronDown,
@@ -125,6 +126,7 @@ function SidebarNav({ groups, onNavigate }: { groups: NavGroup[]; onNavigate?: (
         )
       })}
       <div className="pt-1.5">
+        <NavItem to="/reports" label="Reports" onNavigate={onNavigate} />
         <NavItem to="/modules" label="Modules" onNavigate={onNavigate} />
         <NavItem to="/access" label="Access" onNavigate={onNavigate} />
       </div>
@@ -178,6 +180,7 @@ function RailNav({ groups }: { groups: NavGroup[] }) {
           active={g.models.some((m) => pathname.startsWith(`/m/${m}`))}
         />
       ))}
+      <RailItem to="/reports" label="Reports" icon={<BarChart3 size={18} />} active={pathname.startsWith('/reports')} />
       <RailItem to="/modules" label="Modules" icon={<Blocks size={18} />} active={pathname.startsWith('/modules')} />
       <RailItem to="/access" label="Access" icon={<KeyRound size={18} />} active={pathname.startsWith('/access')} />
     </nav>
@@ -211,6 +214,7 @@ function Breadcrumbs() {
   else if (pathname.startsWith('/theme-studio')) crumbs.push({ label: 'Theme Studio' })
   else if (pathname.startsWith('/modules')) crumbs.push({ label: 'Modules' })
   else if (pathname.startsWith('/access')) crumbs.push({ label: 'Access' })
+  else if (pathname.startsWith('/reports')) crumbs.push({ label: 'Reports' })
   else if (params.model) {
     crumbs.push({ label: modelTitle(params.model), to: `/m/${params.model}` })
     if (params.id) crumbs.push({ label: params.id === 'new' ? 'New' : `#${params.id}` })
