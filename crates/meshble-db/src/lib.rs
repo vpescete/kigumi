@@ -2481,7 +2481,7 @@ impl Db {
         }
 
         let mut tx = self.pool.begin().await?;
-        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, product_uom_id, reserved_qty, location_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
+        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, product_uom_id, lot_id, reserved_qty, location_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
             .bind(picking_id)
             .fetch_all(&mut *tx)
             .await?;
@@ -2491,6 +2491,7 @@ impl Db {
             let product_id: i64 = m.try_get("product_id")?;
             let ordered: Decimal = m.try_get("product_uom_qty")?;
             let already: Decimal = m.try_get("reserved_qty")?;
+            let lot_id: Option<i64> = m.try_get("lot_id")?;
             let src: i64 = m.try_get("location_id")?;
             // Convert the demand to the product reference unit — the quant + reserved_qty are reference.
             let factor = self.uom_factor(m.try_get::<Option<i64>, _>("product_uom_id")?).await?;
@@ -2507,10 +2508,12 @@ impl Db {
             if want <= Decimal::ZERO {
                 continue;
             }
-            // Lock the quant row: another reserve of the same (product, location) blocks here.
-            let row = sqlx::query("SELECT quantity, COALESCE(reserved_quantity, 0) AS reserved_quantity FROM stock_quant WHERE product_id = $1 AND location_id = $2 FOR UPDATE")
+            // Lock the quant row for this (product, location, lot): a concurrent reserve of the same quant
+            // blocks here. COALESCE(lot_id, 0) matches the untracked-bulk quant when the move has no lot.
+            let row = sqlx::query("SELECT quantity, COALESCE(reserved_quantity, 0) AS reserved_quantity FROM stock_quant WHERE product_id = $1 AND location_id = $2 AND COALESCE(lot_id, 0) = COALESCE($3, 0) FOR UPDATE")
                 .bind(product_id)
                 .bind(src)
+                .bind(lot_id)
                 .fetch_optional(&mut *tx)
                 .await?;
             let Some(row) = row else { continue }; // no quant row → nothing on hand → reserve nothing
@@ -2521,9 +2524,10 @@ impl Db {
             if grant <= Decimal::ZERO {
                 continue;
             }
-            sqlx::query("UPDATE stock_quant SET reserved_quantity = reserved_quantity + $3 WHERE product_id = $1 AND location_id = $2")
+            sqlx::query("UPDATE stock_quant SET reserved_quantity = reserved_quantity + $4 WHERE product_id = $1 AND location_id = $2 AND COALESCE(lot_id, 0) = COALESCE($3, 0)")
                 .bind(product_id)
                 .bind(src)
+                .bind(lot_id)
                 .bind(grant)
                 .execute(&mut *tx)
                 .await?;
@@ -2574,7 +2578,7 @@ impl Db {
             return Err(DbError::Conflict("the transfer was already validated".to_string()));
         }
 
-        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, product_uom_id, quantity_done, reserved_qty, location_id, location_dest_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
+        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, product_uom_id, lot_id, quantity_done, reserved_qty, location_id, location_dest_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
             .bind(picking_id)
             .fetch_all(&mut *tx)
             .await?;
@@ -2585,9 +2589,9 @@ impl Db {
         }
         use rust_decimal::Decimal;
         let mut products: Vec<i64> = Vec::new();
-        // (product, remainder in move unit, src, dst, move uom) for each move not fully processed → a
-        // backorder after commit.
-        let mut backorders: Vec<(i64, Decimal, i64, i64, Option<i64>)> = Vec::new();
+        // (product, remainder in move unit, src, dst, move uom, lot) for each move not fully processed →
+        // a backorder after commit.
+        let mut backorders: Vec<(i64, Decimal, i64, i64, Option<i64>, Option<i64>)> = Vec::new();
         for m in &moves {
             let move_id: i64 = m.try_get("id")?;
             let product_id: i64 = m.try_get("product_id")?;
@@ -2595,6 +2599,7 @@ impl Db {
             let done_field: Decimal = m.try_get("quantity_done")?;
             let move_reserved: Decimal = m.try_get("reserved_qty")?;
             let uom_id: Option<i64> = m.try_get("product_uom_id")?;
+            let lot_id: Option<i64> = m.try_get("lot_id")?;
             let src: i64 = m.try_get("location_id")?;
             let dst: i64 = m.try_get("location_dest_id")?;
             // quantity_done == 0 (the default) means "do the full ordered quantity" (all-or-nothing);
@@ -2603,6 +2608,23 @@ impl Db {
             let factor = self.uom_factor(uom_id).await?;
             let done = if done_field > Decimal::ZERO { done_field } else { ordered };
             let mut done_ref = (done * factor).round_dp(6);
+            // Serial-tracked product: a serial is exactly one unit and must carry its lot. Enforce both
+            // before touching a quant, so a serial can never be split or move anonymously.
+            let tracking: Option<String> = sqlx::query_scalar::<_, Option<String>>(
+                "SELECT t.tracking FROM product_product p JOIN product_template t ON p.product_tmpl_id = t.id WHERE p.id = $1",
+            )
+            .bind(product_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .flatten();
+            if tracking.as_deref() == Some("serial") {
+                if lot_id.is_none() {
+                    return Err(DbError::BadInput("a serial-tracked move requires a serial number (lot_id)".to_string()));
+                }
+                if done_ref != Decimal::ONE {
+                    return Err(DbError::BadInput("a serial number is exactly one unit; the move quantity must be 1".to_string()));
+                }
+            }
             // Over-delivery guard: a move OUT of an INTERNAL location can take only what is AVAILABLE
             // there — on-hand minus what OTHER moves have reserved, plus back this move's own
             // reservation (so a pre-reserved move can still deliver what it claimed). Stock never goes
@@ -2612,9 +2634,10 @@ impl Db {
                 .fetch_optional(&mut *tx)
                 .await?;
             if src_usage.as_deref() == Some("internal") {
-                let row = sqlx::query("SELECT quantity, COALESCE(reserved_quantity, 0) AS reserved_quantity FROM stock_quant WHERE product_id = $1 AND location_id = $2")
+                let row = sqlx::query("SELECT quantity, COALESCE(reserved_quantity, 0) AS reserved_quantity FROM stock_quant WHERE product_id = $1 AND location_id = $2 AND COALESCE(lot_id, 0) = COALESCE($3, 0)")
                     .bind(product_id)
                     .bind(src)
+                    .bind(lot_id)
                     .fetch_optional(&mut *tx)
                     .await?;
                 let (on_hand, reserved) = match row {
@@ -2634,11 +2657,12 @@ impl Db {
             let done = (done_ref / factor).round_dp(6);
             // Source loses `done_ref` and frees this move's reservation in full (the move is now done and
             // will never deliver again — any unused reservation must not leak; the backorder re-reserves
-            // from scratch). Destination gains `done_ref`. GREATEST floors reserved at 0.
+            // from scratch). Destination gains `done_ref`. The quant is keyed (product, location, lot);
+            // GREATEST floors reserved at 0.
             if done_ref > Decimal::ZERO {
                 sqlx::query(
-                    "INSERT INTO stock_quant (product_id, location_id, quantity, reserved_quantity) VALUES ($1, $2, $3, 0) \
-                     ON CONFLICT (product_id, location_id) DO UPDATE SET \
+                    "INSERT INTO stock_quant (product_id, location_id, quantity, reserved_quantity, lot_id) VALUES ($1, $2, $3, 0, $5) \
+                     ON CONFLICT (product_id, location_id, COALESCE(lot_id, 0)) DO UPDATE SET \
                        quantity = stock_quant.quantity + $3, \
                        reserved_quantity = GREATEST(0, stock_quant.reserved_quantity - $4)",
                 )
@@ -2646,15 +2670,17 @@ impl Db {
                 .bind(src)
                 .bind(-done_ref)
                 .bind(move_reserved)
+                .bind(lot_id)
                 .execute(&mut *tx)
                 .await?;
                 sqlx::query(
-                    "INSERT INTO stock_quant (product_id, location_id, quantity, reserved_quantity) VALUES ($1, $2, $3, 0) \
-                     ON CONFLICT (product_id, location_id) DO UPDATE SET quantity = stock_quant.quantity + $3",
+                    "INSERT INTO stock_quant (product_id, location_id, quantity, reserved_quantity, lot_id) VALUES ($1, $2, $3, 0, $4) \
+                     ON CONFLICT (product_id, location_id, COALESCE(lot_id, 0)) DO UPDATE SET quantity = stock_quant.quantity + $3",
                 )
                 .bind(product_id)
                 .bind(dst)
                 .bind(done_ref)
+                .bind(lot_id)
                 .execute(&mut *tx)
                 .await?;
             }
@@ -2665,7 +2691,7 @@ impl Db {
                 .await?;
             let remainder = ordered - done;
             if remainder > Decimal::ZERO {
-                backorders.push((product_id, remainder, src, dst, uom_id));
+                backorders.push((product_id, remainder, src, dst, uom_id, lot_id));
             }
             products.push(product_id);
         }
@@ -2704,10 +2730,10 @@ impl Db {
             let pdest = picking.get("location_dest_id").and_then(|v| v.as_i64());
             let bo_moves: Vec<serde_json::Value> = backorders
                 .iter()
-                .map(|(product_id, remainder, src, dst, uom_id)| {
+                .map(|(product_id, remainder, src, dst, uom_id, lot_id)| {
                     serde_json::json!({
                         "product_id": product_id, "product_uom_qty": remainder.to_string(),
-                        "product_uom_id": uom_id, "location_id": src, "location_dest_id": dst
+                        "product_uom_id": uom_id, "lot_id": lot_id, "location_id": src, "location_dest_id": dst
                     })
                 })
                 .collect();
@@ -3128,18 +3154,24 @@ impl Db {
         Ok(())
     }
 
-    /// Stock indexes: one quant per (product, location) — a composite UNIQUE the metamodel can't express,
-    /// and the anchor for the `ON CONFLICT (product_id, location_id)` upsert the move-done mechanism uses.
+    /// Stock indexes: one quant per (product, location, lot) — a composite UNIQUE the metamodel can't
+    /// express, and the anchor for the `ON CONFLICT (product_id, location_id, COALESCE(lot_id, 0))` upsert
+    /// the move-done mechanism uses. `COALESCE(lot_id, 0)` collapses untracked bulk (NULL lot) into a
+    /// single row per (product, location), so legacy/untracked stock stays one quant. The new index is
+    /// created BEFORE the old single-key one is dropped, so a quant is always uniquely constrained.
     /// Tolerates an unmigrated `stock_quant` (the stock module isn't installed). Run during migrate.
     pub async fn ensure_stock_indexes(&self) -> Result<(), DbError> {
-        match sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS stock_quant_product_location ON stock_quant (product_id, location_id)")
-            .execute(&self.pool)
-            .await
-        {
-            Ok(_) => Ok(()),
-            Err(e) if is_undefined_table(&e) => Ok(()),
-            Err(e) => Err(e.into()),
+        for sql in [
+            "CREATE UNIQUE INDEX IF NOT EXISTS stock_quant_product_location_lot ON stock_quant (product_id, location_id, COALESCE(lot_id, 0))",
+            "DROP INDEX IF EXISTS stock_quant_product_location",
+        ] {
+            match sqlx::query(sql).execute(&self.pool).await {
+                Ok(_) => {}
+                Err(e) if is_undefined_table(&e) => return Ok(()),
+                Err(e) => return Err(e.into()),
+            }
         }
+        Ok(())
     }
 }
 

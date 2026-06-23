@@ -76,6 +76,26 @@ pub struct StockQuant {
     // reserved_quantity; validating a move frees the reservation it held as the goods leave.
     #[field(label = "Reserved", default = "0")]
     reserved_quantity: Decimal,
+
+    // The lot/serial this on-hand belongs to. Quants are keyed per (product, location, lot); a NULL lot
+    // is untracked bulk (the common case, key COALESCE(lot_id, 0) = 0).
+    #[field(label = "Lot/Serial", target = "stock.lot")]
+    lot_id: Many2one,
+}
+
+/// A lot or serial number (Odoo's `stock.lot`): a tracked batch (lot) or a single unit (serial) of a
+/// product. On-hand is held per (product, location, lot); a serial-tracked product's lot is exactly one
+/// unit and cannot be in two places at once. Created when receiving a tracked product.
+#[model(name = "stock.lot", table = "stock_lot")]
+pub struct StockLot {
+    #[field(label = "Lot/Serial Number", required)]
+    name: Text,
+
+    #[field(label = "Product", required, target = "product.product")]
+    product_id: Many2one,
+
+    #[field(label = "Company", target = "res.company")]
+    company_id: Many2one,
 }
 
 // stock.picking carries a chatter thread (transfer history) and a tracked state.
@@ -134,6 +154,10 @@ pub struct StockMove {
     #[field(label = "Unit of Measure", target = "uom.uom")]
     product_uom_id: Many2one,
 
+    // The lot/serial this move carries (required for a tracked product). Quants are keyed by it.
+    #[field(label = "Lot/Serial", target = "stock.lot")]
+    lot_id: Many2one,
+
     // The quantity actually processed at validation, in the MOVE unit. 0 means "process the full ordered
     // quantity" (the all-or-nothing default); a smaller value validates a partial transfer and backorders
     // the rest.
@@ -170,6 +194,9 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "stock.picking", group: "stock.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "stock.move", group: "stock.user", read: true, write: true, create: true, delete: true },
     Acl { model: "stock.move", group: "stock.manager", read: true, write: true, create: true, delete: true },
+    // Lots/serials: operators create them when receiving tracked products; managers maintain them.
+    Acl { model: "stock.lot", group: "stock.user", read: true, write: true, create: true, delete: false },
+    Acl { model: "stock.lot", group: "stock.manager", read: true, write: true, create: true, delete: true },
 ];
 
 /// A done transfer's moves are frozen — no write, create or delete (only sudo or reverting can touch
@@ -286,7 +313,7 @@ mod tests {
         assert_eq!(StockLocation::descriptor().name, "stock.location");
         assert_eq!(StockLocation::descriptor().fields.len(), 5);
         assert_eq!(StockWarehouse::descriptor().name, "stock.warehouse");
-        assert_eq!(StockQuant::descriptor().fields.len(), 4);
+        assert_eq!(StockQuant::descriptor().fields.len(), 5);
     }
 
     #[test]

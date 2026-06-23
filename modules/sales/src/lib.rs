@@ -126,6 +126,11 @@ pub struct ProductTemplate {
     #[field(label = "Unit of Measure", target = "uom.uom")]
     uom_id: Many2one,
 
+    // Traceability (Odoo's `tracking`): whether stock of this product is tracked by lot, by unique serial
+    // number, or not at all. A tracked product's moves must carry a lot/serial.
+    #[field(label = "Tracking", default = "none", selection = "none:No Tracking,lot:By Lots,serial:By Unique Serial Number")]
+    tracking: Selection,
+
     #[field(label = "Sales Price", default = "0", tracked)]
     list_price: Decimal,
 
