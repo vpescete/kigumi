@@ -2076,31 +2076,74 @@ impl Db {
             (Some(c), Some(cc)) if c != cc => Some((c, cc)),
             _ => None,
         };
-        // Company-currency value of each part, at today's rate. The receivable is the SUM of the
-        // already-rounded parts (untaxed_co + tax_co), NEVER an independent convert(total) — that is the
-        // only way Σdebit == Σcredit holds exactly after per-line rounding, so check_balanced can't trip.
-        let (untaxed_co, tax_co) = match fx {
-            Some((c, cc)) => (
-                self.convert_amount(untaxed, c, cc, &today).await?,
-                self.convert_amount(tax, c, cc, &today).await?,
-            ),
-            None => (untaxed, tax),
+        use rust_decimal::Decimal;
+        // Company-currency value at today's rate (identity when the order currency == the company's).
+        let untaxed_co = match fx {
+            Some((c, cc)) => self.convert_amount(untaxed, c, cc, &today).await?,
+            None => untaxed,
         };
-        let receivable_co = untaxed_co + tax_co;
 
-        // Balanced invoice: income credit (untaxed) + tax credit (if any) + receivable debit, all in the
-        // company currency. `amount_currency` carries the signed invoice-currency amount (+ debit, −
-        // credit) as the FX memo; it is zero only in the single-currency case (untaxed_co == untaxed).
+        // Per-group tax totals (order currency) from the materialized breakdown, ordered by group
+        // sequence. A line still on the tax_rate fallback contributes no breakdown row, so any tax not
+        // covered by the breakdown is bucketed into a single fallback line — the GL tax always sums to
+        // amount_tax and the move balances.
+        let group_rows = sqlx::query(
+            "SELECT t.tax_group_id, g.name AS gname, SUM(t.tax_amount) AS amt \
+             FROM sale_order_line_tax t JOIN sale_order_line l ON l.id = t.line_id \
+             LEFT JOIN account_tax_group g ON g.id = t.tax_group_id \
+             WHERE l.order_id = $1 \
+             GROUP BY t.tax_group_id, g.name, g.sequence \
+             ORDER BY COALESCE(g.sequence, 1000), t.tax_group_id",
+        )
+        .bind(order_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut buckets: Vec<(String, Decimal)> = Vec::new();
+        let mut breakdown_total = Decimal::ZERO;
+        for r in &group_rows {
+            let amt: Decimal = r.try_get::<Option<Decimal>, _>("amt")?.unwrap_or_default();
+            breakdown_total += amt;
+            if amt != Decimal::ZERO {
+                let name = r.try_get::<Option<String>, _>("gname").ok().flatten().unwrap_or_else(|| "Taxes".to_string());
+                buckets.push((name, amt));
+            }
+        }
+        let fallback = tax - breakdown_total;
+        if fallback != Decimal::ZERO {
+            buckets.push(("Taxes".to_string(), fallback));
+        }
+        // A net-zero-across-groups tax set still needs the tax account; resolve it on demand.
+        let tax_account = match tax_account {
+            Some(a) => Some(a),
+            None if !buckets.is_empty() => Some(
+                self.first_match(&account_model, &elevated, "account_type", "tax", company)
+                    .await?
+                    .ok_or_else(|| DbError::BadInput("no tax account configured".to_string()))?,
+            ),
+            None => None,
+        };
+
+        // Balanced invoice: income credit (untaxed) + one tax credit per group + receivable debit, all in
+        // the company currency. `amount_currency` carries the signed invoice-currency amount (+ debit, −
+        // credit) as the FX memo. The receivable is the SUM of the already-rounded company-currency parts
+        // (untaxed_co + Σ tax_g_co), NEVER an independent convert(total), so check_balanced cannot trip.
         let mut lines = vec![serde_json::json!({
             "account_id": income, "name": "Untaxed Amount", "debit": "0", "credit": untaxed_co.to_string(),
             "amount_currency": (-untaxed).to_string(), "partner_id": partner, "company_id": company
         })];
-        if let Some(tax_account) = tax_account {
+        let mut tax_co_total = Decimal::ZERO;
+        for (name, amt) in &buckets {
+            let amt_co = match fx {
+                Some((c, cc)) => self.convert_amount(*amt, c, cc, &today).await?,
+                None => *amt,
+            };
+            tax_co_total += amt_co;
             lines.push(serde_json::json!({
-                "account_id": tax_account, "name": "Taxes", "debit": "0", "credit": tax_co.to_string(),
-                "amount_currency": (-tax).to_string(), "partner_id": partner, "company_id": company
+                "account_id": tax_account, "name": name, "debit": "0", "credit": amt_co.to_string(),
+                "amount_currency": (-*amt).to_string(), "partner_id": partner, "company_id": company
             }));
         }
+        let receivable_co = untaxed_co + tax_co_total;
         lines.push(serde_json::json!({
             "account_id": receivable, "name": "Receivable", "debit": receivable_co.to_string(), "credit": "0",
             "amount_currency": total.to_string(), "partner_id": partner, "company_id": company
