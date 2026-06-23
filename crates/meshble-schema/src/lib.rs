@@ -16,6 +16,24 @@ pub fn pg_column_type(kind: &FieldKind) -> &'static str {
     pg_type(kind)
 }
 
+/// The column TYPE plus its foreign-key reference for an additive `ALTER TABLE ADD COLUMN` — the subset
+/// of `to_ddl`'s column spec WITHOUT NOT NULL / UNIQUE / CHECK / DEFAULT, so it is safe to add to a
+/// populated table (the column is simply NULL on existing rows; required-ness is enforced at the write
+/// layer). `None` for kinds with no own column (One2many / Many2many).
+pub fn pg_add_column_type(field: &FieldDef) -> Option<String> {
+    let ty = pg_type(&field.kind);
+    if ty.is_empty() {
+        return None;
+    }
+    let mut col = ty.to_string();
+    match field.kind {
+        FieldKind::Many2one { target } => col.push_str(&format!(" REFERENCES {}(id)", table_of(target))),
+        FieldKind::Image => col.push_str(" REFERENCES meshble_attachment(id)"),
+        _ => {}
+    }
+    Some(col)
+}
+
 fn pg_type(kind: &FieldKind) -> &'static str {
     match kind {
         FieldKind::Text | FieldKind::Html | FieldKind::Selection(_) => "text",

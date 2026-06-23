@@ -74,6 +74,11 @@ impl Db {
         for t in &targets {
             self.install_or_upgrade(&t.model, t.model.name, &t.version, &[]).await?;
         }
+        // Additive safety net: materialize any model field added since install (a new #[field] on an
+        // already-installed table) so an in-place upgrade needs no DB reset. Additive only.
+        for t in &targets {
+            self.ensure_model_columns(&t.model).await?;
+        }
         // Second pass: Many2many junction tables, once every model table exists (FKs need both ends).
         for t in &targets {
             self.create_m2m_relations(&t.model).await?;

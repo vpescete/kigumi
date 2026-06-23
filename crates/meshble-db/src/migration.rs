@@ -13,9 +13,9 @@
 //! authored — but atomicity means a step depending on a missing one fails and rolls back the whole
 //! upgrade rather than silently corrupting the schema.
 
-use crate::{Db, DbError};
+use crate::{is_safe_ident, Db, DbError};
 use meshble_core::ResolvedModel;
-use meshble_schema::to_ddl;
+use meshble_schema::{pg_add_column_type, to_ddl};
 use semver::Version;
 use sqlx::Row;
 use std::collections::HashSet;
@@ -74,6 +74,39 @@ impl Db {
         }
         let count: i64 = sqlx::query_scalar("SELECT count(*) FROM meshble_module").fetch_one(&self.pool).await?;
         Ok(count > 0)
+    }
+
+    /// Additive in-place column sync: for each of `model`'s fields that has an own column but is missing
+    /// from the live table, add it via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. ADDITIVE ONLY — it
+    /// never drops, renames, retypes, or adds NOT NULL / UNIQUE / CHECK / DEFAULT to an existing table
+    /// (those can fail or lock a populated table; required-ness is enforced at the write layer, and the
+    /// new column is simply NULL on existing rows). This is the safety net that materializes a newly
+    /// added `#[field]` on an already-installed table without a DB reset; run on migrate after the
+    /// model/install pass. Idempotent (IF NOT EXISTS) and race-safe, like the custom-field ALTER.
+    pub async fn ensure_model_columns(&self, model: &ResolvedModel) -> Result<(), DbError> {
+        let live: HashSet<String> = sqlx::query_scalar(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1",
+        )
+        .bind(model.table)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .collect();
+        for f in model.fields.iter() {
+            let Some(col_type) = pg_add_column_type(f) else { continue };
+            if live.contains(f.name) {
+                continue;
+            }
+            // Defense in depth before interpolation (these are compile-time `'static` idents, but reuse
+            // the exact guard the custom-field ALTER uses).
+            if !is_safe_ident(f.name) || !is_safe_ident(model.table) {
+                return Err(DbError::BadInput(format!("unsafe identifier in column sync: {}.{}", model.table, f.name)));
+            }
+            sqlx::query(&format!("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}", model.table, f.name, col_type))
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
     }
 
     /// Installs `model` for `module` at `target_version` (creating the table on first install), or
