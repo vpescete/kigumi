@@ -2440,6 +2440,25 @@ impl Db {
     /// `FOR UPDATE` — the serialization point that stops two concurrent reservations of the same quant
     /// from over-committing. Idempotent: a re-run only tops up the still-unreserved delta of each move.
     /// Returns the number of moves that gained some reservation. Gated on the caller's picking WRITE.
+    /// The conversion factor of a unit of measure to its product's REFERENCE unit, defined as reference
+    /// units per one of this unit (dozen -> 12, cm with m reference -> 0.01, the reference itself -> 1).
+    /// Absent / unreadable / non-positive factor => 1 (pass-through, so a move without a uom or a legacy
+    /// row is unconverted). The f64 column is snapshotted to a Decimal rounded to 6 dp to bound float dust
+    /// so the quant math (qty_ref = move_qty * factor) stays clean.
+    async fn uom_factor(&self, uom_id: Option<i64>) -> Result<rust_decimal::Decimal, DbError> {
+        use rust_decimal::Decimal;
+        let Some(uid) = uom_id else { return Ok(Decimal::ONE) };
+        let f: Option<f64> = sqlx::query_scalar("SELECT factor FROM uom_uom WHERE id = $1")
+            .bind(uid)
+            .fetch_optional(&self.pool)
+            .await?
+            .flatten();
+        match f.and_then(Decimal::from_f64_retain) {
+            Some(d) if d > Decimal::ZERO => Ok(d.round_dp(6)),
+            _ => Ok(Decimal::ONE),
+        }
+    }
+
     pub async fn reserve_picking(
         &self,
         ctx: &Ctx,
@@ -2462,7 +2481,7 @@ impl Db {
         }
 
         let mut tx = self.pool.begin().await?;
-        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, reserved_qty, location_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
+        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, product_uom_id, reserved_qty, location_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
             .bind(picking_id)
             .fetch_all(&mut *tx)
             .await?;
@@ -2473,6 +2492,9 @@ impl Db {
             let ordered: Decimal = m.try_get("product_uom_qty")?;
             let already: Decimal = m.try_get("reserved_qty")?;
             let src: i64 = m.try_get("location_id")?;
+            // Convert the demand to the product reference unit — the quant + reserved_qty are reference.
+            let factor = self.uom_factor(m.try_get::<Option<i64>, _>("product_uom_id")?).await?;
+            let ordered_ref = (ordered * factor).round_dp(6);
             // Only internal sources hold reservable stock (a supplier/customer source has none).
             let src_usage: Option<String> = sqlx::query_scalar("SELECT usage FROM stock_location WHERE id = $1")
                 .bind(src)
@@ -2481,7 +2503,7 @@ impl Db {
             if src_usage.as_deref() != Some("internal") {
                 continue;
             }
-            let want = ordered - already;
+            let want = ordered_ref - already;
             if want <= Decimal::ZERO {
                 continue;
             }
@@ -2552,7 +2574,7 @@ impl Db {
             return Err(DbError::Conflict("the transfer was already validated".to_string()));
         }
 
-        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, quantity_done, reserved_qty, location_id, location_dest_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
+        let moves = sqlx::query("SELECT id, product_id, product_uom_qty, product_uom_id, quantity_done, reserved_qty, location_id, location_dest_id FROM stock_move WHERE picking_id = $1 AND state = 'draft'")
             .bind(picking_id)
             .fetch_all(&mut *tx)
             .await?;
@@ -2563,19 +2585,24 @@ impl Db {
         }
         use rust_decimal::Decimal;
         let mut products: Vec<i64> = Vec::new();
-        // (product, remainder, src, dst) for each move not fully processed → a backorder after commit.
-        let mut backorders: Vec<(i64, Decimal, i64, i64)> = Vec::new();
+        // (product, remainder in move unit, src, dst, move uom) for each move not fully processed → a
+        // backorder after commit.
+        let mut backorders: Vec<(i64, Decimal, i64, i64, Option<i64>)> = Vec::new();
         for m in &moves {
             let move_id: i64 = m.try_get("id")?;
             let product_id: i64 = m.try_get("product_id")?;
             let ordered: Decimal = m.try_get("product_uom_qty")?;
             let done_field: Decimal = m.try_get("quantity_done")?;
             let move_reserved: Decimal = m.try_get("reserved_qty")?;
+            let uom_id: Option<i64> = m.try_get("product_uom_id")?;
             let src: i64 = m.try_get("location_id")?;
             let dst: i64 = m.try_get("location_dest_id")?;
             // quantity_done == 0 (the default) means "do the full ordered quantity" (all-or-nothing);
-            // a positive value validates exactly that much and backorders the rest.
-            let mut done = if done_field > Decimal::ZERO { done_field } else { ordered };
+            // a positive value validates exactly that much and backorders the rest. All quant math is in
+            // the product REFERENCE unit: done_ref = done(move unit) * factor.
+            let factor = self.uom_factor(uom_id).await?;
+            let done = if done_field > Decimal::ZERO { done_field } else { ordered };
+            let mut done_ref = (done * factor).round_dp(6);
             // Over-delivery guard: a move OUT of an INTERNAL location can take only what is AVAILABLE
             // there — on-hand minus what OTHER moves have reserved, plus back this move's own
             // reservation (so a pre-reserved move can still deliver what it claimed). Stock never goes
@@ -2595,17 +2622,20 @@ impl Db {
                     None => (Decimal::ZERO, Decimal::ZERO),
                 };
                 let available = on_hand - reserved + move_reserved;
-                if done > available {
-                    done = available;
+                if done_ref > available {
+                    done_ref = available;
                 }
-                if done < Decimal::ZERO {
-                    done = Decimal::ZERO;
+                if done_ref < Decimal::ZERO {
+                    done_ref = Decimal::ZERO;
                 }
             }
-            // Source loses `done` and frees this move's reservation in full (the move is now done and
+            // Back-convert the (possibly clamped) reference quantity to the move unit for storage + the
+            // backorder remainder. factor is always > 0 (uom_factor floors at 1).
+            let done = (done_ref / factor).round_dp(6);
+            // Source loses `done_ref` and frees this move's reservation in full (the move is now done and
             // will never deliver again — any unused reservation must not leak; the backorder re-reserves
-            // from scratch). Destination simply gains `done`. GREATEST floors reserved at 0.
-            if done > Decimal::ZERO {
+            // from scratch). Destination gains `done_ref`. GREATEST floors reserved at 0.
+            if done_ref > Decimal::ZERO {
                 sqlx::query(
                     "INSERT INTO stock_quant (product_id, location_id, quantity, reserved_quantity) VALUES ($1, $2, $3, 0) \
                      ON CONFLICT (product_id, location_id) DO UPDATE SET \
@@ -2614,7 +2644,7 @@ impl Db {
                 )
                 .bind(product_id)
                 .bind(src)
-                .bind(-done)
+                .bind(-done_ref)
                 .bind(move_reserved)
                 .execute(&mut *tx)
                 .await?;
@@ -2624,7 +2654,7 @@ impl Db {
                 )
                 .bind(product_id)
                 .bind(dst)
-                .bind(done)
+                .bind(done_ref)
                 .execute(&mut *tx)
                 .await?;
             }
@@ -2635,7 +2665,7 @@ impl Db {
                 .await?;
             let remainder = ordered - done;
             if remainder > Decimal::ZERO {
-                backorders.push((product_id, remainder, src, dst));
+                backorders.push((product_id, remainder, src, dst, uom_id));
             }
             products.push(product_id);
         }
@@ -2674,10 +2704,10 @@ impl Db {
             let pdest = picking.get("location_dest_id").and_then(|v| v.as_i64());
             let bo_moves: Vec<serde_json::Value> = backorders
                 .iter()
-                .map(|(product_id, remainder, src, dst)| {
+                .map(|(product_id, remainder, src, dst, uom_id)| {
                     serde_json::json!({
                         "product_id": product_id, "product_uom_qty": remainder.to_string(),
-                        "location_id": src, "location_dest_id": dst
+                        "product_uom_id": uom_id, "location_id": src, "location_dest_id": dst
                     })
                 })
                 .collect();

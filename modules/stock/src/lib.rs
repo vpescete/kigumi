@@ -125,16 +125,24 @@ pub struct StockMove {
     #[field(label = "Product", required, target = "product.product")]
     product_id: Many2one,
 
+    // The quantity in the MOVE's unit of measure (product_uom_id). The quant always stores the product
+    // REFERENCE unit, so reserve/validate convert: qty_ref = product_uom_qty * uom factor.
     #[field(label = "Quantity", required, default = "0")]
     product_uom_qty: Decimal,
 
-    // The quantity actually processed at validation. 0 means "process the full ordered quantity" (the
-    // all-or-nothing default); a smaller value validates a partial transfer and backorders the rest.
+    // The move's unit of measure. Absent => the product reference unit (factor 1, no conversion).
+    #[field(label = "Unit of Measure", target = "uom.uom")]
+    product_uom_id: Many2one,
+
+    // The quantity actually processed at validation, in the MOVE unit. 0 means "process the full ordered
+    // quantity" (the all-or-nothing default); a smaller value validates a partial transfer and backorders
+    // the rest.
     #[field(label = "Done", default = "0")]
     quantity_done: Decimal,
 
-    // How much on-hand this move has claimed at its source via reserve_picking. Validating the move
-    // frees this exact amount from the source quant's reserved_quantity as the goods move out.
+    // How much on-hand this move has claimed at its source via reserve_picking, in the product REFERENCE
+    // unit (it mirrors the quant). Validating the move frees this exact amount from the source quant's
+    // reserved_quantity as the goods move out.
     #[field(label = "Reserved", default = "0")]
     reserved_qty: Decimal,
 
