@@ -2060,6 +2060,40 @@ impl Db {
         Ok(self.find_ids_secured(model, ctx, &[], &[], Some(&dom)).await?.into_iter().next())
     }
 
+    /// Atomically claims an order for invoicing: a compare-and-set that flips `invoice_status`
+    /// `to_invoice` -> `invoiced` ONLY if it is still `to_invoice`, under the same row-level authorization
+    /// the secured write enforces (the WRITE record rule + the company clause — reusing the exact
+    /// `record_rule_domain` / `company_clause` / `bind_query` primitives). Returns true iff THIS call won
+    /// the claim; false if it was already claimed or the row is not permitted. The single guarded UPDATE
+    /// closes the read-then-claim race two concurrent invoicings would otherwise lose (a duplicate move).
+    /// The caller must already have passed `check_access(Write)` (the ACL-level gate).
+    async fn claim_invoice_status(
+        &self,
+        order_model: &ResolvedModel,
+        ctx: &Ctx,
+        rules: &[RecordRule],
+        order_id: i64,
+    ) -> Result<bool, DbError> {
+        let mut params: Vec<Value> = vec![Value::Int(order_id)];
+        let mut where_sql = match record_rule_domain(Operation::Write, order_model.name, ctx, rules) {
+            Some(rule) => format!(
+                "id = $1 AND invoice_status = 'to_invoice' AND {}",
+                rule.compile_into(order_model, &mut params)?
+            ),
+            None => "id = $1 AND invoice_status = 'to_invoice'".to_string(),
+        };
+        where_sql.push_str(&company_clause(order_model, ctx, &mut params)?);
+        let sql = format!(
+            "UPDATE {} SET invoice_status = 'invoiced' WHERE {} RETURNING id",
+            order_model.table, where_sql
+        );
+        let mut q = sqlx::query(&sql);
+        for v in &params {
+            q = bind_query(q, v);
+        }
+        Ok(q.fetch_optional(&self.pool).await?.is_some())
+    }
+
     /// Generates a posted customer invoice (`account.move`, out_invoice) from a confirmed sale order:
     /// one income credit (untaxed), one tax credit (if any) and a receivable debit (total) — a balanced
     /// entry, posted (numbered + frozen) — then flips the order's `invoice_status` to invoiced. Gated on
@@ -2139,10 +2173,10 @@ impl Db {
             None
         };
 
-        // CLAIM the order under the caller — this enforces the WRITE record rule + company on the order,
-        // and exactly-one-row means we are authorized; abort (no GL effect) otherwise.
-        let claim = serde_json::json!({ "invoice_status": "invoiced" });
-        if self.update_secured(&order_model, ctx, acls, rules, order_id, claim.as_object().unwrap()).await? != 1 {
+        // CLAIM the order atomically (compare-and-set to_invoice -> invoiced) under the caller's row-level
+        // authorization; abort (no GL effect) if it was already claimed or is not permitted. This closes
+        // the read-then-claim double-invoice race.
+        if !self.claim_invoice_status(&order_model, ctx, rules, order_id).await? {
             return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "create_invoice" });
         }
 
@@ -2303,10 +2337,9 @@ impl Db {
             None
         };
 
-        // CLAIM the order under the caller (enforces the order WRITE ACL + record rule + company); abort
-        // (no GL effect) otherwise.
-        let claim = serde_json::json!({ "invoice_status": "invoiced" });
-        if self.update_secured(&order_model, ctx, acls, rules, order_id, claim.as_object().unwrap()).await? != 1 {
+        // CLAIM the order atomically (compare-and-set to_invoice -> invoiced); abort (no GL effect) if it
+        // was already billed or is not permitted. Closes the read-then-claim double-bill race.
+        if !self.claim_invoice_status(&order_model, ctx, rules, order_id).await? {
             return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "create_vendor_bill" });
         }
 
