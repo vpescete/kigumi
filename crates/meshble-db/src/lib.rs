@@ -1636,8 +1636,20 @@ impl Db {
                 .unwrap_or(2) as u32,
             None => 2,
         };
-        // Fiscal-position rewrite map (src tax -> Some(dest) / None = drop), if the order has one.
-        let fmap = match order.get("fiscal_position_id").and_then(|v| v.as_i64()) {
+        // Fiscal position: the order's, else the partner's default (res.partner.
+        // property_account_position_id, a plain id). Its rewrite map remaps src tax -> Some(dest)/None=drop.
+        let position_id = match order.get("fiscal_position_id").and_then(|v| v.as_i64()) {
+            Some(p) => Some(p),
+            None => match order.get("partner_id").and_then(|v| v.as_i64()) {
+                Some(pt) => sqlx::query_scalar::<_, Option<i64>>("SELECT NULLIF(property_account_position_id, 0) FROM res_partner WHERE id = $1")
+                    .bind(pt)
+                    .fetch_optional(&self.pool)
+                    .await?
+                    .flatten(),
+                None => None,
+            },
+        };
+        let fmap = match position_id {
             Some(pid) => self.fiscal_map_for(pid).await?,
             None => BTreeMap::new(),
         };
@@ -2180,14 +2192,26 @@ impl Db {
             return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "create_invoice" });
         }
 
-        // Accounting date is today; the due date is today + the order's payment term (days), if any.
+        // Accounting date is today; the due date is today + the payment term (days). The term is the
+        // order's, else the customer's default (res.partner.property_payment_term_id, a plain id).
         let today = self.today().await?;
-        let due_date = match order.get("payment_term_id").and_then(|v| v.as_i64()) {
-            Some(term_id) => sqlx::query_scalar::<_, Option<String>>(
+        let term_id = match order.get("payment_term_id").and_then(|v| v.as_i64()) {
+            Some(t) => Some(t),
+            None => match partner {
+                Some(p) => sqlx::query_scalar::<_, Option<i64>>("SELECT NULLIF(property_payment_term_id, 0) FROM res_partner WHERE id = $1")
+                    .bind(p)
+                    .fetch_optional(&self.pool)
+                    .await?
+                    .flatten(),
+                None => None,
+            },
+        };
+        let due_date = match term_id {
+            Some(tid) => sqlx::query_scalar::<_, Option<String>>(
                 "SELECT ($1::date + days::int)::text FROM account_payment_term WHERE id = $2 AND active",
             )
             .bind(&today)
-            .bind(term_id)
+            .bind(tid)
             .fetch_optional(&self.pool)
             .await?
             .flatten()

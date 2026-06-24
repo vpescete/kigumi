@@ -435,6 +435,20 @@ pub struct AccountFiscalPosition {
     active: Bool,
 }
 
+/// Partner accounting defaults (Odoo's `property_*` fields), added to `res.partner` via #[extend] from
+/// the sales module. They hold an account.payment.term / account.fiscal.position id but are plain
+/// Integers, NOT Many2one: a real FK would form a cycle (payment.term -> res.company -> res.partner ->
+/// payment.term), so referential integrity is traded for the partner-default convenience. An order with
+/// no explicit payment term / fiscal position falls back to its partner's default (resolved by id).
+#[extend("res.partner")]
+pub struct PartnerAccounting {
+    #[field(label = "Customer Payment Terms", default = "0")]
+    property_payment_term_id: Integer,
+
+    #[field(label = "Fiscal Position", default = "0")]
+    property_account_position_id: Integer,
+}
+
 /// One source-to-destination tax rewrite within a fiscal position. A NULL destination drops the source
 /// tax entirely (e.g. an export position removing domestic VAT).
 #[model(name = "account.fiscal.position.tax", table = "account_fiscal_position_tax")]
