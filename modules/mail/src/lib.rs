@@ -60,6 +60,30 @@ pub struct MailMessage {
     parent_id: Many2one,
 }
 
+/// An outgoing email (Odoo's `mail.mail`): a queued message awaiting SMTP delivery. `flush_outgoing_mail`
+/// reads the `outgoing` rows, hands each to the host's transport, and marks it `sent` / `exception`. The
+/// queue lives here; the SMTP transport (lettre) stays at the app level, so this module has no mail deps.
+#[model(name = "mail.mail", table = "mail_mail")]
+pub struct MailMail {
+    #[field(label = "To", required)]
+    email_to: Text,
+
+    #[field(label = "From")]
+    email_from: Text,
+
+    #[field(label = "Subject")]
+    subject: Text,
+
+    #[field(label = "Body")]
+    body_html: Text,
+
+    #[field(label = "State", default = "outgoing", selection = "outgoing:Outgoing,sent:Sent,exception:Failed")]
+    state: Selection,
+
+    #[field(label = "Error")]
+    error_message: Text,
+}
+
 /// A field-change audit row: one tracked field went from `old_value` to `new_value`, carried by a
 /// `notification` message. ONE typed value pair (serialized from the field's `Value`), not Odoo's
 /// ~10-column sparse table. `message_id` is a plain integer (no FK), like `author_id`: the subsystem
@@ -131,6 +155,10 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "mail.tracking", group: "admin", read: true, write: false, create: false, delete: true },
     Acl { model: "mail.activity", group: "admin", read: true, write: true, create: true, delete: true },
     Acl { model: "mail.follower", group: "admin", read: true, write: false, create: true, delete: true },
+    // Outgoing mail queue: users can queue + read their mail; admins manage the queue. The flush marks
+    // state through the db (elevated), not via these ACLs.
+    Acl { model: "mail.mail", group: "user", read: true, write: false, create: true, delete: false },
+    Acl { model: "mail.mail", group: "admin", read: true, write: true, create: true, delete: true },
 ];
 meshble::register_acls!(ACLS);
 

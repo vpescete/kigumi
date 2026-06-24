@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 use meshble::prelude::*;
 use meshble_auth::hash_password;
 use meshble_config::Settings;
-use meshble_db::Db;
+use meshble_db::{Db, OutgoingMail};
 use meshble_server::{
     access_fingerprint, refresh_access, refresh_custom_fields, refresh_view_overrides,
     router_with_data_dynamic_rasterized, GenpdfRasterizer,
@@ -516,6 +516,43 @@ async fn bootstrap_admin(db: &Db) -> Fallible {
     Ok(())
 }
 
+/// Builds an SMTP send closure from the instance config, or None if SMTP is not configured (the queue
+/// then just accumulates). The closure sends one queued mail over a BLOCKING lettre transport (STARTTLS
+/// on 587, implicit TLS on 465); it runs in the mail-flush task, so blocking on a slow server is contained.
+fn build_mail_sender(s: &Settings) -> Option<Box<dyn Fn(&OutgoingMail) -> Result<(), String> + Send + Sync>> {
+    use lettre::message::header::ContentType;
+    use lettre::transport::smtp::authentication::Credentials;
+    use lettre::{Message, SmtpTransport, Transport};
+
+    let host = s.config.mail.smtp_host.clone()?;
+    let port = s.config.mail.smtp_port.unwrap_or(587);
+    let from_default = s.config.mail.from.clone().unwrap_or_else(|| "no-reply@localhost".to_string());
+    let builder = if port == 465 { SmtpTransport::relay(&host) } else { SmtpTransport::starttls_relay(&host) };
+    let mut builder = match builder {
+        Ok(b) => b.port(port),
+        Err(e) => {
+            eprintln!("smtp transport build failed ({e}); outbound mail disabled");
+            return None;
+        }
+    };
+    if let Some(pw) = s.secrets.smtp_password.clone() {
+        builder = builder.credentials(Credentials::new(from_default.clone(), pw));
+    }
+    let mailer = builder.build();
+    println!("outbound mail enabled (smtp {host}:{port})");
+    Some(Box::new(move |m: &OutgoingMail| -> Result<(), String> {
+        let from = if m.from.is_empty() { from_default.clone() } else { m.from.clone() };
+        let email = Message::builder()
+            .from(from.parse().map_err(|e| format!("bad from address: {e}"))?)
+            .to(m.to.parse().map_err(|e| format!("bad to address: {e}"))?)
+            .subject(m.subject.clone())
+            .header(ContentType::TEXT_HTML)
+            .body(m.body.clone())
+            .map_err(|e| e.to_string())?;
+        mailer.send(&email).map(|_| ()).map_err(|e| e.to_string())
+    }))
+}
+
 async fn serve(s: Settings) -> Fallible {
     let bind = s.config.server.bind.clone();
     let db = Db::connect(&s.secrets.database_url).await?;
@@ -563,6 +600,21 @@ async fn serve(s: Settings) -> Fallible {
             }
         }
     });
+
+    // Outbound mail: if SMTP is configured, flush the mail.mail queue each tick over a blocking SMTP
+    // transport (lettre). Without SMTP config the queue just accumulates. Its own task so a slow SMTP
+    // server never delays the cron scheduler.
+    if let Some(send) = build_mail_sender(&s) {
+        let mail_db = db.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(CRON_TICK_SECS)).await;
+                if let Err(e) = mail_db.flush_outgoing_mail(send.as_ref()).await {
+                    eprintln!("meshble mail flush failed: {e:?}");
+                }
+            }
+        });
+    }
 
     // Live served-catalog refresh: re-read the install ledger periodically so a module installed or
     // uninstalled by ANOTHER process (or the CLI) is reflected without a restart (Odoo's registry

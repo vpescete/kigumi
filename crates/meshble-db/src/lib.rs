@@ -24,6 +24,16 @@ pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 pub use tax::{compute_tax_lines, TaxResult, TaxSpec};
 
+/// One queued outgoing email handed to the host's SMTP transport by [`Db::flush_outgoing_mail`].
+#[derive(Clone, Debug)]
+pub struct OutgoingMail {
+    pub id: i64,
+    pub to: String,
+    pub from: String,
+    pub subject: String,
+    pub body: String,
+}
+
 use meshble_core::{
     action_for, check_access, check_constraints, compute_on_read, compute_stored, computed_fields,
     delegated_fields, field_accessible, field_is_readonly, has_constraints, has_read_computes, inherits_of, is_mailed,
@@ -2730,6 +2740,57 @@ impl Db {
                 })
             })
             .collect())
+    }
+
+    /// Flushes the outgoing mail queue: hands every `mail.mail` in state `outgoing` to `send` (the host's
+    /// SMTP transport) and marks each `sent` or `exception` (recording the error). The transport stays at
+    /// the app level (lettre), so this crate has no mail dependency — `send` is a synchronous closure
+    /// (use a blocking SMTP transport). Tolerates an unmigrated `mail_mail` (mail not installed). Returns
+    /// the number successfully sent.
+    pub async fn flush_outgoing_mail(
+        &self,
+        send: &(dyn Fn(&OutgoingMail) -> Result<(), String> + Send + Sync),
+    ) -> Result<usize, DbError> {
+        let rows = match sqlx::query(
+            "SELECT id, email_to, email_from, subject, body_html FROM mail_mail WHERE state = 'outgoing' ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) if is_undefined_table(&e) => return Ok(0),
+            Err(e) => return Err(e.into()),
+        };
+        let s = |r: &PgRow, c: &str| -> String {
+            r.try_get::<Option<String>, _>(c).ok().flatten().unwrap_or_default()
+        };
+        let mut sent = 0usize;
+        for r in &rows {
+            let mail = OutgoingMail {
+                id: r.try_get("id")?,
+                to: s(r, "email_to"),
+                from: s(r, "email_from"),
+                subject: s(r, "subject"),
+                body: s(r, "body_html"),
+            };
+            match send(&mail) {
+                Ok(()) => {
+                    sqlx::query("UPDATE mail_mail SET state = 'sent', error_message = NULL WHERE id = $1")
+                        .bind(mail.id)
+                        .execute(&self.pool)
+                        .await?;
+                    sent += 1;
+                }
+                Err(err) => {
+                    sqlx::query("UPDATE mail_mail SET state = 'exception', error_message = $2 WHERE id = $1")
+                        .bind(mail.id)
+                        .bind(err)
+                        .execute(&self.pool)
+                        .await?;
+                }
+            }
+        }
+        Ok(sent)
     }
 
     /// Validates a `stock.picking` (draft → done): in ONE transaction, atomically moves each line's
