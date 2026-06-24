@@ -447,6 +447,8 @@ fn build_data_router(
         // Static segments, so they take precedence over the `/api/:name` model routes below.
         .route("/api/_acl", post(set_acl_handler))
         .route("/api/_rule", post(set_rule_handler))
+        .route("/api/_webhooks", get(list_webhooks_handler).post(create_webhook_handler))
+        .route("/api/_webhooks/:id/deactivate", post(deactivate_webhook_handler))
         .route("/api/:name", get(list_handler).post(create_handler))
         .route(
             "/api/:name/:id",
@@ -990,6 +992,71 @@ async fn set_acl_handler(State(state): State<AppState>, headers: HeaderMap, Json
             json_response(serde_json::json!({ "acl": { "model": model, "group": group } }).to_string())
         }
         Err(e) => write_error("set_acl", e),
+    }
+}
+
+/// Registers a webhook subscription (admin). Body: {name, url, event_filter?:[..], company_id?}. The
+/// per-subscription HMAC secret is generated server-side (CSPRNG) and returned ONCE — never again.
+async fn create_webhook_handler(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "managing webhooks requires the admin group").into_response();
+    }
+    let Some(url) = str_field(&body, "url") else {
+        return (StatusCode::BAD_REQUEST, "'url' is required").into_response();
+    };
+    if !url.starts_with("https://") {
+        return (StatusCode::BAD_REQUEST, "webhook url must be https").into_response();
+    }
+    let name = str_field(&body, "name").unwrap_or("webhook");
+    let filter: Vec<String> = body
+        .get("event_filter")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let company_id = body.get("company_id").and_then(|v| v.as_i64());
+    // A strong write-only secret, shown once.
+    let secret = format!("whsec_{}{}", new_jti(), new_jti());
+    match backend.db.create_webhook_subscription(name, url, &secret, &filter, company_id).await {
+        Ok(id) => json_response(serde_json::json!({ "id": id, "secret": secret }).to_string()),
+        Err(e) => write_error("create_webhook", e),
+    }
+}
+
+/// Lists webhook subscriptions (admin) — never the secret.
+async fn list_webhooks_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "managing webhooks requires the admin group").into_response();
+    }
+    match backend.db.list_webhook_subscriptions().await {
+        Ok(rows) => json_response(serde_json::json!({ "subscriptions": rows }).to_string()),
+        Err(e) => write_error("list_webhooks", e),
+    }
+}
+
+/// Deactivates a webhook subscription (admin).
+async fn deactivate_webhook_handler(State(state): State<AppState>, Path(id): Path<i64>, headers: HeaderMap) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "managing webhooks requires the admin group").into_response();
+    }
+    match backend.db.deactivate_webhook_subscription(id).await {
+        Ok(true) => json_response(serde_json::json!({ "deactivated": id }).to_string()),
+        Ok(false) => (StatusCode::NOT_FOUND, "no such subscription").into_response(),
+        Err(e) => write_error("deactivate_webhook", e),
     }
 }
 
