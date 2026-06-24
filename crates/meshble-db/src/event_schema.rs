@@ -21,6 +21,23 @@ pub struct OutboxEvent {
     pub change_summary: serde_json::Value,
 }
 
+/// A claimed delivery handed to the host's HTTP transport. `payload["id"]` (evt_<n>) is the stable
+/// idempotency key across retries; `attempts` is the count BEFORE this attempt.
+#[derive(Clone, Debug)]
+pub struct WebhookDelivery {
+    pub id: i64,
+    pub url: String,
+    pub secret: String,
+    pub payload: serde_json::Value,
+    pub attempts: i32,
+}
+
+/// Retry policy: give up after this many failed attempts (dead-letter).
+const WEBHOOK_MAX_ATTEMPTS: i32 = 8;
+/// Backoff = base * 2^attempts, capped — 30s, 60s, 120s … up to 6h.
+const WEBHOOK_BACKOFF_BASE_SECS: i64 = 30;
+const WEBHOOK_BACKOFF_CAP_SECS: i64 = 21_600;
+
 impl Db {
     /// Creates the integration tables if absent (idempotent; run at migrate + serve). Additive — never
     /// touches existing data.
@@ -217,6 +234,96 @@ impl Db {
         Ok(n > 0)
     }
 
+    /// Delivers pending+due webhook deliveries via `send` (the host's signed HTTP transport), with an
+    /// atomic claim-and-advance (pending -> delivering with a lease, the run_due_crons SKIP LOCKED shape:
+    /// the lock is NOT held across the POST). On success: sent. On failure: re-queued with exponential
+    /// backoff (attempts++), or dead-lettered after WEBHOOK_MAX_ATTEMPTS. The transport stays at the app
+    /// level (reqwest+HMAC in the CLI); this crate has no HTTP dep. Returns the number delivered.
+    pub async fn flush_webhooks(
+        &self,
+        send: &(dyn Fn(&WebhookDelivery) -> Result<(), String> + Send + Sync),
+    ) -> Result<usize, DbError> {
+        let claimed = match sqlx::query(
+            "UPDATE webhook_delivery SET state = 'delivering', lease_until = now() + interval '5 minutes' \
+             WHERE id IN ( \
+                 SELECT id FROM webhook_delivery WHERE state = 'pending' AND next_attempt_at <= now() \
+                 ORDER BY next_attempt_at LIMIT 100 FOR UPDATE SKIP LOCKED) \
+             RETURNING id, url, secret, payload, attempts",
+        )
+        .fetch_all(&self.pool)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) if is_undefined_table(&e) => return Ok(0),
+            Err(e) => return Err(e.into()),
+        };
+        let mut delivered = 0usize;
+        for r in &claimed {
+            let d = WebhookDelivery {
+                id: r.try_get("id")?,
+                url: r.try_get::<Option<String>, _>("url").ok().flatten().unwrap_or_default(),
+                secret: r.try_get::<Option<String>, _>("secret").ok().flatten().unwrap_or_default(),
+                payload: r.try_get::<serde_json::Value, _>("payload").unwrap_or(serde_json::Value::Null),
+                attempts: r.try_get::<i32, _>("attempts").unwrap_or(0),
+            };
+            match send(&d) {
+                Ok(()) => {
+                    sqlx::query("UPDATE webhook_delivery SET state = 'sent', lease_until = NULL, last_status = 200, last_error = NULL WHERE id = $1")
+                        .bind(d.id)
+                        .execute(&self.pool)
+                        .await?;
+                    delivered += 1;
+                }
+                Err(err) => {
+                    let attempts = d.attempts + 1;
+                    let err = err.chars().take(500).collect::<String>(); // never log a secret/large body
+                    if attempts >= WEBHOOK_MAX_ATTEMPTS {
+                        sqlx::query("UPDATE webhook_delivery SET state = 'dead', attempts = $2, lease_until = NULL, last_error = $3 WHERE id = $1")
+                            .bind(d.id)
+                            .bind(attempts)
+                            .bind(&err)
+                            .execute(&self.pool)
+                            .await?;
+                    } else {
+                        let backoff = (WEBHOOK_BACKOFF_BASE_SECS.saturating_mul(1i64 << attempts.min(20)))
+                            .min(WEBHOOK_BACKOFF_CAP_SECS);
+                        sqlx::query("UPDATE webhook_delivery SET state = 'pending', attempts = $2, lease_until = NULL, last_error = $3, next_attempt_at = now() + make_interval(secs => $4) WHERE id = $1")
+                            .bind(d.id)
+                            .bind(attempts)
+                            .bind(&err)
+                            .bind(backoff as f64)
+                            .execute(&self.pool)
+                            .await?;
+                    }
+                }
+            }
+        }
+        Ok(delivered)
+    }
+
+    /// Re-queues deliveries stuck in 'delivering' past their lease (a flusher crashed mid-send) so they
+    /// are retried. Run on a cron.
+    pub async fn reap_stuck_deliveries(&self) -> Result<u64, DbError> {
+        let n = match sqlx::query("UPDATE webhook_delivery SET state = 'pending', lease_until = NULL WHERE state = 'delivering' AND lease_until < now()")
+            .execute(&self.pool)
+            .await
+        {
+            Ok(r) => r.rows_affected(),
+            Err(e) if is_undefined_table(&e) => 0,
+            Err(e) => return Err(e.into()),
+        };
+        Ok(n)
+    }
+
+    /// Test helper: clears the backoff so pending deliveries are immediately due (lets a test drive the
+    /// retry loop without sleeping through the exponential backoff).
+    pub async fn force_deliveries_due(&self) -> Result<u64, DbError> {
+        Ok(sqlx::query("UPDATE webhook_delivery SET next_attempt_at = now() WHERE state = 'pending'")
+            .execute(&self.pool)
+            .await?
+            .rows_affected())
+    }
+
     /// Count of deliveries in a given state (test helper).
     pub async fn deliveries_in_state(&self, state: &str) -> Result<i64, DbError> {
         Ok(sqlx::query_scalar("SELECT count(*) FROM webhook_delivery WHERE state = $1")
@@ -229,6 +336,13 @@ impl Db {
     /// Empties the integration outbox + deliveries (test/admin helper).
     pub async fn clear_event_outbox(&self) -> Result<(), DbError> {
         let _ = sqlx::query("TRUNCATE event_outbox RESTART IDENTITY CASCADE").execute(&self.pool).await;
+        Ok(())
+    }
+
+    /// Empties webhook subscriptions + their deliveries (test helper — subscriptions are not migration
+    /// models, so a test's table-drop does not reset them).
+    pub async fn clear_webhook_subscriptions(&self) -> Result<(), DbError> {
+        let _ = sqlx::query("TRUNCATE webhook_subscription RESTART IDENTITY CASCADE").execute(&self.pool).await;
         Ok(())
     }
 

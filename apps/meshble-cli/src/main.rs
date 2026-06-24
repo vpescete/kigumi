@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 use meshble::prelude::*;
 use meshble_auth::hash_password;
 use meshble_config::Settings;
-use meshble_db::{Db, OutgoingMail};
+use meshble_db::{Db, OutgoingMail, WebhookDelivery};
 use meshble_server::{
     access_fingerprint, refresh_access, refresh_custom_fields, refresh_view_overrides,
     router_with_data_dynamic_rasterized, GenpdfRasterizer,
@@ -555,6 +555,108 @@ fn build_mail_sender(s: &Settings) -> Option<Box<dyn Fn(&OutgoingMail) -> Result
     }))
 }
 
+/// True if an IP must never be a webhook target — loopback, private, link-local (incl. 169.254.169.254
+/// cloud metadata), CGNAT, unspecified, and the IPv6 equivalents. The SSRF guard: a tenant-supplied URL
+/// must not be coercible into reaching the instance's own network.
+fn ip_is_blocked(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified()
+                || v4.is_broadcast() || v4.is_documentation()
+                || o[0] == 0                              // 0.0.0.0/8
+                || (o[0] == 100 && (o[1] & 0xc0) == 64)   // 100.64.0.0/10 CGNAT
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback() || v6.is_unspecified() || v6.is_multicast()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00  // fc00::/7 unique-local
+                || (v6.segments()[0] & 0xffc0) == 0xfe80  // fe80::/10 link-local
+                || v6.to_ipv4_mapped().map(|m| ip_is_blocked(IpAddr::V4(m))).unwrap_or(false)
+        }
+    }
+}
+
+/// Rejects a webhook URL that is not https (unless MESHBLE_WEBHOOK_ALLOW_INSECURE=1 for local dev) or
+/// whose host resolves to a blocked address. ponytail: resolve-then-check has a TOCTOU window against DNS
+/// rebinding (reqwest re-resolves on connect); redirect::none + https + this check cover the common case —
+/// pin to the resolved IP if a hostile-tenant threat model demands it.
+fn webhook_url_is_safe(url: &str) -> Result<(), String> {
+    use std::net::ToSocketAddrs;
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("bad url: {e}"))?;
+    let insecure_ok = std::env::var("MESHBLE_WEBHOOK_ALLOW_INSECURE").as_deref() == Ok("1");
+    if parsed.scheme() != "https" && !(insecure_ok && parsed.scheme() == "http") {
+        return Err("webhook url must be https".into());
+    }
+    let host = parsed.host_str().ok_or("url has no host")?;
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addrs: Vec<_> = (host, port).to_socket_addrs().map_err(|e| format!("dns resolution failed: {e}"))?.collect();
+    if addrs.is_empty() {
+        return Err("host did not resolve".into());
+    }
+    if addrs.iter().any(|a| ip_is_blocked(a.ip())) {
+        return Err("webhook host resolves to a blocked (private/loopback) address".into());
+    }
+    Ok(())
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
+/// The webhook transport — the ONLY place HTTP + HMAC live. Each pending delivery is POSTed as the frozen
+/// JSON envelope over a blocking client (redirect::none, 10s timeout) and signed Stripe-style:
+/// `X-Meshble-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, "<t>.<body>")>`, so a consumer can verify
+/// authenticity + reject replays. A non-2xx (or a transport/SSRF error) returns Err -> the db layer retries
+/// with backoff and dead-letters after the cap. ponytail: blocking send on the flush task's worker, fine at
+/// this cadence; move to spawn_blocking/async if delivery volume grows.
+fn build_webhook_sender() -> Box<dyn Fn(&WebhookDelivery) -> Result<(), String> + Send + Sync> {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .expect("blocking http client");
+
+    Box::new(move |d: &WebhookDelivery| -> Result<(), String> {
+        webhook_url_is_safe(&d.url)?;
+        let body = serde_json::to_string(&d.payload).map_err(|e| e.to_string())?;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_secs();
+        let mut mac = Hmac::<Sha256>::new_from_slice(d.secret.as_bytes()).map_err(|e| e.to_string())?;
+        mac.update(format!("{ts}.{body}").as_bytes());
+        let sig = hex_encode(&mac.finalize().into_bytes());
+        let event_type = d.payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let idem = d.payload.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+        let resp = client
+            .post(&d.url)
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "meshble-webhooks/1")
+            .header("X-Meshble-Signature", format!("t={ts},v1={sig}"))
+            .header("X-Meshble-Event", event_type)
+            .header("X-Meshble-Delivery", d.id.to_string())
+            .header("X-Meshble-Idempotency", idem)
+            .body(body)
+            .send()
+            .map_err(|e| format!("transport error: {e}"))?;
+        let status = resp.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(format!("endpoint returned {status}"))
+        }
+    })
+}
+
 async fn serve(s: Settings) -> Fallible {
     let bind = s.config.server.bind.clone();
     let db = Db::connect(&s.secrets.database_url).await?;
@@ -585,6 +687,7 @@ async fn serve(s: Settings) -> Fallible {
     // to `'static`), so a DB ACL/rule added via the CLI or the `/api/_acl` `/api/_rule` endpoints takes
     // effect without a restart: the poll loop below reloads on change, the endpoints reload at once.
     db.ensure_access_schema().await?;
+    db.ensure_event_schema().await?;
     let acls: meshble_server::AclState =
         std::sync::Arc::new(std::sync::RwLock::new(std::sync::Arc::from(registered_acls())));
     let rules: meshble_server::RuleState =
@@ -617,6 +720,27 @@ async fn serve(s: Settings) -> Fallible {
             }
         });
     }
+
+    // Outbound webhooks: each tick, materialize undispatched domain events into per-subscription
+    // deliveries (fan-out), reap any deliveries a crashed flusher left leased, then POST the pending ones
+    // over the signed blocking transport (retry/backoff/dead-letter handled in the db layer). Its own
+    // task so a slow endpoint never delays the cron scheduler or mail flush.
+    let wh_db = db.clone();
+    let wh_send = build_webhook_sender();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(CRON_TICK_SECS)).await;
+            if let Err(e) = wh_db.fan_out_events().await {
+                eprintln!("meshble webhook fan-out failed: {e:?}");
+            }
+            if let Err(e) = wh_db.reap_stuck_deliveries().await {
+                eprintln!("meshble webhook reap failed: {e:?}");
+            }
+            if let Err(e) = wh_db.flush_webhooks(wh_send.as_ref()).await {
+                eprintln!("meshble webhook flush failed: {e:?}");
+            }
+        }
+    });
 
     // Live served-catalog refresh: re-read the install ledger periodically so a module installed or
     // uninstalled by ANOTHER process (or the CLI) is reflected without a restart (Odoo's registry

@@ -26,6 +26,7 @@ async fn events_fan_out_to_matching_subscriptions_once() {
     for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
     db.ensure_event_schema().await.unwrap();
     db.clear_event_outbox().await.unwrap();
+    db.clear_webhook_subscriptions().await.unwrap();
 
     let partner = resolve_registered("res.partner").unwrap();
 

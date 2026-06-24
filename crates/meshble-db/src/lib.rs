@@ -24,7 +24,7 @@ pub use view_override::ViewOverride;
 pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 pub use tax::{compute_tax_lines, TaxResult, TaxSpec};
-pub use event_schema::OutboxEvent;
+pub use event_schema::{OutboxEvent, WebhookDelivery};
 
 /// One queued outgoing email handed to the host's SMTP transport by [`Db::flush_outgoing_mail`].
 #[derive(Clone, Debug)]
