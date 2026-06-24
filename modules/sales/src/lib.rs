@@ -699,6 +699,7 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "purchase.order", group: "sales.user", read: true, write: true, create: true, delete: false },
     Acl { model: "purchase.order", group: "sales.manager", read: true, write: true, create: true, delete: true },
     Acl { model: "purchase.order.line", group: "sales.user", read: true, write: true, create: true, delete: true },
+    Acl { model: "purchase.order.line.tax", group: "sales.user", read: true, write: true, create: true, delete: true },
     // Discount wizard (transient): opened, edited and applied by anyone in sales; the GC cron reclaims
     // the scratchpad rows, so no delete right is granted.
     Acl { model: "sale.order.discount", group: "sales.user", read: true, write: true, create: true, delete: false },
@@ -815,6 +816,10 @@ pub struct PurchaseOrder {
     #[field(label = "Billing Status", required, default = "no", selection = "no:Nothing to Bill,to_invoice:To Bill,invoiced:Fully Billed")]
     invoice_status: Selection,
 
+    // Optional fiscal position; apply_purchase_taxes remaps each line's taxes through it before computing.
+    #[field(label = "Fiscal Position", target = "account.fiscal.position")]
+    fiscal_position_id: Many2one,
+
     #[field(label = "Currency", required, target = "res.currency")]
     currency_id: Many2one,
 
@@ -853,20 +858,53 @@ pub struct PurchaseOrderLine {
     #[field(label = "Disc.%", default = "0")]
     discount: Decimal,
 
+    // Taxes mirror sale.order.line: a Many2many source set + a materialized breakdown One2many that the
+    // shared line computes read (apply_purchase_taxes fills them); legacy tax_id/tax_rate kept.
+    #[field(label = "Taxes", target = "account.tax", relation = "purchase_order_line_tax_rel", column = "line_id", target_column = "tax_id")]
+    tax_ids: Many2many,
+
+    #[field(label = "Tax Breakdown", target = "purchase.order.line.tax", inverse = "line_id")]
+    tax_line_ids: One2many,
+
     #[field(label = "Tax", target = "account.tax")]
     tax_id: Many2one,
 
     #[field(label = "Tax Rate %", default = "0")]
     tax_rate: Decimal,
 
-    #[field(label = "Subtotal", compute = "compute_line_subtotal", depends = "product_uom_qty,price_unit,discount", store)]
+    #[field(label = "Subtotal", compute = "compute_line_subtotal", depends = "product_uom_qty,price_unit,discount,tax_line_ids.tax_amount", store)]
     price_subtotal: Decimal,
 
-    #[field(label = "Tax", compute = "compute_line_tax", depends = "product_uom_qty,price_unit,discount,tax_rate", store)]
+    #[field(label = "Tax", compute = "compute_line_tax", depends = "product_uom_qty,price_unit,discount,tax_rate,tax_line_ids.tax_amount", store)]
     price_tax: Decimal,
 
-    #[field(label = "Total", compute = "compute_line_total", depends = "product_uom_qty,price_unit,discount,tax_rate", store)]
+    #[field(label = "Total", compute = "compute_line_total", depends = "product_uom_qty,price_unit,discount,tax_rate,tax_line_ids.tax_amount", store)]
     price_total: Decimal,
+}
+
+/// One materialized per-tax row of a purchase order line (the buy-side mirror of sale.order.line.tax).
+#[model(name = "purchase.order.line.tax", table = "purchase_order_line_tax")]
+pub struct PurchaseOrderLineTax {
+    #[field(label = "Line", required, target = "purchase.order.line")]
+    line_id: Many2one,
+
+    #[field(label = "Sequence", default = "10")]
+    sequence: Integer,
+
+    #[field(label = "Tax", target = "account.tax")]
+    tax_id: Many2one,
+
+    #[field(label = "Tax Group", target = "account.tax.group")]
+    tax_group_id: Many2one,
+
+    #[field(label = "Base", default = "0")]
+    base_amount: Decimal,
+
+    #[field(label = "Tax Amount", default = "0")]
+    tax_amount: Decimal,
+
+    #[field(label = "Included in Price", default = "false")]
+    is_price_include: Bool,
 }
 
 /// `confirm`: a draft purchase order becomes confirmed and gets its PO number (the buy-side mirror of

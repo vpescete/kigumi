@@ -1316,8 +1316,8 @@ async fn apply_taxes_handler(
     Path((name, id)): Path<(String, i64)>,
     headers: HeaderMap,
 ) -> Response {
-    if name != "sale.order" {
-        return (StatusCode::BAD_REQUEST, "apply_taxes is only valid on sale.order").into_response();
+    if name != "sale.order" && name != "purchase.order" {
+        return (StatusCode::BAD_REQUEST, "apply_taxes is only valid on sale.order or purchase.order").into_response();
     }
     if let Err(r) = resolve_model(&state, &name) {
         return r;
@@ -1327,7 +1327,12 @@ async fn apply_taxes_handler(
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.apply_taxes(&ctx, &backend.acls(), &backend.rules(), id).await {
+    let result = if name == "purchase.order" {
+        backend.db.apply_purchase_taxes(&ctx, &backend.acls(), &backend.rules(), id).await
+    } else {
+        backend.db.apply_taxes(&ctx, &backend.acls(), &backend.rules(), id).await
+    };
+    match result {
         Ok(n) => json_response(serde_json::json!({ "taxed": n }).to_string()),
         Err(e) => write_error("apply_taxes", e),
     }

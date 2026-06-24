@@ -1572,13 +1572,54 @@ impl Db {
         rules: &[RecordRule],
         order_id: i64,
     ) -> Result<u64, DbError> {
+        self.apply_taxes_to(
+            ctx, acls, rules, order_id, "sale.order", "sale.order.line", "sale.order.line.tax",
+            "sale_order_line_tax_rel", "sale_order_line_tax", "apply_taxes",
+        )
+        .await
+    }
+
+    /// Buy-side mirror of `apply_taxes`: materializes the per-tax breakdown on a purchase order's lines
+    /// (and remaps via the order's fiscal position). The vendor bill rolls it up per group.
+    pub async fn apply_purchase_taxes(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        order_id: i64,
+    ) -> Result<u64, DbError> {
+        self.apply_taxes_to(
+            ctx, acls, rules, order_id, "purchase.order", "purchase.order.line", "purchase.order.line.tax",
+            "purchase_order_line_tax_rel", "purchase_order_line_tax", "apply_purchase_taxes",
+        )
+        .await
+    }
+
+    /// The tax-engine core shared by the sale and purchase sides. Resolves each line's tax set (Many2many,
+    /// else legacy tax_id, else the product's default taxes), remaps it through the order's fiscal
+    /// position, runs `compute_tax_lines`, and replaces the line's breakdown rows + a blended back-compat
+    /// `tax_rate`. The model / table names differ only by side; the SQL fragments are fixed literals.
+    #[allow(clippy::too_many_arguments)]
+    async fn apply_taxes_to(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        order_id: i64,
+        order_model_name: &str,
+        line_model_name: &str,
+        breakdown_model_name: &str,
+        m2m_rel: &str,
+        breakdown_table: &str,
+        op_name: &'static str,
+    ) -> Result<u64, DbError> {
         use rust_decimal::Decimal;
-        let order_model = resolve_registered("sale.order").map_err(DbError::BadInput)?;
-        let line_model = resolve_registered("sale.order.line").map_err(DbError::BadInput)?;
-        let breakdown_model = resolve_registered("sale.order.line.tax").map_err(DbError::BadInput)?;
+        let order_model = resolve_registered(order_model_name).map_err(DbError::BadInput)?;
+        let line_model = resolve_registered(line_model_name).map_err(DbError::BadInput)?;
+        let breakdown_model = resolve_registered(breakdown_model_name).map_err(DbError::BadInput)?;
 
         if !check_access(Operation::Write, order_model.name, ctx, acls) {
-            return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "apply_taxes" });
+            return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: op_name });
         }
         let order = self
             .find_one_secured(&order_model, ctx, acls, rules, order_id)
@@ -1615,7 +1656,7 @@ impl Db {
 
             // The tax set, in resolution order: the line's Many2many membership, else the legacy single
             // tax_id, else the product's default taxes (Odoo's product.taxes_id flowing to the line).
-            let mut tax_ids: Vec<i64> = sqlx::query_scalar("SELECT tax_id FROM sale_order_line_tax_rel WHERE line_id = $1")
+            let mut tax_ids: Vec<i64> = sqlx::query_scalar(&format!("SELECT tax_id FROM {m2m_rel} WHERE line_id = $1"))
                 .bind(lid)
                 .fetch_all(&self.pool)
                 .await?;
@@ -1654,7 +1695,7 @@ impl Db {
             let (subtotal, results) = tax::compute_tax_lines(line_net, qty, &specs, dp);
 
             // Replace the line's breakdown rows (idempotent: a re-run re-derives from tax_ids).
-            sqlx::query("DELETE FROM sale_order_line_tax WHERE line_id = $1")
+            sqlx::query(&format!("DELETE FROM {breakdown_table} WHERE line_id = $1"))
                 .bind(lid)
                 .execute(&self.pool)
                 .await?;
@@ -1679,6 +1720,44 @@ impl Db {
             applied += 1;
         }
         Ok(applied)
+    }
+
+    /// Per-group tax totals (order currency) from a line's materialized breakdown, plus a single fallback
+    /// bucket for any tax NOT in the breakdown (lines still on the tax_rate fallback), so the GL tax always
+    /// sums to the order's amount_tax. Ordered by group sequence (NULL group last). `breakdown_table` /
+    /// `line_table` are fixed literals (the sale or purchase pair). Returns (group name, amount) buckets.
+    async fn tax_group_buckets(
+        &self,
+        order_id: i64,
+        breakdown_table: &str,
+        line_table: &str,
+        total_tax: rust_decimal::Decimal,
+    ) -> Result<Vec<(String, rust_decimal::Decimal)>, DbError> {
+        use rust_decimal::Decimal;
+        let sql = format!(
+            "SELECT t.tax_group_id, g.name AS gname, SUM(t.tax_amount) AS amt \
+             FROM {breakdown_table} t JOIN {line_table} l ON l.id = t.line_id \
+             LEFT JOIN account_tax_group g ON g.id = t.tax_group_id \
+             WHERE l.order_id = $1 \
+             GROUP BY t.tax_group_id, g.name, g.sequence \
+             ORDER BY COALESCE(g.sequence, 1000), t.tax_group_id"
+        );
+        let rows = sqlx::query(&sql).bind(order_id).fetch_all(&self.pool).await?;
+        let mut buckets: Vec<(String, Decimal)> = Vec::new();
+        let mut breakdown_total = Decimal::ZERO;
+        for r in &rows {
+            let amt: Decimal = r.try_get::<Option<Decimal>, _>("amt")?.unwrap_or_default();
+            breakdown_total += amt;
+            if amt != Decimal::ZERO {
+                let name = r.try_get::<Option<String>, _>("gname").ok().flatten().unwrap_or_else(|| "Taxes".to_string());
+                buckets.push((name, amt));
+            }
+        }
+        let fallback = total_tax - breakdown_total;
+        if fallback != Decimal::ZERO {
+            buckets.push(("Taxes".to_string(), fallback));
+        }
+        Ok(buckets)
     }
 
     /// Resolves account.tax ids into engine specs, preserving the given order and dropping inactive taxes.
@@ -2102,35 +2181,9 @@ impl Db {
             None => untaxed,
         };
 
-        // Per-group tax totals (order currency) from the materialized breakdown, ordered by group
-        // sequence. A line still on the tax_rate fallback contributes no breakdown row, so any tax not
-        // covered by the breakdown is bucketed into a single fallback line — the GL tax always sums to
-        // amount_tax and the move balances.
-        let group_rows = sqlx::query(
-            "SELECT t.tax_group_id, g.name AS gname, SUM(t.tax_amount) AS amt \
-             FROM sale_order_line_tax t JOIN sale_order_line l ON l.id = t.line_id \
-             LEFT JOIN account_tax_group g ON g.id = t.tax_group_id \
-             WHERE l.order_id = $1 \
-             GROUP BY t.tax_group_id, g.name, g.sequence \
-             ORDER BY COALESCE(g.sequence, 1000), t.tax_group_id",
-        )
-        .bind(order_id)
-        .fetch_all(&self.pool)
-        .await?;
-        let mut buckets: Vec<(String, Decimal)> = Vec::new();
-        let mut breakdown_total = Decimal::ZERO;
-        for r in &group_rows {
-            let amt: Decimal = r.try_get::<Option<Decimal>, _>("amt")?.unwrap_or_default();
-            breakdown_total += amt;
-            if amt != Decimal::ZERO {
-                let name = r.try_get::<Option<String>, _>("gname").ok().flatten().unwrap_or_else(|| "Taxes".to_string());
-                buckets.push((name, amt));
-            }
-        }
-        let fallback = tax - breakdown_total;
-        if fallback != Decimal::ZERO {
-            buckets.push(("Taxes".to_string(), fallback));
-        }
+        // Per-group tax totals (order currency) from the materialized breakdown + a fallback bucket for any
+        // tax not covered by a breakdown row, so the GL tax always sums to amount_tax and the move balances.
+        let buckets = self.tax_group_buckets(order_id, "sale_order_line_tax", "sale_order_line", tax).await?;
         // A net-zero-across-groups tax set still needs the tax account; resolve it on demand.
         let tax_account = match tax_account {
             Some(a) => Some(a),
@@ -2275,25 +2328,40 @@ impl Db {
             Some((c, cc)) => self.convert_amount(untaxed, c, cc, &today).await?,
             None => untaxed,
         };
-        let tax_co = match fx {
-            Some((c, cc)) => self.convert_amount(tax, c, cc, &today).await?,
-            None => tax,
+        // Per-group tax totals (order currency) from the breakdown + a fallback bucket; the GL tax sums to
+        // amount_tax and the bill balances.
+        let buckets = self.tax_group_buckets(order_id, "purchase_order_line_tax", "purchase_order_line", tax).await?;
+        // A net-zero-across-groups tax set still needs the tax account; resolve it on demand.
+        let tax_account = match tax_account {
+            Some(a) => Some(a),
+            None if !buckets.is_empty() => Some(
+                self.first_match(&account_model, &elevated, "account_type", "tax", company)
+                    .await?
+                    .ok_or_else(|| DbError::BadInput("no tax account configured".to_string()))?,
+            ),
+            None => None,
         };
-        // The payable is the SUM of the rounded parts, never convert(total), so check_balanced holds.
-        let payable_co = untaxed_co + tax_co;
 
-        // Balanced bill: expense debit (untaxed) + tax debit (if any) + payable credit (total), in company
-        // currency. amount_currency carries the signed invoice-currency amount (+ debit, − credit).
+        // Balanced bill: expense debit (untaxed) + one tax debit per group + payable credit (total), in
+        // company currency. amount_currency carries the signed invoice-currency amount (+ debit, − credit).
+        // The payable is the SUM of the rounded parts (untaxed_co + Σ tax_g_co), never convert(total).
         let mut lines = vec![serde_json::json!({
             "account_id": expense, "name": "Untaxed Amount", "debit": untaxed_co.to_string(), "credit": "0",
             "amount_currency": untaxed.to_string(), "partner_id": partner, "company_id": company
         })];
-        if let Some(tax_account) = tax_account {
+        let mut tax_co_total = Decimal::ZERO;
+        for (name, amt) in &buckets {
+            let amt_co = match fx {
+                Some((c, cc)) => self.convert_amount(*amt, c, cc, &today).await?,
+                None => *amt,
+            };
+            tax_co_total += amt_co;
             lines.push(serde_json::json!({
-                "account_id": tax_account, "name": "Taxes", "debit": tax_co.to_string(), "credit": "0",
-                "amount_currency": tax.to_string(), "partner_id": partner, "company_id": company
+                "account_id": tax_account, "name": name, "debit": amt_co.to_string(), "credit": "0",
+                "amount_currency": amt.to_string(), "partner_id": partner, "company_id": company
             }));
         }
+        let payable_co = untaxed_co + tax_co_total;
         lines.push(serde_json::json!({
             "account_id": payable, "name": "Payable", "debit": "0", "credit": payable_co.to_string(),
             "amount_currency": (-total).to_string(), "partner_id": partner, "company_id": company
