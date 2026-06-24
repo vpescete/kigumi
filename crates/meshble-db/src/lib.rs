@@ -2683,6 +2683,55 @@ impl Db {
             .collect())
     }
 
+    /// General-ledger drill-down: every POSTED move line on one account, in date order, with a running
+    /// balance (cumulative Σ debit − credit) — the detail behind a trial-balance account total. Read-gated
+    /// on account.account. v1: all companies, single currency.
+    pub async fn general_ledger(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        _rules: &[RecordRule],
+        account_id: i64,
+    ) -> Result<Vec<serde_json::Value>, DbError> {
+        let account_model = resolve_registered("account.account").map_err(DbError::BadInput)?;
+        if !check_access(Operation::Read, account_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: account_model.name.to_string(), operation: "general_ledger" });
+        }
+        let rows = sqlx::query(
+            "SELECT m.date::text AS date, m.name AS move_name, m.move_type, l.name AS label, \
+                    l.partner_id, p.name AS partner_name, l.debit, l.credit \
+             FROM account_move_line l \
+             JOIN account_move m ON m.id = l.move_id AND m.state = 'posted' \
+             LEFT JOIN res_partner p ON p.id = l.partner_id \
+             WHERE l.account_id = $1 \
+             ORDER BY m.date, m.id, l.id",
+        )
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+        use rust_decimal::Decimal;
+        let mut running = Decimal::ZERO;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                let debit: Decimal = r.try_get("debit").unwrap_or_default();
+                let credit: Decimal = r.try_get("credit").unwrap_or_default();
+                running += debit - credit;
+                serde_json::json!({
+                    "date": r.try_get::<Option<String>, _>("date").ok().flatten(),
+                    "move_name": r.try_get::<Option<String>, _>("move_name").ok().flatten(),
+                    "move_type": r.try_get::<Option<String>, _>("move_type").ok().flatten(),
+                    "label": r.try_get::<Option<String>, _>("label").ok().flatten(),
+                    "partner_id": r.try_get::<Option<i64>, _>("partner_id").ok().flatten(),
+                    "partner_name": r.try_get::<Option<String>, _>("partner_name").ok().flatten(),
+                    "debit": debit.to_string(),
+                    "credit": credit.to_string(),
+                    "balance": running.to_string(),
+                })
+            })
+            .collect())
+    }
+
     /// Validates a `stock.picking` (draft → done): in ONE transaction, atomically moves each line's
     /// quantity from its source to its destination quant (`ON CONFLICT (product_id, location_id)`
     /// upsert), marks the moves done, numbers the transfer from a per-type sequence (IN/OUT/INT), and

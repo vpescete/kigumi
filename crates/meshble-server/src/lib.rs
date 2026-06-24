@@ -429,6 +429,7 @@ fn build_data_router(
         .route("/api/:name/:id/apply_taxes", post(apply_taxes_handler))
         .route("/api/:name/:id/register_payment", post(register_payment_handler))
         .route("/api/reports/trial_balance", get(trial_balance_handler))
+        .route("/api/reports/general_ledger/:account_id", get(general_ledger_handler))
         .route("/api/reports/aged/:kind", get(aged_handler))
         .route("/api/:name/_onchange", post(onchange_handler))
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
@@ -1380,6 +1381,19 @@ async fn trial_balance_handler(State(state): State<AppState>, headers: HeaderMap
     match backend.db.trial_balance(&ctx, &backend.acls(), &backend.rules()).await {
         Ok(rows) => json_response(serde_json::json!({ "rows": rows }).to_string()),
         Err(e) => write_error("trial_balance", e),
+    }
+}
+
+/// General-ledger drill-down: posted move lines on one account with a running balance.
+async fn general_ledger_handler(State(state): State<AppState>, Path(account_id): Path<i64>, headers: HeaderMap) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.general_ledger(&ctx, &backend.acls(), &backend.rules(), account_id).await {
+        Ok(rows) => json_response(serde_json::json!({ "rows": rows }).to_string()),
+        Err(e) => write_error("general_ledger", e),
     }
 }
 
