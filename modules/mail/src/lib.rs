@@ -155,9 +155,10 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "mail.tracking", group: "admin", read: true, write: false, create: false, delete: true },
     Acl { model: "mail.activity", group: "admin", read: true, write: true, create: true, delete: true },
     Acl { model: "mail.follower", group: "admin", read: true, write: false, create: true, delete: true },
-    // Outgoing mail queue: users can queue + read their mail; admins manage the queue. The flush marks
-    // state through the db (elevated), not via these ACLs.
-    Acl { model: "mail.mail", group: "user", read: true, write: false, create: true, delete: false },
+    // Outgoing mail queue: admin/system only — the queue is populated by elevated system code (sending an
+    // invoice/quotation), NOT by end users, so a user cannot queue a spoofed email through the company
+    // relay. The flush additionally forces the envelope From to the configured address (see the CLI), so
+    // even an admin-queued row can only be sent from an address the relay is authorized for.
     Acl { model: "mail.mail", group: "admin", read: true, write: true, create: true, delete: true },
 ];
 meshble::register_acls!(ACLS);

@@ -541,7 +541,9 @@ fn build_mail_sender(s: &Settings) -> Option<Box<dyn Fn(&OutgoingMail) -> Result
     let mailer = builder.build();
     println!("outbound mail enabled (smtp {host}:{port})");
     Some(Box::new(move |m: &OutgoingMail| -> Result<(), String> {
-        let from = if m.from.is_empty() { from_default.clone() } else { m.from.clone() };
+        // Force the envelope From to the configured address — the relay is authorized only for it, so a
+        // queued row can never be sent as a spoofed sender. `m.from` is informational only.
+        let from = from_default.clone();
         let email = Message::builder()
             .from(from.parse().map_err(|e| format!("bad from address: {e}"))?)
             .to(m.to.parse().map_err(|e| format!("bad to address: {e}"))?)
