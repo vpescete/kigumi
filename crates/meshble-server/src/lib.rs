@@ -441,6 +441,7 @@ fn build_data_router(
         .route("/api/:name/:id/post", post(post_move_handler))
         // Generate a posted customer invoice (account.move) from a confirmed sale order.
         .route("/api/:name/:id/create_invoice", post(create_invoice_handler))
+        .route("/api/:name/:id/create_vendor_bill", post(create_vendor_bill_handler))
         .route("/api/:name/:id/validate", post(validate_picking_handler))
         .route("/api/:name/:id/reserve", post(reserve_picking_handler))
         .route("/api/:name/:id/create_delivery", post(create_delivery_handler))
@@ -1451,6 +1452,30 @@ async fn create_invoice_handler(
     match backend.db.create_sale_invoice(&ctx, &backend.acls(), &backend.rules(), id).await {
         Ok(move_id) => json_response(serde_json::json!({ "invoice": move_id }).to_string()),
         Err(e) => write_error("create_invoice", e),
+    }
+}
+
+/// Posts a vendor bill (`account.move`, in_invoice) from a confirmed `purchase.order`. v1: pinned to
+/// purchase.order. Authorization (WRITE on purchase.order) lives in the db layer.
+async fn create_vendor_bill_handler(
+    State(state): State<AppState>,
+    Path((name, id)): Path<(String, i64)>,
+    headers: HeaderMap,
+) -> Response {
+    if name != "purchase.order" {
+        return (StatusCode::BAD_REQUEST, "create_vendor_bill is only valid on purchase.order").into_response();
+    }
+    if let Err(r) = resolve_model(&state, &name) {
+        return r;
+    }
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.create_vendor_bill(&ctx, &backend.acls(), &backend.rules(), id).await {
+        Ok(move_id) => json_response(serde_json::json!({ "bill": move_id }).to_string()),
+        Err(e) => write_error("create_vendor_bill", e),
     }
 }
 

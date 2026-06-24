@@ -2182,6 +2182,136 @@ impl Db {
         Ok(move_id)
     }
 
+    /// Generates a posted vendor bill (`account.move`, in_invoice) from a confirmed purchase order: one
+    /// expense debit (untaxed), one tax debit (if any) and a payable credit (total) — the buy-side mirror
+    /// of `create_sale_invoice`, then flips the order's `invoice_status` to invoiced. Multi-currency safe
+    /// (the payable is the SUM of the already-rounded company-currency parts, so the move balances to the
+    /// cent). Gated on the caller's WRITE of the order; the GL posting runs elevated. Returns the move id.
+    /// Same documented non-atomicity as create_sale_invoice (claim then post). v1: a single tax line from
+    /// the order's amount_tax (purchase lines carry no per-group breakdown); per-group tax + fiscal
+    /// positions on the buy side are a follow-up. The bill is payable via `register_payment` (in_invoice).
+    pub async fn create_vendor_bill(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        order_id: i64,
+    ) -> Result<i64, DbError> {
+        use rust_decimal::Decimal;
+        let order_model = resolve_registered("purchase.order").map_err(DbError::BadInput)?;
+        let account_model = resolve_registered("account.account")
+            .map_err(|_| DbError::BadInput("install the account module to bill".to_string()))?;
+        let journal_model = resolve_registered("account.journal").map_err(DbError::BadInput)?;
+        let move_model = resolve_registered("account.move").map_err(DbError::BadInput)?;
+
+        if !check_access(Operation::Write, order_model.name, ctx, acls) {
+            return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "create_vendor_bill" });
+        }
+        let order = self
+            .find_one_secured(&order_model, ctx, acls, rules, order_id)
+            .await?
+            .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
+        let status = order.get("invoice_status").and_then(|v| v.as_str()).unwrap_or("");
+        if status != "to_invoice" {
+            return Err(DbError::BadInput(format!("order is not ready to bill (billing status '{status}')")));
+        }
+        let partner = order.get("partner_id").and_then(|v| v.as_i64());
+        let currency = order.get("currency_id").and_then(|v| v.as_i64());
+        let company = order.get("company_id").and_then(|v| v.as_i64()).or(ctx.company_id);
+        let amount = |k: &str| -> Decimal {
+            order.get(k).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or_default()
+        };
+        let (untaxed, tax, total) = (amount("amount_untaxed"), amount("amount_tax"), amount("amount_total"));
+        if total <= Decimal::ZERO {
+            return Err(DbError::BadInput("cannot bill an order with a non-positive total".to_string()));
+        }
+
+        // Resolve the chart BEFORE claiming the order, so a misconfiguration fails before any side effect.
+        let elevated = ctx.sudo();
+        let payable = self
+            .first_match(&account_model, &elevated, "account_type", "payable", company)
+            .await?
+            .ok_or_else(|| DbError::BadInput("no payable account configured".to_string()))?;
+        let expense = self
+            .first_match(&account_model, &elevated, "account_type", "expense", company)
+            .await?
+            .ok_or_else(|| DbError::BadInput("no expense account configured".to_string()))?;
+        let journal = self
+            .first_match(&journal_model, &elevated, "journal_type", "purchase", company)
+            .await?
+            .ok_or_else(|| DbError::BadInput("no purchase journal configured".to_string()))?;
+        let tax_account = if tax != Decimal::ZERO {
+            Some(
+                self.first_match(&account_model, &elevated, "account_type", "tax", company)
+                    .await?
+                    .ok_or_else(|| DbError::BadInput("no tax account configured".to_string()))?,
+            )
+        } else {
+            None
+        };
+
+        // CLAIM the order under the caller (enforces the order WRITE ACL + record rule + company); abort
+        // (no GL effect) otherwise.
+        let claim = serde_json::json!({ "invoice_status": "invoiced" });
+        if self.update_secured(&order_model, ctx, acls, rules, order_id, claim.as_object().unwrap()).await? != 1 {
+            return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "create_vendor_bill" });
+        }
+
+        let today = self.today().await?;
+        // Company-currency conversion at today's rate (identity when same / absent company currency).
+        let co_cur: Option<i64> = match company {
+            Some(co) => sqlx::query_scalar::<_, Option<i64>>("SELECT currency_id FROM res_company WHERE id = $1")
+                .bind(co)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten(),
+            None => None,
+        };
+        let fx = match (currency, co_cur) {
+            (Some(c), Some(cc)) if c != cc => Some((c, cc)),
+            _ => None,
+        };
+        let untaxed_co = match fx {
+            Some((c, cc)) => self.convert_amount(untaxed, c, cc, &today).await?,
+            None => untaxed,
+        };
+        let tax_co = match fx {
+            Some((c, cc)) => self.convert_amount(tax, c, cc, &today).await?,
+            None => tax,
+        };
+        // The payable is the SUM of the rounded parts, never convert(total), so check_balanced holds.
+        let payable_co = untaxed_co + tax_co;
+
+        // Balanced bill: expense debit (untaxed) + tax debit (if any) + payable credit (total), in company
+        // currency. amount_currency carries the signed invoice-currency amount (+ debit, − credit).
+        let mut lines = vec![serde_json::json!({
+            "account_id": expense, "name": "Untaxed Amount", "debit": untaxed_co.to_string(), "credit": "0",
+            "amount_currency": untaxed.to_string(), "partner_id": partner, "company_id": company
+        })];
+        if let Some(tax_account) = tax_account {
+            lines.push(serde_json::json!({
+                "account_id": tax_account, "name": "Taxes", "debit": tax_co.to_string(), "credit": "0",
+                "amount_currency": tax.to_string(), "partner_id": partner, "company_id": company
+            }));
+        }
+        lines.push(serde_json::json!({
+            "account_id": payable, "name": "Payable", "debit": "0", "credit": payable_co.to_string(),
+            "amount_currency": (-total).to_string(), "partner_id": partner, "company_id": company
+        }));
+
+        let move_payload = serde_json::json!({
+            "move_type": "in_invoice", "journal_id": journal, "partner_id": partner,
+            "currency_id": currency, "company_id": company, "line_ids": lines,
+            "date": today, "invoice_date_due": today,
+            // Settlement starts fully open; register_payment draws this down (in_invoice → payable).
+            "amount_residual": total.to_string(), "amount_total_company": payable_co.to_string()
+        });
+        let move_id =
+            self.insert_secured(&move_model, &elevated, &[], &[], move_payload.as_object().unwrap()).await?;
+        self.post_move(&elevated, &[], &[], move_id).await?;
+        Ok(move_id)
+    }
+
     /// Registers a (full or partial) payment against a posted customer invoice / vendor bill: atomically
     /// draws down the invoice's open `amount_residual` (a guarded SQL decrement that both validates — no
     /// over-payment, no concurrent double-spend — and records `payment_state`/`reconciled`), then books a

@@ -810,6 +810,11 @@ pub struct PurchaseOrder {
     #[field(label = "Status", required, default = "draft", selection = "draft:Draft,purchase:Confirmed,done:Done")]
     state: Selection,
 
+    // Billing seam (mirror of sale.order): confirm sets it To Invoice; create_vendor_bill posts the bill
+    // and flips it to Invoiced.
+    #[field(label = "Billing Status", required, default = "no", selection = "no:Nothing to Bill,to_invoice:To Bill,invoiced:Fully Billed")]
+    invoice_status: Selection,
+
     #[field(label = "Currency", required, target = "res.currency")]
     currency_id: Many2one,
 
@@ -870,6 +875,7 @@ fn confirm_purchase(i: &ActionInput) -> Result<ActionOutcome, String> {
     match i.str("state") {
         "draft" => Ok(ActionOutcome::new()
             .set("state", Value::Str("purchase".to_string()))
+            .set("invoice_status", Value::Str("to_invoice".to_string()))
             .assign_sequence("name", "PO")),
         s => Err(format!("can only confirm a draft purchase order (state is '{s}')")),
     }
