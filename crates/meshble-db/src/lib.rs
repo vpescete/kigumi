@@ -2501,19 +2501,21 @@ impl Db {
             serde_json::json!({ "account_id": money, "name": "Payment", "debit": bank_d.to_string(), "credit": bank_c.to_string(), "amount_currency": bank_cur.to_string(), "partner_id": partner, "company_id": company }),
             serde_json::json!({ "account_id": counterpart, "name": "Payment", "debit": ctr_d.to_string(), "credit": ctr_c.to_string(), "amount_currency": ctr_cur.to_string(), "partner_id": partner, "company_id": company }),
         ];
-        // FX plug: the line that keeps Σdebit == Σcredit in company currency (the realized gain/loss).
-        // v1 books both gain and loss to the income account; dedicated gain/loss accounts are a follow-up.
+        // FX plug: the line that keeps Σdebit == Σcredit in company currency (the realized gain/loss). A
+        // credit (imbalance > 0) is a realized GAIN → an income account; a debit is a realized LOSS → an
+        // expense account. The gain/loss sign is direction-agnostic (customer-in and vendor-out both fall
+        // out of the same imbalance), so a single rule routes both correctly.
         let imbalance = (bank_d + ctr_d) - (bank_c + ctr_c);
         if imbalance != Decimal::ZERO {
-            let fx_account = self
-                .first_match(&account_model, &elevated, "account_type", "income", company)
-                .await?
-                .ok_or_else(|| DbError::BadInput("no income account configured for FX gain/loss".to_string()))?;
-            let (fx_d, fx_c) = if imbalance > Decimal::ZERO {
-                (Decimal::ZERO, imbalance)
+            let (fx_d, fx_c, gl_type) = if imbalance > Decimal::ZERO {
+                (Decimal::ZERO, imbalance, "income")
             } else {
-                (-imbalance, Decimal::ZERO)
+                (-imbalance, Decimal::ZERO, "expense")
             };
+            let fx_account = self
+                .first_match(&account_model, &elevated, "account_type", gl_type, company)
+                .await?
+                .ok_or_else(|| DbError::BadInput(format!("no {gl_type} account configured for FX gain/loss")))?;
             lines.push(serde_json::json!({ "account_id": fx_account, "name": "Exchange difference", "debit": fx_d.to_string(), "credit": fx_c.to_string(), "amount_currency": "0", "partner_id": partner, "company_id": company }));
         }
         let lines = serde_json::Value::Array(lines);
