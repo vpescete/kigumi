@@ -6,6 +6,9 @@
 //! `meshble_core::resolve_all_registered()` and its security policy, then calls [`router`] or
 //! [`router_with_data`]. The core stays headless; this crate is optional.
 
+mod pdf;
+pub use pdf::GenpdfRasterizer;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -389,6 +392,34 @@ pub fn router_with_data_dynamic(
         auth_secret,
         blobs,
         None,
+    )
+}
+
+/// Like [`router_with_data_dynamic`] but with a PDF rasterizer for report `?format=pdf` (None → 501).
+#[allow(clippy::too_many_arguments)]
+pub fn router_with_data_dynamic_rasterized(
+    models: Vec<ResolvedModel>,
+    installed: Arc<RwLock<HashSet<String>>>,
+    custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
+    view_overrides: Arc<RwLock<HashMap<String, Vec<ViewOverride>>>>,
+    db: Db,
+    acls: AclState,
+    rules: RuleState,
+    auth_secret: impl Into<String>,
+    blobs: Arc<dyn BlobStore>,
+    rasterizer: Option<Arc<dyn Rasterizer>>,
+) -> Router {
+    build_data_router(
+        models,
+        installed,
+        custom_fields,
+        view_overrides,
+        db,
+        acls,
+        rules,
+        auth_secret,
+        blobs,
+        rasterizer,
     )
 }
 

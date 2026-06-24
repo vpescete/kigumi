@@ -16,7 +16,7 @@ use meshble_config::Settings;
 use meshble_db::Db;
 use meshble_server::{
     access_fingerprint, refresh_access, refresh_custom_fields, refresh_view_overrides,
-    router_with_data_dynamic,
+    router_with_data_dynamic_rasterized, GenpdfRasterizer,
 };
 
 type Fallible = Result<(), Box<dyn std::error::Error>>;
@@ -608,7 +608,7 @@ async fn serve(s: Settings) -> Fallible {
     let blobs: std::sync::Arc<dyn meshble_storage::BlobStore> =
         std::sync::Arc::new(meshble_storage::FsBlobStore::new(blob_root));
 
-    let app = router_with_data_dynamic(
+    let app = router_with_data_dynamic_rasterized(
         models,
         installed_set,
         custom_fields,
@@ -618,6 +618,7 @@ async fn serve(s: Settings) -> Fallible {
         rules,
         s.secrets.jwt_secret.clone(),
         blobs,
+        Some(std::sync::Arc::new(GenpdfRasterizer::new())),
     );
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
