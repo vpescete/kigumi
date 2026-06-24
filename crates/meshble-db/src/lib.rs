@@ -10,6 +10,7 @@ mod access_store;
 mod auth_store;
 mod cron;
 mod custom_field;
+mod event_schema;
 mod migration;
 mod module_store;
 mod sequence;
@@ -23,6 +24,7 @@ pub use view_override::ViewOverride;
 pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 pub use tax::{compute_tax_lines, TaxResult, TaxSpec};
+pub use event_schema::OutboxEvent;
 
 /// One queued outgoing email handed to the host's SMTP transport by [`Db::flush_outgoing_mail`].
 #[derive(Clone, Debug)]
@@ -535,6 +537,23 @@ impl Db {
         if has_constraints(model.name) {
             check_constraints_in_tx(model, tx, id, None).await?;
         }
+        // Domain event, atomic with the create (same tx): a rolled-back insert enqueues nothing.
+        let company_id = record.get("company_id").and_then(|v| match v {
+            Value::Int(n) => Some(*n),
+            _ => None,
+        });
+        self.enqueue_event_in_tx(
+            tx,
+            &OutboxEvent {
+                event_type: "model.created".to_string(),
+                model: model.name.to_string(),
+                record_id: id,
+                author_uid: Some(ctx.uid),
+                company_id,
+                change_summary: serde_json::json!({}),
+            },
+        )
+        .await?;
         Ok((id, record))
     }
 
@@ -712,6 +731,15 @@ impl Db {
         // NEW values are re-read the same way (Postgres `::text`) after the UPDATE, so old/new diff in
         // ONE representation: no false positive from Date/Datetime/Float/Decimal text-format mismatch.
         let old_text = snapshot_text(&mut tx, model.table, &track_cols, id, true).await?;
+        // Domain-event state detection: snapshot the OLD 'state' (independent of mail tracking, which may
+        // be empty) when this write touches a 'state' column, so model.state_changed fires only on a real
+        // transition.
+        let writes_state = model.fields.iter().any(|f| f.name == "state") && cols.iter().any(|(c, _)| *c == "state");
+        let old_state = if writes_state {
+            snapshot_text(&mut tx, model.table, &["state"], id, false).await?.into_iter().next().and_then(|(_, v)| v)
+        } else {
+            None
+        };
 
         // 1) Scalar UPDATE of the provided columns (computed columns recomputed in step 3); the Write
         //    rule + company scope are enforced in the WHERE.
@@ -825,6 +853,55 @@ impl Db {
         // Re-read the NEW text of tracked columns on the still-locked row (same `::text` rendering as
         // the old snapshot). Tracked columns are non-computed, so the recompute above can't touch them.
         let new_text = snapshot_text(&mut tx, model.table, &track_cols, id, false).await?;
+
+        // Domain events, atomic with the update (same tx): model.updated always (when a row matched), and
+        // model.state_changed when the 'state' value actually changed.
+        if affected > 0 {
+            let company_id = if model.fields.iter().any(|f| f.name == "company_id") {
+                snapshot_text(&mut tx, model.table, &["company_id"], id, false)
+                    .await?
+                    .into_iter()
+                    .next()
+                    .and_then(|(_, v)| v)
+                    .and_then(|s| s.parse::<i64>().ok())
+            } else {
+                None
+            };
+            let changed: Vec<&str> = cols.iter().map(|(c, _)| *c).collect();
+            self.enqueue_event_in_tx(
+                &mut tx,
+                &OutboxEvent {
+                    event_type: "model.updated".to_string(),
+                    model: model.name.to_string(),
+                    record_id: id,
+                    author_uid: Some(ctx.uid),
+                    company_id,
+                    change_summary: serde_json::json!({ "changed_fields": changed }),
+                },
+            )
+            .await?;
+            if writes_state {
+                let new_state = snapshot_text(&mut tx, model.table, &["state"], id, false)
+                    .await?
+                    .into_iter()
+                    .next()
+                    .and_then(|(_, v)| v);
+                if old_state != new_state {
+                    self.enqueue_event_in_tx(
+                        &mut tx,
+                        &OutboxEvent {
+                            event_type: "model.state_changed".to_string(),
+                            model: model.name.to_string(),
+                            record_id: id,
+                            author_uid: Some(ctx.uid),
+                            company_id,
+                            change_summary: serde_json::json!({ "field": "state", "from": old_state, "to": new_state }),
+                        },
+                    )
+                    .await?;
+                }
+            }
+        }
         tx.commit().await?;
 
         // 4) Re-parenting: if this row is itself a child whose FK moved, recompute the old + new
@@ -3085,6 +3162,20 @@ impl Db {
             .await?;
         }
 
+        // Domain event, atomic with the transfer (same tx): the picking is validated/done.
+        self.enqueue_event_in_tx(
+            &mut tx,
+            &OutboxEvent {
+                event_type: "stock.picking.done".to_string(),
+                model: "stock.picking".to_string(),
+                record_id: picking_id,
+                author_uid: Some(ctx.uid),
+                company_id: picking.get("company_id").and_then(|v| v.as_i64()),
+                change_summary: serde_json::json!({ "name": number }),
+            },
+        )
+        .await?;
+
         tx.commit().await?;
 
         // Spill any unfulfilled remainder into a new DRAFT backorder transfer, created via the ORM (so it
@@ -3346,6 +3437,16 @@ impl Db {
         }
         // Capture the parents this child points to before it is gone, to recompute them after.
         let parents = self.parent_targets(model, id).await?;
+        // Snapshot company_id before the row is gone (for the best-effort delete event below).
+        let pre_company: Option<i64> = if model.fields.iter().any(|f| f.name == "company_id") {
+            sqlx::query_scalar::<_, Option<i64>>(&format!("SELECT company_id FROM {} WHERE id = $1", model.table))
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten()
+        } else {
+            None
+        };
         let mut params: Vec<Value> = vec![Value::Int(id)];
         let mut where_sql = match record_rule_domain(Operation::Delete, model.name, ctx, rules) {
             Some(rule) => format!("id = $1 AND {}", rule.compile_into(model, &mut params)?),
@@ -3365,6 +3466,22 @@ impl Db {
             self.cleanup_attachments(model.name, id).await?;
             if is_mailed(model.name) {
                 self.cleanup_thread(model.name, id).await?;
+            }
+            // Best-effort post-commit delete event (DELETE is autocommit, not a tx — at-least-once,
+            // loseable in the crash window until the Phase-4 transactional wrapping). Never fail the
+            // delete on an enqueue error.
+            if let Err(e) = self
+                .enqueue_event(&OutboxEvent {
+                    event_type: "model.deleted".to_string(),
+                    model: model.name.to_string(),
+                    record_id: id,
+                    author_uid: Some(ctx.uid),
+                    company_id: pre_company,
+                    change_summary: serde_json::json!({}),
+                })
+                .await
+            {
+                eprintln!("meshble: delete event enqueue failed for {}#{id}: {e:?}", model.name);
             }
         }
         for (parent, pid) in parents {
