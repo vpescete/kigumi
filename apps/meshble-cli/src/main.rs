@@ -452,6 +452,20 @@ async fn seed_base_data(db: &Db) -> Fallible {
         println!("seeded default company + currency");
     }
 
+    // Seed a starter set of countries (idempotent: insert only the ones not already present by code).
+    if let Ok(country) = resolve_registered("res.country") {
+        for (name, code) in [
+            ("Italy", "IT"), ("France", "FR"), ("Germany", "DE"), ("Spain", "ES"),
+            ("United Kingdom", "GB"), ("United States", "US"), ("Switzerland", "CH"), ("Netherlands", "NL"),
+        ] {
+            let by_code = Domain::field("code").eq(code);
+            if db.count_secured(&country, &su, &[], &[], Some(&by_code)).await? == 0 {
+                let v = serde_json::json!({ "name": name, "code": code, "active": true });
+                db.insert_secured(&country, &su, &[], &[], v.as_object().unwrap()).await?;
+            }
+        }
+    }
+
     // Seed the read-only res.groups list from every group referenced by registered ACLs/rules
     // (idempotent: insert only the ones not already present).
     if let Ok(groups) = resolve_registered("res.groups") {

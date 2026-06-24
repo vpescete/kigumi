@@ -61,6 +61,37 @@ pub struct ResCurrencyRate {
     company_id: Many2one,
 }
 
+/// A country (Odoo's `res.country`): ISO master data referenced by partner / company addresses (and
+/// later by fiscal-position auto-apply). Reference data — read by all, maintained by admin, seeded.
+#[model(name = "res.country", table = "res_country")]
+pub struct ResCountry {
+    #[field(label = "Country Name", required)]
+    name: Text,
+
+    // ISO 3166-1 alpha-2 (IT, FR, …).
+    #[field(label = "Country Code")]
+    code: Text,
+
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+}
+
+/// A state / province within a country (Odoo's `res.country.state`).
+#[model(name = "res.country.state", table = "res_country_state")]
+pub struct ResCountryState {
+    #[field(label = "State Name", required)]
+    name: Text,
+
+    #[field(label = "State Code")]
+    code: Text,
+
+    #[field(label = "Country", required, target = "res.country")]
+    country_id: Many2one,
+
+    #[field(label = "Active", default = "true")]
+    active: Bool,
+}
+
 /// Partner: a company or an individual — customers, suppliers, contacts. Referenced widely.
 #[model(name = "res.partner", table = "res_partner")]
 pub struct ResPartner {
@@ -89,8 +120,15 @@ pub struct ResPartner {
     #[field(label = "ZIP")]
     zip: Text,
 
+    // Free-text legacy country (kept for back-compat); country_id is the structured reference.
     #[field(label = "Country Code")]
     country_code: Text,
+
+    #[field(label = "Country", target = "res.country")]
+    country_id: Many2one,
+
+    #[field(label = "State", target = "res.country.state")]
+    state_id: Many2one,
 
     #[field(label = "Currency", target = "res.currency")]
     currency_id: Many2one,
@@ -180,6 +218,11 @@ pub struct IrAttachment {
 /// endpoints (which check host access and run elevated), never the raw model.
 pub static ACLS: &[Acl] = &[
     Acl { model: "res.currency", group: "user", read: true, write: false, create: false, delete: false },
+    // Country master data: read by everyone, maintained by admin (seeded).
+    Acl { model: "res.country", group: "user", read: true, write: false, create: false, delete: false },
+    Acl { model: "res.country", group: "admin", read: true, write: true, create: true, delete: true },
+    Acl { model: "res.country.state", group: "user", read: true, write: false, create: false, delete: false },
+    Acl { model: "res.country.state", group: "admin", read: true, write: true, create: true, delete: true },
     Acl { model: "res.partner", group: "user", read: true, write: true, create: true, delete: false },
     Acl { model: "res.company", group: "user", read: true, write: false, create: false, delete: false },
     Acl { model: "res.groups", group: "user", read: true, write: false, create: false, delete: false },
