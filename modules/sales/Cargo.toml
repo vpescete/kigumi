@@ -13,6 +13,9 @@ meshble = { workspace = true }
 rust_decimal = "1"
 # The quotation report render fn reads the record JSON (find_one_secured's shape).
 serde_json = "1"
+# Bespoke READ SQL the secured/domain finds can't express (pricelist most-specific-rule, category
+# ancestry) runs on the pool handed out by ServiceCtx::pool(). Matches meshble-db's sqlx config.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "rust_decimal"] }
 # Module dependency mirrors the manifest `depends` (base, mail). Keeping Cargo deps and
 # manifest deps aligned is intentional — a future lint can enforce the match.
 meshble-mod-base = { path = "../base", version = "1.0.0" }

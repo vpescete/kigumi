@@ -462,13 +462,11 @@ fn build_data_router(
         // Variant generation: materialize a product.template's attribute combinations into variants.
         .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
         // Re-price a sale order's lines from its pricelist.
-        .route("/api/:name/:id/apply_pricelist", post(apply_pricelist_handler))
         .route("/api/:name/:id/apply_taxes", post(apply_taxes_handler))
         .route("/api/:name/:id/register_payment", post(register_payment_handler))
         .route("/api/reports/trial_balance", get(trial_balance_handler))
         .route("/api/reports/general_ledger/:account_id", get(general_ledger_handler))
         .route("/api/reports/aged/:kind", get(aged_handler))
-        .route("/api/:name/_onchange", post(onchange_handler))
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
         // Apply the discount wizard: write its discount onto the target order's lines.
@@ -1415,30 +1413,6 @@ async fn generate_variants_handler(
     }
 }
 
-/// Re-prices a sale order's lines from its pricelist. v1: pinned to sale.order. Authorization +
-/// currency check live in the db layer (apply_pricelist gates on order write, runs as the caller).
-async fn apply_pricelist_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "sale.order" {
-        return (StatusCode::BAD_REQUEST, "apply_pricelist is only valid on sale.order").into_response();
-    }
-    if let Err(r) = resolve_model(&state, &name) {
-        return r;
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match backend.db.apply_pricelist(&ctx, &backend.acls(), &backend.rules(), id).await {
-        Ok(n) => json_response(serde_json::json!({ "priced": n }).to_string()),
-        Err(e) => write_error("apply_pricelist", e),
-    }
-}
-
 /// Derive each line's `tax_rate` from its `account.tax` (the runtime tax engine). Pinned to sale.order,
 /// like apply_pricelist.
 async fn apply_taxes_handler(
@@ -1542,26 +1516,6 @@ async fn aged_handler(State(state): State<AppState>, Path(kind): Path<String>, h
     match backend.db.aged_balance(&ctx, &backend.acls(), &backend.rules(), move_type).await {
         Ok(rows) => json_response(serde_json::json!({ "rows": rows }).to_string()),
         Err(e) => write_error("aged_balance", e),
-    }
-}
-
-/// Product onchange for an order/invoice line: given `{product_id}`, returns `{values}` the client merges
-/// into the line before saving (name, price_unit, product_uom_qty=1, uom_id). Pinned to the line models.
-async fn onchange_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
-    if name != "sale.order.line" && name != "purchase.order.line" {
-        return (StatusCode::BAD_REQUEST, "onchange is only valid on order/invoice lines").into_response();
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    let Some(product_id) = body.get("product_id").and_then(|v| v.as_i64()) else {
-        return (StatusCode::BAD_REQUEST, "'product_id' is required").into_response();
-    };
-    match backend.db.product_onchange_values(&ctx, &backend.acls(), &backend.rules(), product_id).await {
-        Ok(values) => json_response(serde_json::json!({ "values": values }).to_string()),
-        Err(e) => write_error("onchange", e),
     }
 }
 

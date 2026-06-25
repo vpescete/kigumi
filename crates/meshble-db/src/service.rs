@@ -121,6 +121,17 @@ impl<'a> ServiceCtx<'a> {
     pub fn check_access(&self, op: Operation, model: &str) -> bool {
         check_access(op, model, &self.caller, self.acls)
     }
+    /// The instance clock (current date as YYYY-MM-DD) — a framework concern, used by pricing/tax/FX.
+    pub async fn today(&self) -> Result<String, DbError> {
+        self.db.today().await
+    }
+    /// The connection pool, for a module's own bespoke READ SQL (reference data, recursive category trees,
+    /// junction reads, most-specific-rule queries) that the domain-based secured finds cannot express. Past
+    /// the gate the body is trusted first-party code, exactly as the ERP methods were before relocation;
+    /// WRITES should still go through the secured helpers so ACL/record-rule/company scope are re-applied.
+    pub fn pool(&self) -> &sqlx::PgPool {
+        &self.db.pool
+    }
 
     // ── secured reads (visibility-gated) ──
     pub async fn find_one_secured(&self, m: &ResolvedModel, ctx: &Ctx, id: i64) -> Result<Option<Json>, DbError> {

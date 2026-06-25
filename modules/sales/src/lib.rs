@@ -962,9 +962,14 @@ pub struct SaleOrderDiscount {
 }
 meshble::register_transient!("sale.order.discount");
 meshble::register_wizard!("sale.order.discount", default_get_discount);
-// The wizard's apply step is a cross-record SERVICE owned by this module (formerly a hardcoded method on
-// Db): POST /api/sale.order.discount/:id/service/apply_discount.
+// Cross-record SERVICES owned by this module (formerly hardcoded methods on Db). Each is one line; the
+// framework dispatches them generically — meshble-db no longer names sale.order/product.product for these.
+// The wizard's apply step: POST /api/sale.order.discount/:id/service/apply_discount.
 meshble::register_service!("sale.order.discount", "apply_discount", services::apply_discount, true, &["sales.user"]);
+// Re-price an order from its pricelist: POST /api/sale.order/:id/service/apply_pricelist.
+meshble::register_service!("sale.order", "apply_pricelist", services::apply_pricelist, true, &["sales.user"]);
+// Read-only line defaults for a product (replaces the old /_onchange): POST /api/product.product/:id/service/line_defaults.
+meshble::register_service!("product.product", "line_defaults", services::line_defaults, false, &[]);
 
 /// `default_get` for the discount wizard: seed `order_id` from the open context's active record. With
 /// no active record the seed is empty (the required `order_id` then makes the open fail — by design).
