@@ -397,7 +397,7 @@ async fn seed_account_data(db: &Db) -> Fallible {
     let acc = |code: &str, name: &str, atype: &str, reconcile: bool| {
         serde_json::json!({ "code": code, "name": name, "account_type": atype, "reconcile": reconcile, "company_id": comp_id, "active": true })
     };
-    let mut new_account = |v: serde_json::Value| {
+    let new_account = |v: serde_json::Value| {
         let account = &account;
         let su = &su;
         async move { db.insert_secured(account, su, &[], &[], v.as_object().unwrap()).await }
@@ -409,7 +409,7 @@ async fn seed_account_data(db: &Db) -> Fallible {
     new_account(acc("211000", "Account Payable", "payable", true)).await?;
     new_account(acc("251000", "Tax Received", "tax", false)).await?;
 
-    let mut new_journal = |v: serde_json::Value| {
+    let new_journal = |v: serde_json::Value| {
         let journal = &journal;
         let su = &su;
         async move { db.insert_secured(journal, su, &[], &[], v.as_object().unwrap()).await }

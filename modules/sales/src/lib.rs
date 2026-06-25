@@ -3,6 +3,8 @@
 
 use meshble::prelude::*;
 
+pub mod services;
+
 /// Module manifest: its own version + compatibility range with the framework.
 /// Equivalent to Odoo's `__manifest__.py`, but with verifiable versions.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
@@ -960,6 +962,9 @@ pub struct SaleOrderDiscount {
 }
 meshble::register_transient!("sale.order.discount");
 meshble::register_wizard!("sale.order.discount", default_get_discount);
+// The wizard's apply step is a cross-record SERVICE owned by this module (formerly a hardcoded method on
+// Db): POST /api/sale.order.discount/:id/service/apply_discount.
+meshble::register_service!("sale.order.discount", "apply_discount", services::apply_discount, true, &["sales.user"]);
 
 /// `default_get` for the discount wizard: seed `order_id` from the open context's active record. With
 /// no active record the seed is empty (the required `order_id` then makes the open fail — by design).

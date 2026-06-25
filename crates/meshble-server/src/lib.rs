@@ -455,6 +455,10 @@ fn build_data_router(
             get(get_one_handler).patch(update_handler).delete(delete_handler),
         )
         .route("/api/:name/:id/action/:action", post(action_handler))
+        // The ONE generic cross-record service route (the run_action twin). A module owns the logic via
+        // register_service! and meshble-db dispatches by capability — no per-service handler, no model-name
+        // literal. The named ERP endpoints below are migrating onto this and will be deleted.
+        .route("/api/:name/:id/service/:service", post(service_handler))
         // Variant generation: materialize a product.template's attribute combinations into variants.
         .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
         // Re-price a sale order's lines from its pricelist.
@@ -468,7 +472,6 @@ fn build_data_router(
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
         // Apply the discount wizard: write its discount onto the target order's lines.
-        .route("/api/:name/:id/apply_discount", post(apply_discount_handler))
         // Render a record's report as HTML (secured entirely by read access to the record).
         .route("/api/:name/:id/report/:report", get(report_handler))
         // Post a draft journal entry: balance re-check + per-journal numbering + state -> posted.
@@ -1354,6 +1357,34 @@ async fn action_handler(
     }
 }
 
+/// The generic cross-record service dispatch. Resolves the model (404 if its module isn't served),
+/// authenticates, then runs `db.run_service` which gates (ACL + group + visibility) and invokes the
+/// module-registered service body. Zero ERP model-name literals — a new service needs no edit here.
+async fn service_handler(
+    State(state): State<AppState>,
+    Path((name, id, service)): Path<(String, i64, String)>,
+    headers: HeaderMap,
+    body: Option<Json<Json2>>,
+) -> Response {
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let body_map = match body {
+        Some(Json(Json2::Object(m))) => m,
+        _ => serde_json::Map::new(),
+    };
+    match backend.db.run_service(&model, &ctx, &backend.acls(), &backend.rules(), id, &service, body_map).await {
+        Ok(json) => json_response(json.to_string()),
+        Err(e) => write_error("service", e),
+    }
+}
+
 /// Generates `product.product` variants for a `product.template` (the cartesian product of its
 /// attribute lines). v1: product-template-specific, so the path name is pinned. Authorization +
 /// reconciliation live in the db layer; this handler only authenticates and shapes the response.
@@ -1773,30 +1804,6 @@ fn pdf_response(bytes: Vec<u8>, title: &str, id: i64) -> Response {
         bytes,
     )
         .into_response()
-}
-
-/// Applies the discount wizard onto its target order's lines. v1: pinned to sale.order.discount.
-/// Authorization (WRITE on sale.order) + the percent range check live in the db layer.
-async fn apply_discount_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "sale.order.discount" {
-        return (StatusCode::BAD_REQUEST, "apply_discount is only valid on sale.order.discount").into_response();
-    }
-    if let Err(r) = resolve_model(&state, &name) {
-        return r;
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match backend.db.apply_sale_order_discount(&ctx, &backend.acls(), &backend.rules(), id).await {
-        Ok(n) => json_response(serde_json::json!({ "discounted": n }).to_string()),
-        Err(e) => write_error("apply_discount", e),
-    }
 }
 
 /// Opens a wizard (transient model): computes its server-side defaults from the open context, creates

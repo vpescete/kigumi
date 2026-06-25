@@ -14,6 +14,7 @@ mod event_schema;
 mod migration;
 mod module_store;
 mod sequence;
+mod service;
 mod settings;
 mod tax;
 mod view_override;
@@ -25,6 +26,10 @@ pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 pub use tax::{compute_tax_lines, TaxResult, TaxSpec};
 pub use event_schema::{OutboxEvent, WebhookDelivery};
+pub use service::{
+    service_for, services_for, BoxServiceFut, ServiceCtx, ServiceFn, ServiceInput, ServiceOutput,
+    ServiceRegistration,
+};
 
 /// One queued outgoing email handed to the host's SMTP transport by [`Db::flush_outgoing_mail`].
 #[derive(Clone, Debug)]
@@ -1934,60 +1939,6 @@ impl Db {
             values.insert("uom_id".to_string(), uom.clone());
         }
         Ok(serde_json::Value::Object(values))
-    }
-
-    /// Applies the `sale.order.discount` wizard: writes its `discount` percent onto every line of its
-    /// target order (the line/order compute cascade then re-rolls subtotals/totals). Gated on the REAL
-    /// effect — WRITE on `sale.order` — since the wizard row itself is only read. Runs under the caller
-    /// ctx (lines must be visible/permitted). Per-line, not atomic across lines (documented).
-    pub async fn apply_sale_order_discount(
-        &self,
-        ctx: &Ctx,
-        acls: &[Acl],
-        rules: &[RecordRule],
-        wizard_id: i64,
-    ) -> Result<u64, DbError> {
-        let wizard_model = resolve_registered("sale.order.discount").map_err(DbError::BadInput)?;
-        let order_model = resolve_registered("sale.order").map_err(DbError::BadInput)?;
-        let line_model = resolve_registered("sale.order.line").map_err(DbError::BadInput)?;
-
-        if !check_access(Operation::Write, order_model.name, ctx, acls) {
-            return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation: "apply_discount" });
-        }
-        let wizard = self
-            .find_one_secured(&wizard_model, ctx, acls, rules, wizard_id)
-            .await?
-            .ok_or_else(|| DbError::BadInput("discount wizard not found or not permitted".to_string()))?;
-        let order_id = wizard
-            .get("order_id")
-            .and_then(|v| v.as_i64())
-            .ok_or_else(|| DbError::BadInput("the discount wizard has no order".to_string()))?;
-        let discount: rust_decimal::Decimal = wizard
-            .get("discount")
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_default();
-        // Validate at the boundary: a percent must be in [0, 100] (the line net factor is 1 - d/100).
-        if discount < rust_decimal::Decimal::ZERO || discount > rust_decimal::Decimal::from(100) {
-            return Err(DbError::BadInput("discount must be a percentage between 0 and 100".to_string()));
-        }
-
-        // The order must be visible/permitted to the caller (mirrors apply_pricelist).
-        self.find_one_secured(&order_model, ctx, acls, rules, order_id)
-            .await?
-            .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
-
-        let lines = self
-            .find_secured(&line_model, ctx, acls, rules, Some(&Domain::field("order_id").eq(order_id)))
-            .await?;
-        let mut applied = 0u64;
-        for line in &lines {
-            let Some(lid) = line.get("id").and_then(|v| v.as_i64()) else { continue };
-            let payload = serde_json::json!({ "discount": discount.to_string() });
-            self.update_secured(&line_model, ctx, acls, rules, lid, payload.as_object().unwrap()).await?;
-            applied += 1;
-        }
-        Ok(applied)
     }
 
     /// The exchange rate for `currency` effective on or before `as_of` (units of the currency per 1 base

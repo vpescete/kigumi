@@ -10,3 +10,6 @@ repository.workspace = true
 meshble-core = { workspace = true }
 meshble-schema = { workspace = true }
 meshble-macros = { workspace = true }
+# The cross-record service seam (register_service!) is DB-typed (ServiceCtx threads secured CRUD), so it
+# lives in meshble-db; the facade re-exports it so modules declare services through the one prelude.
+meshble-db = { workspace = true }

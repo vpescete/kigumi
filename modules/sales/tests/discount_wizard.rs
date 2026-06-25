@@ -60,8 +60,9 @@ async fn discount_wizard_applies_to_every_line_and_rerolls_totals() {
 
     // Open-equivalent: a wizard row seeded with the order + a 10% discount (create_date via DB default).
     let wid = db.insert_secured(&wizard, &su, &[], &[], json!({ "order_id": oid, "discount": "10" }).as_object().unwrap()).await.unwrap();
-    let applied = db.apply_sale_order_discount(&su, &[], &[], wid).await.unwrap();
-    assert_eq!(applied, 2, "both lines discounted");
+    // Apply via the generic cross-record SERVICE seam (the logic now lives in modules/sales, not in db).
+    let result = db.run_service(&wizard, &su, &[], &[], wid, "apply_discount", serde_json::Map::new()).await.unwrap();
+    assert_eq!(result["applied"].as_i64(), Some(2), "both lines discounted");
 
     // Every line now carries the discount, and the order amount re-rolled: 250 less 10% = 225.
     let lines = db.find_secured(&line, &su, &[], &[], Some(&Domain::field("order_id").eq(oid))).await.unwrap();
@@ -75,7 +76,7 @@ async fn discount_wizard_applies_to_every_line_and_rerolls_totals() {
 
     // Boundary: a percent outside [0, 100] is rejected, and nothing is written.
     let bad = db.insert_secured(&wizard, &su, &[], &[], json!({ "order_id": oid, "discount": "150" }).as_object().unwrap()).await.unwrap();
-    assert!(db.apply_sale_order_discount(&su, &[], &[], bad).await.is_err(), "out-of-range discount rejected");
+    assert!(db.run_service(&wizard, &su, &[], &[], bad, "apply_discount", serde_json::Map::new()).await.is_err(), "out-of-range discount rejected");
     let still = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&still, "amount_untaxed"), 225.0, "rejected apply left the order unchanged");
 

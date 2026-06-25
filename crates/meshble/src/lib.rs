@@ -28,6 +28,12 @@ pub mod prelude {
     };
     pub use meshble_macros::{extend, model};
     pub use meshble_schema::{openapi, to_ddl, to_ui_contract, FieldRule, UiRule};
+    // The cross-record service seam (DB-typed, defined in meshble-db) — registered via register_service!.
+    // `DbError` is the service result's error type, so a module needs no direct meshble-db dependency.
+    pub use meshble_db::{
+        service_for, services_for, BoxServiceFut, DbError, ServiceCtx, ServiceFn, ServiceInput,
+        ServiceOutput, ServiceRegistration,
+    };
 }
 
 /// Marks a field as a `related` field (Odoo `related=`): a non-stored, read-only mirror of the value
@@ -133,6 +139,27 @@ macro_rules! register_action {
     ($model:expr, $name:expr, $func:expr, $groups:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::ActionRegistration { model: $model, name: $name, func: $func, groups: $groups }
+        }
+    };
+}
+
+/// Registers a cross-record SERVICE on a model, runnable via `POST /api/<model>/<id>/service/<name>`.
+/// The transactional twin of `register_action!`: `func` is a `async fn(&mut ServiceCtx, ServiceInput)
+/// -> Result<ServiceOutput, DbError>` that owns multi-record logic through the secured `ServiceCtx`.
+/// `write_gate` is `true` for a mutating service, `false` for a read-only one (a report). The macro
+/// emits the one `Box::pin` that adapts the async fn to the stored fn pointer.
+/// `meshble::register_service!("sale.order.discount", "apply_discount", apply_discount, true, &["sales.user"]);`
+#[macro_export]
+macro_rules! register_service {
+    ($model:expr, $name:expr, $func:path, $write_gate:expr, $groups:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::ServiceRegistration {
+                model: $model,
+                name: $name,
+                func: |cx, inp| ::std::boxed::Box::pin($func(cx, inp)),
+                write_gate: $write_gate,
+                groups: $groups,
+            }
         }
     };
 }
