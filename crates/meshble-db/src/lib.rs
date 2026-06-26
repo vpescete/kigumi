@@ -683,6 +683,9 @@ impl Db {
 
     /// Updates row `id` with validated `values`, enforcing ACL Write and the Write record rule
     /// (rows outside the rule are not matched → 0 affected). Returns the number of rows updated.
+    /// Wraps [`Db::update_secured_in_tx`] with the transaction boundary and the POST-COMMIT work
+    /// (aggregate re-parenting + best-effort chatter tracking); a cross-record SERVICE calls the in-tx
+    /// twin directly to fold a secured update into its own transaction.
     pub async fn update_secured(
         &self,
         model: &ResolvedModel,
@@ -692,6 +695,59 @@ impl Db {
         id: i64,
         values: &Map<String, Json>,
     ) -> Result<u64, DbError> {
+        // Parents this row points to BEFORE the write (re-parenting uses before + after). Read on the pool
+        // just before the tx opens — equivalent to reading it right after begin (the tx has written
+        // nothing yet), and the twin no longer needs it.
+        let before = self.parent_targets(model, id).await?;
+        let mut tx = self.pool.begin().await?;
+        let (affected, track_changes) =
+            self.update_secured_in_tx(model, ctx, acls, rules, id, values, &mut tx).await?;
+        if affected == 0 {
+            return Ok(0); // no row matched / not permitted → tx rolls back on drop
+        }
+        tx.commit().await?;
+
+        // 4) Re-parenting: if this row is itself a child whose FK moved, recompute the old + new
+        //    aggregate parents (deduped).
+        let after = self.parent_targets(model, id).await?;
+        let mut seen: Vec<(&'static str, i64)> = Vec::new();
+        for (parent, pid) in before.into_iter().chain(after) {
+            if !seen.iter().any(|&(n, p)| n == parent.name && p == pid) {
+                seen.push((parent.name, pid));
+                self.recompute_parent(&parent, pid).await?;
+            }
+        }
+
+        // 5) Field tracking: record the chatter audit entry from the diff the twin computed in-tx.
+        //    Best-effort and post-commit — the write is already durable, so a missing mail schema or a
+        //    tracking failure is logged, never propagated (would mislead the caller into a retry).
+        if !track_changes.is_empty() {
+            if let Err(e) = self.write_tracking(model.name, id, ctx.uid, &track_changes).await {
+                eprintln!("meshble-db tracking write failed (write committed): {e:?}");
+            }
+        }
+        Ok(affected)
+    }
+
+    /// The secured update on the CALLER's transaction `tx`: ACL Write + D6 + the Write rule/company
+    /// scope, the scalar UPDATE, nested One2many commands, Many2many sets, the `_inherits` delegated
+    /// parent write, the in-tx recompute + constraints + PTAV refresh, and the domain events —
+    /// everything that must be atomic with the row change. Returns the affected count and the tracked-
+    /// field diff (computed in-tx, written by the caller post-commit). [`Db::update_secured`] wraps this
+    /// with begin/commit + the post-commit re-parenting/tracking; a cross-record service calls it
+    /// directly to fold a secured update into its own transaction. On a 0-affected match it returns
+    /// `(0, empty)` having written nothing, so the caller rolls back.
+    #[allow(clippy::type_complexity)]
+    pub(crate) async fn update_secured_in_tx(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        acls: &[Acl],
+        rules: &[RecordRule],
+        id: i64,
+        values: &Map<String, Json>,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+    ) -> Result<(u64, Vec<(String, Option<String>, Option<String>)>), DbError> {
         if !check_access(Operation::Write, model.name, ctx, acls) {
             return Err(DbError::AccessDenied { model: model.name.to_string(), operation: "write" });
         }
@@ -727,21 +783,17 @@ impl Db {
             Vec::new()
         };
 
-        let mut tx = self.pool.begin().await?;
-        // Parents this row points to BEFORE the write (re-parenting uses before + after).
-        let before = self.parent_targets(model, id).await?;
-
         // Snapshot the OLD text of tracked columns, locking the row (FOR UPDATE) so the snapshot is
         // exactly what THIS write overwrites — no stale/lost old value under a concurrent writer. The
         // NEW values are re-read the same way (Postgres `::text`) after the UPDATE, so old/new diff in
         // ONE representation: no false positive from Date/Datetime/Float/Decimal text-format mismatch.
-        let old_text = snapshot_text(&mut tx, model.table, &track_cols, id, true).await?;
+        let old_text = snapshot_text(&mut *tx, model.table, &track_cols, id, true).await?;
         // Domain-event state detection: snapshot the OLD 'state' (independent of mail tracking, which may
         // be empty) when this write touches a 'state' column, so model.state_changed fires only on a real
         // transition.
         let writes_state = model.fields.iter().any(|f| f.name == "state") && cols.iter().any(|(c, _)| *c == "state");
         let old_state = if writes_state {
-            snapshot_text(&mut tx, model.table, &["state"], id, false).await?.into_iter().next().and_then(|(_, v)| v)
+            snapshot_text(&mut *tx, model.table, &["state"], id, false).await?.into_iter().next().and_then(|(_, v)| v)
         } else {
             None
         };
@@ -765,9 +817,9 @@ impl Db {
             for v in &params {
                 q = bind_query(q, v);
             }
-            affected = q.execute(&mut *tx).await?.rows_affected();
+            affected = q.execute(&mut **tx).await?.rows_affected();
             if affected == 0 {
-                return Ok(0); // no such row / not permitted → tx rolls back on drop
+                return Ok((0, Vec::new())); // no such row / not permitted → caller rolls back
             }
         } else {
             // Nested-only write: confirm the parent is writable by this caller before touching its
@@ -783,18 +835,18 @@ impl Db {
             for v in &params {
                 q = bind_query(q, v);
             }
-            if q.fetch_optional(&mut *tx).await?.is_none() {
-                return Ok(0);
+            if q.fetch_optional(&mut **tx).await?.is_none() {
+                return Ok((0, Vec::new()));
             }
         }
 
         // 2) Apply the nested child commands (create/update/delete) in the same transaction.
         if !nested.is_empty() {
-            self.apply_nested_in_tx(&mut tx, ctx, acls, rules, &nested, id, true).await?;
+            self.apply_nested_in_tx(&mut *tx, ctx, acls, rules, &nested, id, true).await?;
         }
         // 2b) Apply Many2many sets (the row was confirmed writable above).
         if !m2m.is_empty() {
-            apply_m2m_in_tx(&mut tx, id, &m2m).await?;
+            apply_m2m_in_tx(&mut *tx, id, &m2m).await?;
         }
         // 2c) _inherits: write delegated keys through to the parent (read this row's via FK, then
         //     UPDATE the parent). The child was confirmed writable above; the parent enforces its own
@@ -805,12 +857,12 @@ impl Db {
                 let pid: Option<i64> =
                     sqlx::query_scalar::<Postgres, i64>(&format!("SELECT {via} FROM {} WHERE id = $1", model.table))
                         .bind(id)
-                        .fetch_optional(&mut *tx)
+                        .fetch_optional(&mut **tx)
                         .await?;
                 let pid = pid.ok_or_else(|| {
                     DbError::BadInput(format!("_inherits via '{via}' is null on '{}'", model.name))
                 })?;
-                self.update_delegated_parent(&parent_model, ctx, acls, rules, pid, &delegated, &mut tx).await?;
+                self.update_delegated_parent(&parent_model, ctx, acls, rules, pid, &delegated, &mut *tx).await?;
             }
         }
 
@@ -819,9 +871,9 @@ impl Db {
         if !computed_fields(model).is_empty() {
             sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
                 .bind(format!("agg:{}:{}", model.table, id))
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
-            recompute_columns_on(&mut tx, model, id).await?;
+            recompute_columns_on(&mut *tx, model, id).await?;
         }
 
         // @api.constrains: validate the updated record (+ children) in-tx, AFTER the recompute so the
@@ -834,7 +886,7 @@ impl Db {
         if has_constraints(model.name) {
             let mut changed: Vec<String> = values.keys().cloned().collect();
             changed.extend(computed_fields(model).iter().map(|c| c.to_string()));
-            check_constraints_in_tx(model, &mut tx, id, Some(&changed)).await?;
+            check_constraints_in_tx(model, &mut *tx, id, Some(&changed)).await?;
         }
 
         // M15.1: a PTAV `price_extra` edit re-materializes `price_extra` on every variant whose combo
@@ -848,22 +900,22 @@ impl Db {
                 VG_VARIANT_PTAV_REL
             ))
             .bind(id)
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut **tx)
             .await?;
             for vid in vids {
-                self.set_variant_price_extra_in_tx(&variant, &ptav, &mut tx, vid).await?;
+                self.set_variant_price_extra_in_tx(&variant, &ptav, &mut *tx, vid).await?;
             }
         }
 
         // Re-read the NEW text of tracked columns on the still-locked row (same `::text` rendering as
         // the old snapshot). Tracked columns are non-computed, so the recompute above can't touch them.
-        let new_text = snapshot_text(&mut tx, model.table, &track_cols, id, false).await?;
+        let new_text = snapshot_text(&mut *tx, model.table, &track_cols, id, false).await?;
 
         // Domain events, atomic with the update (same tx): model.updated always (when a row matched), and
         // model.state_changed when the 'state' value actually changed.
         if affected > 0 {
             let company_id = if model.fields.iter().any(|f| f.name == "company_id") {
-                snapshot_text(&mut tx, model.table, &["company_id"], id, false)
+                snapshot_text(&mut *tx, model.table, &["company_id"], id, false)
                     .await?
                     .into_iter()
                     .next()
@@ -874,7 +926,7 @@ impl Db {
             };
             let changed: Vec<&str> = cols.iter().map(|(c, _)| *c).collect();
             self.enqueue_event_in_tx(
-                &mut tx,
+                &mut *tx,
                 &OutboxEvent {
                     event_type: "model.updated".to_string(),
                     model: model.name.to_string(),
@@ -886,14 +938,14 @@ impl Db {
             )
             .await?;
             if writes_state {
-                let new_state = snapshot_text(&mut tx, model.table, &["state"], id, false)
+                let new_state = snapshot_text(&mut *tx, model.table, &["state"], id, false)
                     .await?
                     .into_iter()
                     .next()
                     .and_then(|(_, v)| v);
                 if old_state != new_state {
                     self.enqueue_event_in_tx(
-                        &mut tx,
+                        &mut *tx,
                         &OutboxEvent {
                             event_type: "model.state_changed".to_string(),
                             model: model.name.to_string(),
@@ -907,36 +959,19 @@ impl Db {
                 }
             }
         }
-        tx.commit().await?;
 
-        // 4) Re-parenting: if this row is itself a child whose FK moved, recompute the old + new
-        //    aggregate parents (deduped).
-        let after = self.parent_targets(model, id).await?;
-        let mut seen: Vec<(&'static str, i64)> = Vec::new();
-        for (parent, pid) in before.into_iter().chain(after) {
-            if !seen.iter().any(|&(n, p)| n == parent.name && p == pid) {
-                seen.push((parent.name, pid));
-                self.recompute_parent(&parent, pid).await?;
+        // Diff tracked columns in-tx (pure: just comparing the two `::text` snapshots). The caller writes
+        // the chatter entry post-commit, best-effort. An empty diff means no tracked value actually
+        // changed (the post-commit write_tracking would be a no-op anyway).
+        let mut track_changes: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+        for c in &track_cols {
+            let old_t = old_text.iter().find(|(k, _)| k == c).and_then(|(_, o)| o.clone());
+            let new_t = new_text.iter().find(|(k, _)| k == c).and_then(|(_, o)| o.clone());
+            if old_t != new_t {
+                track_changes.push((c.to_string(), old_t, new_t));
             }
         }
-
-        // 5) Field tracking: diff old vs new for tracked columns and record a chatter audit entry.
-        //    Best-effort and post-commit — the write is already durable, so a missing mail schema or
-        //    a tracking failure is logged, never propagated (would mislead the caller into a retry).
-        if !track_cols.is_empty() {
-            let mut changes: Vec<(String, Option<String>, Option<String>)> = Vec::new();
-            for c in &track_cols {
-                let old_t = old_text.iter().find(|(k, _)| k == c).and_then(|(_, o)| o.clone());
-                let new_t = new_text.iter().find(|(k, _)| k == c).and_then(|(_, o)| o.clone());
-                if old_t != new_t {
-                    changes.push((c.to_string(), old_t, new_t));
-                }
-            }
-            if let Err(e) = self.write_tracking(model.name, id, ctx.uid, &changes).await {
-                eprintln!("meshble-db tracking write failed (write committed): {e:?}");
-            }
-        }
-        Ok(affected)
+        Ok((affected, track_changes))
     }
 
     /// Applies a parent's One2many child commands in `tx`. Create is always allowed; Update/Delete
