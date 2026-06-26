@@ -462,7 +462,6 @@ fn build_data_router(
         // Variant generation: materialize a product.template's attribute combinations into variants.
         .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
         // Re-price a sale order's lines from its pricelist.
-        .route("/api/:name/:id/apply_taxes", post(apply_taxes_handler))
         .route("/api/:name/:id/register_payment", post(register_payment_handler))
         .route("/api/reports/trial_balance", get(trial_balance_handler))
         .route("/api/reports/general_ledger/:account_id", get(general_ledger_handler))
@@ -1410,35 +1409,6 @@ async fn generate_variants_handler(
                 .to_string(),
         ),
         Err(e) => write_error("generate_variants", e),
-    }
-}
-
-/// Derive each line's `tax_rate` from its `account.tax` (the runtime tax engine). Pinned to sale.order,
-/// like apply_pricelist.
-async fn apply_taxes_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "sale.order" && name != "purchase.order" {
-        return (StatusCode::BAD_REQUEST, "apply_taxes is only valid on sale.order or purchase.order").into_response();
-    }
-    if let Err(r) = resolve_model(&state, &name) {
-        return r;
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    let result = if name == "purchase.order" {
-        backend.db.apply_purchase_taxes(&ctx, &backend.acls(), &backend.rules(), id).await
-    } else {
-        backend.db.apply_taxes(&ctx, &backend.acls(), &backend.rules(), id).await
-    };
-    match result {
-        Ok(n) => json_response(serde_json::json!({ "taxed": n }).to_string()),
-        Err(e) => write_error("apply_taxes", e),
     }
 }
 

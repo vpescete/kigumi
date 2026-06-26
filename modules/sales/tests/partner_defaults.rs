@@ -79,7 +79,7 @@ async fn partner_accounting_defaults_flow_to_orders() {
     db.insert_secured(&line, &su, &[], &[], json!({ "order_id": oid, "product_id": prod, "product_uom_qty": 1, "price_unit": 100.0, "tax_ids": [vat22] }).as_object().unwrap()).await.unwrap();
 
     // Fiscal default: apply_taxes remaps via the partner's Export position -> VAT dropped.
-    db.apply_taxes(&seller, acls, rules, oid).await.unwrap();
+    db.run_service(&order, &seller, acls, rules, oid, "apply_taxes", serde_json::Map::new()).await.unwrap();
     let taxed = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&taxed, "amount_tax"), 0.0, "the partner's Export fiscal position dropped VAT");
 

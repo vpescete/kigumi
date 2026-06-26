@@ -7,6 +7,7 @@ use meshble::prelude::*; // ServiceCtx, ServiceInput, ServiceOutput, DbError, Do
 use rust_decimal::Decimal;
 use serde_json::json;
 use sqlx::Row;
+use std::collections::BTreeMap;
 
 /// Applies the discount wizard's percentage to every line of its order (Odoo's `sale.order.discount`
 /// apply). Invoked on the wizard id via `POST /api/sale.order.discount/:id/service/apply_discount`.
@@ -136,6 +137,206 @@ pub async fn line_defaults(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Resu
         values.insert("uom_id".to_string(), uom.clone());
     }
     Ok(ServiceOutput::json(json!({ "values": serde_json::Value::Object(values) })))
+}
+
+/// Materializes the per-tax breakdown on a `sale.order`'s lines from each line's `account.tax` set:
+/// POST /api/sale.order/:id/service/apply_taxes. Behavior-preserving relocation of `Db::apply_taxes`.
+pub async fn apply_taxes(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+    let n = apply_taxes_to(
+        cx, input.record_id, "sale.order", "sale.order.line", "sale.order.line.tax",
+        "sale_order_line_tax_rel", "sale_order_line_tax",
+    )
+    .await?;
+    Ok(ServiceOutput::json(json!({ "taxed": n })))
+}
+
+/// Buy-side mirror: POST /api/purchase.order/:id/service/apply_purchase_taxes. Relocation of
+/// `Db::apply_purchase_taxes`.
+pub async fn apply_purchase_taxes(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+    let n = apply_taxes_to(
+        cx, input.record_id, "purchase.order", "purchase.order.line", "purchase.order.line.tax",
+        "purchase_order_line_tax_rel", "purchase_order_line_tax",
+    )
+    .await?;
+    Ok(ServiceOutput::json(json!({ "taxed": n })))
+}
+
+/// The tax-engine orchestration shared by the sale and purchase sides (the relocated `Db::apply_taxes_to`):
+/// resolve each line's tax set (Many2many, else legacy tax_id, else the product's default taxes), remap it
+/// through the order's fiscal position, run the pure `tax::compute_tax_lines` engine, and replace the
+/// line's breakdown rows + a blended back-compat `tax_rate`. run_service has already gated Write +
+/// visibility on the order (the route model). Reference reads + the engine-owned breakdown delete run on
+/// the module's pool; the breakdown rows + the line rate are written through the secured path.
+async fn apply_taxes_to(
+    cx: &mut ServiceCtx<'_>,
+    order_id: i64,
+    order_model_name: &str,
+    line_model_name: &str,
+    breakdown_model_name: &str,
+    m2m_rel: &str,
+    breakdown_table: &str,
+) -> Result<u64, DbError> {
+    let order_model = cx.resolve(order_model_name)?;
+    let line_model = cx.resolve(line_model_name)?;
+    let breakdown_model = cx.resolve(breakdown_model_name)?;
+    let ctx = cx.caller().clone();
+
+    let order = cx
+        .find_one_secured(&order_model, &ctx, order_id)
+        .await?
+        .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
+
+    // Round per-tax amounts to the order currency's decimal places (default 2).
+    let dp: u32 = match order.get("currency_id").and_then(|v| v.as_i64()) {
+        Some(cur) => sqlx::query_scalar::<_, Option<i64>>("SELECT decimal_places FROM res_currency WHERE id = $1")
+            .bind(cur)
+            .fetch_optional(cx.pool())
+            .await?
+            .flatten()
+            .unwrap_or(2) as u32,
+        None => 2,
+    };
+    // Fiscal position: the order's, else the partner's default (res.partner.property_account_position_id,
+    // a plain id). Its rewrite map remaps src tax -> Some(dest)/None=drop.
+    let position_id = match order.get("fiscal_position_id").and_then(|v| v.as_i64()) {
+        Some(p) => Some(p),
+        None => match order.get("partner_id").and_then(|v| v.as_i64()) {
+            Some(pt) => sqlx::query_scalar::<_, Option<i64>>("SELECT NULLIF(property_account_position_id, 0) FROM res_partner WHERE id = $1")
+                .bind(pt)
+                .fetch_optional(cx.pool())
+                .await?
+                .flatten(),
+            None => None,
+        },
+    };
+    let fmap = match position_id {
+        Some(pid) => fiscal_map_for(cx.pool(), pid).await?,
+        None => BTreeMap::new(),
+    };
+
+    let lines = cx
+        .find_secured(&line_model, &ctx, Some(&Domain::field("order_id").eq(order_id)))
+        .await?;
+    let mut applied = 0u64;
+    for line in &lines {
+        let Some(lid) = line.get("id").and_then(|v| v.as_i64()) else { continue };
+        let dec = |k: &str| -> Decimal {
+            line.get(k).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or_default()
+        };
+        let qty = dec("product_uom_qty");
+        let line_net = qty * dec("price_unit") * (Decimal::ONE - dec("discount") / Decimal::from(100));
+
+        // The tax set, in resolution order: the line's Many2many membership, else the legacy single
+        // tax_id, else the product's default taxes (Odoo's product.taxes_id flowing to the line).
+        let mut tax_ids: Vec<i64> = sqlx::query_scalar(&format!("SELECT tax_id FROM {m2m_rel} WHERE line_id = $1"))
+            .bind(lid)
+            .fetch_all(cx.pool())
+            .await?;
+        if tax_ids.is_empty() {
+            if let Some(t) = line.get("tax_id").and_then(|v| v.as_i64()) {
+                tax_ids.push(t);
+            }
+        }
+        if tax_ids.is_empty() {
+            if let Some(pid) = line.get("product_id").and_then(|v| v.as_i64()) {
+                tax_ids = sqlx::query_scalar(
+                    "SELECT r.tax_id FROM product_template_tax_rel r \
+                     JOIN product_product p ON p.product_tmpl_id = r.product_id WHERE p.id = $1",
+                )
+                .bind(pid)
+                .fetch_all(cx.pool())
+                .await?;
+            }
+        }
+        // Remap through the fiscal position (NULL dest drops the tax); dedup, preserving order, so a tax
+        // never applies twice. tax_ids (the user's original selection) is left untouched.
+        let mut mapped: Vec<i64> = Vec::new();
+        for t in &tax_ids {
+            let dest = match fmap.get(t) {
+                Some(Some(d)) => Some(*d),
+                Some(None) => None,
+                None => Some(*t),
+            };
+            if let Some(d) = dest {
+                if !mapped.contains(&d) {
+                    mapped.push(d);
+                }
+            }
+        }
+        let specs = resolve_tax_specs(cx.pool(), &mapped).await?;
+        let (subtotal, results) = crate::tax::compute_tax_lines(line_net, qty, &specs, dp);
+
+        // Replace the line's breakdown rows (idempotent: a re-run re-derives from tax_ids).
+        sqlx::query(&format!("DELETE FROM {breakdown_table} WHERE line_id = $1"))
+            .bind(lid)
+            .execute(cx.pool())
+            .await?;
+        for r in &results {
+            let payload = json!({
+                "line_id": lid, "sequence": r.sequence, "tax_id": r.tax_id, "tax_group_id": r.group_id,
+                "base_amount": r.base.to_string(), "tax_amount": r.tax_amount.to_string(),
+                "is_price_include": r.is_price_include
+            });
+            cx.insert_secured(&breakdown_model, &ctx, payload.as_object().unwrap()).await?;
+        }
+        // Back-compat blended rate (only consulted by the line's fallback compute when the breakdown is
+        // empty, which it now is not). Updating the line also rolls the new tax up into the order totals.
+        let total_tax: Decimal = results.iter().map(|r| r.tax_amount).sum();
+        let blended = if subtotal != Decimal::ZERO {
+            (total_tax / subtotal * Decimal::from(100)).round_dp(4)
+        } else {
+            Decimal::ZERO
+        };
+        let payload = json!({ "tax_rate": blended.to_string() });
+        cx.update_secured(&line_model, &ctx, lid, payload.as_object().unwrap()).await?;
+        applied += 1;
+    }
+    Ok(applied)
+}
+
+/// Resolves account.tax ids into engine specs, preserving the given order and dropping inactive taxes.
+/// Module-owned reference reads on the pool ServiceCtx hands out (relocated from `Db::resolve_tax_specs`).
+async fn resolve_tax_specs(pool: &sqlx::PgPool, tax_ids: &[i64]) -> Result<Vec<crate::tax::TaxSpec>, DbError> {
+    let mut specs = Vec::new();
+    for &tid in tax_ids {
+        let row = sqlx::query(
+            "SELECT amount_type, amount, price_include, include_base_amount, sequence, tax_group_id, active \
+             FROM account_tax WHERE id = $1",
+        )
+        .bind(tid)
+        .fetch_optional(pool)
+        .await?;
+        let Some(row) = row else { continue };
+        if !row.try_get::<Option<bool>, _>("active").ok().flatten().unwrap_or(true) {
+            continue;
+        }
+        specs.push(crate::tax::TaxSpec {
+            tax_id: tid,
+            group_id: row.try_get::<Option<i64>, _>("tax_group_id").ok().flatten(),
+            amount_type: row.try_get::<Option<String>, _>("amount_type").ok().flatten().unwrap_or_else(|| "percent".to_string()),
+            amount: row.try_get::<Option<Decimal>, _>("amount").ok().flatten().unwrap_or_default(),
+            price_include: row.try_get::<Option<bool>, _>("price_include").ok().flatten().unwrap_or(false),
+            include_base_amount: row.try_get::<Option<bool>, _>("include_base_amount").ok().flatten().unwrap_or(false),
+            sequence: row.try_get::<Option<i64>, _>("sequence").ok().flatten().unwrap_or(10),
+        });
+    }
+    Ok(specs)
+}
+
+/// The fiscal position's source-to-destination tax rewrite map (NULL dest = drop the source tax).
+/// Relocated from `Db::fiscal_map_for`.
+async fn fiscal_map_for(pool: &sqlx::PgPool, position_id: i64) -> Result<BTreeMap<i64, Option<i64>>, DbError> {
+    let rows = sqlx::query("SELECT tax_src_id, tax_dest_id FROM account_fiscal_position_tax WHERE position_id = $1")
+        .bind(position_id)
+        .fetch_all(pool)
+        .await?;
+    let mut map = BTreeMap::new();
+    for r in &rows {
+        let src: i64 = r.try_get("tax_src_id")?;
+        let dest: Option<i64> = r.try_get("tax_dest_id")?;
+        map.insert(src, dest);
+    }
+    Ok(map)
 }
 
 /// Resolves the unit price for `variant_id` from `pricelist_id` at `date` and `quantity` — the

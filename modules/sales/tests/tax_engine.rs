@@ -72,7 +72,7 @@ async fn apply_taxes_materializes_a_multi_tax_breakdown() {
     let seller = Ctx::new(1, vec!["sales.user".to_string()]);
     let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
 
-    db.apply_taxes(&seller, acls, rules, oid).await.unwrap();
+    db.run_service(&order, &seller, acls, rules, oid, "apply_taxes", serde_json::Map::new()).await.unwrap();
     let after = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&after, "amount_untaxed"), 100.0);
     assert_eq!(money(&after, "amount_tax"), 27.0, "22% (22) + fixed 5 = 27");
@@ -84,7 +84,7 @@ async fn apply_taxes_materializes_a_multi_tax_breakdown() {
     assert!(rows.iter().any(|r| r["tax_id"].as_i64() == Some(eco5) && money(r, "tax_amount") == 5.0 && r["tax_group_id"].as_i64() == Some(g_eco)));
 
     // Idempotent: a second run re-derives the same two rows and totals (never doubles).
-    db.apply_taxes(&seller, acls, rules, oid).await.unwrap();
+    db.run_service(&order, &seller, acls, rules, oid, "apply_taxes", serde_json::Map::new()).await.unwrap();
     let again = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&again, "amount_tax"), 27.0, "re-running apply_taxes is idempotent");
     assert_eq!(db.find_secured(&breakdown, &su, &[], &[], Some(&Domain::field("line_id").eq(lid))).await.unwrap().len(), 2);
@@ -93,7 +93,7 @@ async fn apply_taxes_materializes_a_multi_tax_breakdown() {
     let pos = ins(&fpos, json!({ "name": "Reduced", "active": true })).await;
     ins(&fpostax, json!({ "position_id": pos, "tax_src_id": vat22, "tax_dest_id": vat10 })).await;
     db.update_secured(&order, &su, &[], &[], oid, json!({ "fiscal_position_id": pos }).as_object().unwrap()).await.unwrap();
-    db.apply_taxes(&seller, acls, rules, oid).await.unwrap();
+    db.run_service(&order, &seller, acls, rules, oid, "apply_taxes", serde_json::Map::new()).await.unwrap();
     let mapped = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&mapped, "amount_tax"), 15.0, "VAT remapped to 10% (10) + Eco 5 = 15");
     assert_eq!(money(&mapped, "amount_total"), 115.0);
@@ -105,7 +105,7 @@ async fn apply_taxes_materializes_a_multi_tax_breakdown() {
     let exp = ins(&fpos, json!({ "name": "Export", "active": true })).await;
     ins(&fpostax, json!({ "position_id": exp, "tax_src_id": vat22 })).await;
     db.update_secured(&order, &su, &[], &[], oid, json!({ "fiscal_position_id": exp }).as_object().unwrap()).await.unwrap();
-    db.apply_taxes(&seller, acls, rules, oid).await.unwrap();
+    db.run_service(&order, &seller, acls, rules, oid, "apply_taxes", serde_json::Map::new()).await.unwrap();
     let dropped = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&dropped, "amount_tax"), 5.0, "VAT dropped, only the fixed Eco remains");
     assert_eq!(money(&dropped, "amount_total"), 105.0);

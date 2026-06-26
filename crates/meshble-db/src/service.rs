@@ -125,10 +125,12 @@ impl<'a> ServiceCtx<'a> {
     pub async fn today(&self) -> Result<String, DbError> {
         self.db.today().await
     }
-    /// The connection pool, for a module's own bespoke READ SQL (reference data, recursive category trees,
-    /// junction reads, most-specific-rule queries) that the domain-based secured finds cannot express. Past
-    /// the gate the body is trusted first-party code, exactly as the ERP methods were before relocation;
-    /// WRITES should still go through the secured helpers so ACL/record-rule/company scope are re-applied.
+    /// The connection pool, for a module's own bespoke SQL the domain-based secured finds cannot express:
+    /// reference reads (currency, fiscal positions, recursive category trees), junction reads, most-
+    /// specific-rule queries, and engine-owned BULK operations (e.g. replacing a line's tax breakdown rows
+    /// with a single DELETE). Past the gate the body is trusted first-party code, exactly as the ERP
+    /// methods were before relocation. Per-RECORD user-data writes should still go through the secured
+    /// helpers so ACL/record-rule/company scope are re-applied; the raw pool is for engine-owned rows.
     pub fn pool(&self) -> &sqlx::PgPool {
         &self.db.pool
     }

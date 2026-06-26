@@ -64,7 +64,7 @@ async fn apply_taxes_derives_the_rate_from_account_tax() {
     // Derive the rate from account.tax, as a plain sales.user (gates on order write).
     let seller = Ctx::new(1, vec!["sales.user".to_string()]);
     let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
-    let n = db.apply_taxes(&seller, acls, rules, oid).await.unwrap();
+    let n = db.run_service(&order, &seller, acls, rules, oid, "apply_taxes", serde_json::Map::new()).await.unwrap()["taxed"].as_u64().unwrap();
     assert_eq!(n, 1, "one line processed");
 
     let after = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
@@ -82,7 +82,7 @@ async fn apply_taxes_derives_the_rate_from_account_tax() {
         "name": "Eco fee", "type_tax_use": "sale", "amount_type": "fixed", "amount": "5", "active": true
     }).as_object().unwrap()).await.unwrap();
     db.update_secured(&line, &su, &[], &[], l["id"].as_i64().unwrap(), json!({ "tax_id": fixed }).as_object().unwrap()).await.unwrap();
-    db.apply_taxes(&seller, acls, rules, oid).await.unwrap();
+    db.run_service(&order, &seller, acls, rules, oid, "apply_taxes", serde_json::Map::new()).await.unwrap();
     let after2 = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&after2, "amount_tax"), 5.0, "a fixed tax now yields a real per-unit amount");
     assert_eq!(money(&after2, "amount_total"), 105.0);

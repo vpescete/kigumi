@@ -57,7 +57,7 @@ async fn line_inherits_the_product_default_taxes() {
 
     let seller = Ctx::new(1, vec!["sales.user".to_string()]);
     let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
-    db.apply_taxes(&seller, acls, rules, oid).await.unwrap();
+    db.run_service(&order, &seller, acls, rules, oid, "apply_taxes", serde_json::Map::new()).await.unwrap();
 
     let after = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&after, "amount_tax"), 22.0, "the line inherited the product's default VAT");

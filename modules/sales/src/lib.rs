@@ -4,6 +4,8 @@
 use meshble::prelude::*;
 
 pub mod services;
+// The pure tax engine (relocated from meshble-db: tax math is ERP, owned by this module).
+pub mod tax;
 
 /// Module manifest: its own version + compatibility range with the framework.
 /// Equivalent to Odoo's `__manifest__.py`, but with verifiable versions.
@@ -970,6 +972,11 @@ meshble::register_service!("sale.order.discount", "apply_discount", services::ap
 meshble::register_service!("sale.order", "apply_pricelist", services::apply_pricelist, true, &["sales.user"]);
 // Read-only line defaults for a product (replaces the old /_onchange): POST /api/product.product/:id/service/line_defaults.
 meshble::register_service!("product.product", "line_defaults", services::line_defaults, false, &[]);
+// Materialize the per-tax breakdown on an order's lines (sell + buy sides). No group gate: the original
+// methods gated purely on the order's Write ACL, and purchase.order Write is granted to sales.user AND
+// sales.manager — a group requirement here would narrow access (manager-only callers) vs the original.
+meshble::register_service!("sale.order", "apply_taxes", services::apply_taxes, true, &[]);
+meshble::register_service!("purchase.order", "apply_purchase_taxes", services::apply_purchase_taxes, true, &[]);
 
 /// `default_get` for the discount wizard: seed `order_id` from the open context's active record. With
 /// no active record the seed is empty (the required `order_id` then makes the open fail — by design).

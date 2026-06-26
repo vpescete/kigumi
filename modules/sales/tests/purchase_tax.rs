@@ -75,7 +75,7 @@ async fn purchase_taxes_roll_up_per_group_into_the_vendor_bill() {
 
     let buyer = Ctx::new(1, vec!["sales.user".to_string()]);
     let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
-    db.apply_purchase_taxes(&buyer, acls, rules, oid).await.unwrap();
+    db.run_service(&order, &buyer, acls, rules, oid, "apply_purchase_taxes", serde_json::Map::new()).await.unwrap();
     db.run_action(&order, &su, &[], &[], oid, "confirm").await.unwrap();
     let confirmed = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&confirmed, "amount_untaxed"), 200.0);
@@ -99,7 +99,7 @@ async fn purchase_taxes_roll_up_per_group_into_the_vendor_bill() {
     ins(&fpostax, json!({ "position_id": pos, "tax_src_id": vat22, "tax_dest_id": vat10 })).await;
     let o2 = db.insert_secured(&order, &su, &[], &[], json!({ "name": "New", "partner_id": vendor, "currency_id": cur, "fiscal_position_id": pos }).as_object().unwrap()).await.unwrap();
     db.insert_secured(&line, &su, &[], &[], json!({ "order_id": o2, "product_id": prod, "product_uom_qty": 1, "price_unit": 100.0, "tax_ids": [vat22] }).as_object().unwrap()).await.unwrap();
-    db.apply_purchase_taxes(&buyer, acls, rules, o2).await.unwrap();
+    db.run_service(&order, &buyer, acls, rules, o2, "apply_purchase_taxes", serde_json::Map::new()).await.unwrap();
     let mapped = db.find_one_secured(&order, &su, &[], &[], o2).await.unwrap().unwrap();
     assert_eq!(money(&mapped, "amount_tax"), 10.0, "VAT remapped 22% -> 10%");
 
