@@ -125,6 +125,28 @@ impl<'a> ServiceCtx<'a> {
     pub async fn today(&self) -> Result<String, DbError> {
         self.db.today().await
     }
+    /// Gapless sequence: the next formatted value for `code` (advances the counter atomically). Framework
+    /// numbering an ERP service uses to number an invoice / journal entry.
+    pub async fn next_value(&self, code: &str) -> Result<String, DbError> {
+        self.db.next_value(code).await
+    }
+    /// Registers a sequence `code` with its formatting if absent (idempotent).
+    pub async fn ensure_sequence(&self, code: &str, prefix: &str, suffix: &str, padding: i32) -> Result<(), DbError> {
+        self.db.ensure_sequence(code, prefix, suffix, padding).await
+    }
+    /// The first ACTIVE id of `model` whose `field` == `value` and whose company matches (company_id = c,
+    /// or IS NULL when none) — the generic chart / journal / location reference resolution. Runs ELEVATED
+    /// (engine-owned config lookup), so a service past the gate can resolve config rows the caller may not
+    /// directly read, while the company pin keeps the lookup deterministic (never another company's rows).
+    pub async fn first_match(&self, model: &ResolvedModel, field: &str, value: &str, company: Option<i64>) -> Result<Option<i64>, DbError> {
+        self.db.first_match(model, &self.caller.sudo(), field, value, company).await
+    }
+    /// A guarded compare-and-set under the CALLER's row-level authorization (Write record rule + company):
+    /// `UPDATE model SET set_clause WHERE id AND extra_where`. Static fragments only (no injection surface).
+    /// Returns true iff this call won the transition — e.g. atomically claiming an order for invoicing.
+    pub async fn guarded_cas(&self, model: &ResolvedModel, id: i64, set_clause: &str, extra_where: &str) -> Result<bool, DbError> {
+        self.db.guarded_cas(model, &self.caller, self.rules, id, set_clause, extra_where).await
+    }
     /// The connection pool, for a module's own bespoke SQL the domain-based secured finds cannot express:
     /// reference reads (currency, fiscal positions, recursive category trees), junction reads, most-
     /// specific-rule queries, and engine-owned BULK operations (e.g. replacing a line's tax breakdown rows

@@ -1740,6 +1740,37 @@ impl Db {
         Ok(self.find_ids_secured(model, ctx, &[], &[], Some(&dom)).await?.into_iter().next())
     }
 
+    /// A generic guarded compare-and-set: `UPDATE model SET <set_clause> WHERE id = $1 AND <extra_where>`,
+    /// AND-ed with the caller's WRITE record rule + company clause (the exact row-level authorization a
+    /// secured write enforces, via the same `record_rule_domain` / `company_clause` / `bind_query`
+    /// primitives). `set_clause` and `extra_where` are STATIC fragments the calling module controls —
+    /// values flow only through the bound id and the rule/company params, so there is no injection surface.
+    /// Returns true iff THIS call matched (won the transition). Generalizes the invoice-claim CAS so a
+    /// relocated module service can atomically transition a record (e.g. invoice_status `to_invoice` ->
+    /// `invoiced`) under the caller's authorization. Autocommit on the pool; reachable only via ServiceCtx.
+    pub(crate) async fn guarded_cas(
+        &self,
+        model: &ResolvedModel,
+        ctx: &Ctx,
+        rules: &[RecordRule],
+        id: i64,
+        set_clause: &str,
+        extra_where: &str,
+    ) -> Result<bool, DbError> {
+        let mut params: Vec<Value> = vec![Value::Int(id)];
+        let mut where_sql = match record_rule_domain(Operation::Write, model.name, ctx, rules) {
+            Some(rule) => format!("id = $1 AND {extra_where} AND {}", rule.compile_into(model, &mut params)?),
+            None => format!("id = $1 AND {extra_where}"),
+        };
+        where_sql.push_str(&company_clause(model, ctx, &mut params)?);
+        let sql = format!("UPDATE {} SET {set_clause} WHERE {} RETURNING id", model.table, where_sql);
+        let mut q = sqlx::query(&sql);
+        for v in &params {
+            q = bind_query(q, v);
+        }
+        Ok(q.fetch_optional(&self.pool).await?.is_some())
+    }
+
     /// Atomically claims an order for invoicing: a compare-and-set that flips `invoice_status`
     /// `to_invoice` -> `invoiced` ONLY if it is still `to_invoice`, under the same row-level authorization
     /// the secured write enforces (the WRITE record rule + the company clause — reusing the exact
