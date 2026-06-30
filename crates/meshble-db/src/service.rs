@@ -62,8 +62,7 @@ impl ServiceOutput {
 /// returning a boxed future whose lifetime is tied to the `&mut ServiceCtx` borrow. Module authors write a
 /// bare `async fn(&mut ServiceCtx, ServiceInput) -> Result<ServiceOutput, DbError>` and `register_service!`
 /// wraps it with the one `Box::pin`.
-pub type ServiceFn =
-    for<'c, 'a> fn(&'c mut ServiceCtx<'a>, ServiceInput) -> BoxServiceFut<'c, Result<ServiceOutput, DbError>>;
+pub type ServiceFn = for<'c, 'a, 't> fn(&'c mut ServiceCtx<'a, 't>, ServiceInput) -> BoxServiceFut<'c, Result<ServiceOutput, DbError>>;
 
 /// Registration of a service by (model, name) — the transactional twin of `ActionRegistration`.
 /// `write_gate` selects the ACL operation the dispatcher checks (Write for a mutating service, Read for a
@@ -123,17 +122,25 @@ pub fn ledger_report_names() -> Vec<&'static str> {
 /// methods are `async fn`s delegating to `Db`'s secured CRUD under the caller's context, so the security
 /// engine is re-applied on every call. The ERP model-name literals a body resolves live in the MODULE,
 /// never in this crate.
-pub struct ServiceCtx<'a> {
+pub struct ServiceCtx<'a, 't> {
     db: &'a Db,
+    tx: &'a mut sqlx::Transaction<'t, sqlx::Postgres>,
     caller: Ctx,
     acls: &'a [Acl],
     rules: &'a [RecordRule],
 }
 
-impl<'a> ServiceCtx<'a> {
+impl<'a, 't> ServiceCtx<'a, 't> {
     /// The authenticated caller (the dispatcher has already gated it).
     pub fn caller(&self) -> &Ctx {
         &self.caller
+    }
+    /// The LIVE service transaction, for a body that needs single-transaction atomicity (FOR UPDATE
+    /// locking, a compare-and-set, multi-row updates that must commit together) — e.g. stock reservation
+    /// / validation. run_service opens it, the body runs all its tx-bound SQL here, and run_service commits
+    /// on Ok (rolls back on Err). Pool-based services (the secured-CRUD methods) leave it untouched.
+    pub fn tx(&mut self) -> &mut sqlx::Transaction<'t, sqlx::Postgres> {
+        self.tx
     }
     /// Explicit, greppable elevation past the gate for engine-owned rows (GL lines, join rows, sequences).
     pub fn elevated(&self) -> Ctx {
@@ -232,8 +239,15 @@ impl Db {
         if self.find_one_secured(model, ctx, acls, rules, id).await?.is_none() {
             return Err(DbError::BadInput("record not found or not permitted".to_string()));
         }
-        let mut cx = ServiceCtx { db: self, caller: ctx.clone(), acls, rules };
-        let out = (reg.func)(&mut cx, ServiceInput { record_id: id, body }).await?;
+        // ONE transaction for the whole body: a tx-bound service (FOR UPDATE / CAS / atomic multi-write)
+        // runs its SQL on cx.tx() and commits here; a pool-based service leaves it empty (a no-op commit).
+        let mut tx = self.pool.begin().await?;
+        let result = {
+            let mut cx = ServiceCtx { db: self, tx: &mut tx, caller: ctx.clone(), acls, rules };
+            (reg.func)(&mut cx, ServiceInput { record_id: id, body }).await
+        }; // cx dropped → the tx borrow is released
+        let out = result?; // Err → tx drops (rollback) and returns
+        tx.commit().await?;
         Ok(out.0)
     }
 

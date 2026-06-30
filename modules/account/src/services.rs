@@ -20,7 +20,7 @@ use sqlx::Row;
 /// invoice/bill/payment services call after building a draft move, and the body of the `post` service.
 /// `ctx` is the authorization context (the caller for the `post` service; elevated when called by the
 /// engine after creating a move). Returns the assigned entry number. Relocated from `Db::post_move`.
-pub(crate) async fn post_move(cx: &ServiceCtx<'_>, ctx: &Ctx, move_id: i64) -> Result<String, DbError> {
+pub(crate) async fn post_move(cx: &ServiceCtx<'_, '_>, ctx: &Ctx, move_id: i64) -> Result<String, DbError> {
     let move_model = cx.resolve("account.move")?;
     let journal_model = cx.resolve("account.journal")?;
     let line_model = cx.resolve("account.move.line")?;
@@ -93,7 +93,7 @@ pub(crate) async fn post_move(cx: &ServiceCtx<'_>, ctx: &Ctx, move_id: i64) -> R
 
 /// The `post` service on account.move: POST /api/account.move/:id/service/post. run_service has gated
 /// Write + visibility on the move; this runs post_move under the caller and returns the entry number.
-pub async fn post(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+pub async fn post(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
     let ctx = cx.caller().clone();
     let number = post_move(cx, &ctx, input.record_id).await?;
     Ok(ServiceOutput::json(json!({ "posted": number })))
@@ -103,7 +103,7 @@ pub async fn post(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<Servic
 /// /api/sale.order/:id/service/create_invoice): a balanced out_invoice (income credit + per-group tax
 /// credits + receivable debit, in company currency), then claims the order (to_invoice → invoiced) and
 /// posts. run_service gated Write + visibility on the order. Relocated from `Db::create_sale_invoice`.
-pub async fn create_invoice(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+pub async fn create_invoice(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
     let order_model = cx.resolve("sale.order")?;
     let account_model = cx
         .resolve("account.account")
@@ -255,7 +255,7 @@ pub async fn create_invoice(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Res
 /// /api/purchase.order/:id/service/create_vendor_bill): the buy-side mirror of create_invoice (expense
 /// debit + per-group tax debits + payable credit), then claims + posts. Relocated from
 /// `Db::create_vendor_bill`.
-pub async fn create_vendor_bill(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+pub async fn create_vendor_bill(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
     let order_model = cx.resolve("purchase.order")?;
     let account_model = cx
         .resolve("account.account")
@@ -375,7 +375,7 @@ pub async fn create_vendor_bill(cx: &mut ServiceCtx<'_>, input: ServiceInput) ->
 /// /api/account.move/:id/service/register_payment, body {amount, journal_id}): atomically draws down the
 /// open residual, then books a balanced payment entry (with a realized-FX plug line when the company and
 /// invoice currencies differ), posted. Relocated from `Db::register_payment`.
-pub async fn register_payment(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+pub async fn register_payment(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
     let move_model = cx.resolve("account.move")?;
     let journal_model = cx.resolve("account.journal")?;
     let account_model = cx.resolve("account.account")?;
@@ -678,7 +678,7 @@ pub async fn convert_amount(pool: &sqlx::PgPool, amount: Decimal, from_currency:
 }
 
 /// The company's fiscal lock date as an ISO YYYY-MM-DD string, or None.
-async fn company_lock_date(cx: &ServiceCtx<'_>, company_id: i64) -> Result<Option<String>, DbError> {
+async fn company_lock_date(cx: &ServiceCtx<'_, '_>, company_id: i64) -> Result<Option<String>, DbError> {
     Ok(sqlx::query_scalar::<_, Option<String>>("SELECT fiscalyear_lock_date::text FROM res_company WHERE id = $1")
         .bind(company_id)
         .fetch_optional(cx.pool())
@@ -690,7 +690,7 @@ async fn company_lock_date(cx: &ServiceCtx<'_>, company_id: i64) -> Result<Optio
 /// bucket for any tax NOT in the breakdown, so the GL tax always sums to the order's amount_tax. Ordered by
 /// group sequence (NULL group last). Relocated from `Db::tax_group_buckets`.
 async fn tax_group_buckets(
-    cx: &ServiceCtx<'_>,
+    cx: &ServiceCtx<'_, '_>,
     order_id: i64,
     breakdown_table: &str,
     line_table: &str,

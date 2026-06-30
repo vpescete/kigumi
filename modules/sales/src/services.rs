@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 /// Behavior-preserving relocation of the former `Db::apply_sale_order_discount`: gates on the order's
 /// Write access (the wizard the route named is only a transient scratchpad), validates the percent at the
 /// boundary, and writes each line's `discount` through the SECURED path so the line/order totals cascade.
-pub async fn apply_discount(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+pub async fn apply_discount(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
     let wizard_model = cx.resolve("sale.order.discount")?;
     let order_model = cx.resolve("sale.order")?;
     let line_model = cx.resolve("sale.order.line")?;
@@ -65,7 +65,7 @@ pub async fn apply_discount(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Res
 /// order id via `POST /api/sale.order/:id/service/apply_pricelist`. run_service has already gated Write +
 /// visibility on the order. The pricelist currency must equal the order currency (no FX in v1).
 /// Behavior-preserving relocation of the former `Db::apply_pricelist`.
-pub async fn apply_pricelist(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+pub async fn apply_pricelist(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
     let order_model = cx.resolve("sale.order")?;
     let line_model = cx.resolve("sale.order.line")?;
     let pricelist_model = cx.resolve("product.pricelist")?;
@@ -118,7 +118,7 @@ pub async fn apply_pricelist(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Re
 /// uom). A read-only service on `product.product` — `POST /api/product.product/:id/service/line_defaults`,
 /// returning `{values}` the client merges into the line. Behavior-preserving relocation of the former
 /// `Db::product_onchange_values`; replaces the old model-level `/_onchange` endpoint.
-pub async fn line_defaults(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+pub async fn line_defaults(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
     let product_model = cx.resolve("product.product")?;
     let ctx = cx.caller().clone();
     let p = cx
@@ -141,7 +141,7 @@ pub async fn line_defaults(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Resu
 
 /// Materializes the per-tax breakdown on a `sale.order`'s lines from each line's `account.tax` set:
 /// POST /api/sale.order/:id/service/apply_taxes. Behavior-preserving relocation of `Db::apply_taxes`.
-pub async fn apply_taxes(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+pub async fn apply_taxes(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
     let n = apply_taxes_to(
         cx, input.record_id, "sale.order", "sale.order.line", "sale.order.line.tax",
         "sale_order_line_tax_rel", "sale_order_line_tax",
@@ -152,7 +152,7 @@ pub async fn apply_taxes(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result
 
 /// Buy-side mirror: POST /api/purchase.order/:id/service/apply_purchase_taxes. Relocation of
 /// `Db::apply_purchase_taxes`.
-pub async fn apply_purchase_taxes(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+pub async fn apply_purchase_taxes(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
     let n = apply_taxes_to(
         cx, input.record_id, "purchase.order", "purchase.order.line", "purchase.order.line.tax",
         "purchase_order_line_tax_rel", "purchase_order_line_tax",
@@ -168,7 +168,7 @@ pub async fn apply_purchase_taxes(cx: &mut ServiceCtx<'_>, input: ServiceInput) 
 /// visibility on the order (the route model). Reference reads + the engine-owned breakdown delete run on
 /// the module's pool; the breakdown rows + the line rate are written through the secured path.
 async fn apply_taxes_to(
-    cx: &mut ServiceCtx<'_>,
+    cx: &mut ServiceCtx<'_, '_>,
     order_id: i64,
     order_model_name: &str,
     line_model_name: &str,
