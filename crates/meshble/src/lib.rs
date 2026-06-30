@@ -31,8 +31,9 @@ pub mod prelude {
     // The cross-record service seam (DB-typed, defined in meshble-db) — registered via register_service!.
     // `DbError` is the service result's error type, so a module needs no direct meshble-db dependency.
     pub use meshble_db::{
-        service_for, services_for, BoxServiceFut, DbError, ServiceCtx, ServiceFn, ServiceInput,
-        ServiceOutput, ServiceRegistration,
+        ledger_report_for, ledger_report_names, service_for, services_for, BoxServiceFut, DbError,
+        LedgerReportFn, LedgerReportRegistration, ServiceCtx, ServiceFn, ServiceInput, ServiceOutput,
+        ServiceRegistration,
     };
 }
 
@@ -158,6 +159,25 @@ macro_rules! register_service {
                 name: $name,
                 func: |cx, inp| ::std::boxed::Box::pin($func(cx, inp)),
                 write_gate: $write_gate,
+                groups: $groups,
+            }
+        }
+    };
+}
+
+/// Registers a read-only LEDGER REPORT (record-less aggregate query, returning JSON rows) runnable via
+/// `GET /api/reports/<name>` — distinct from `register_report!`, which is the per-record document/PDF
+/// engine. `func` is an `async fn(&PgPool, params) -> Result<Vec<Json>, DbError>`; `read_model` is the
+/// model whose Read ACL gates it. The macro emits the one `Box::pin` adapting the async fn to the fn ptr.
+/// `meshble::register_ledger_report!("trial_balance", "account.account", trial_balance, &[]);`
+#[macro_export]
+macro_rules! register_ledger_report {
+    ($name:expr, $read_model:expr, $func:path, $groups:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::LedgerReportRegistration {
+                name: $name,
+                read_model: $read_model,
+                func: |pool, params| ::std::boxed::Box::pin($func(pool, params)),
                 groups: $groups,
             }
         }

@@ -512,6 +512,128 @@ pub async fn register_payment(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> R
 
 // ── module-owned bespoke SQL helpers (relocated from Db), run on the pool ServiceCtx hands out ──
 
+// ── read-only REPORTS (relocated from Db), dispatched by GET /api/reports/<name> via Db::run_report,
+//    which gates Read on the declared model before calling these. Pool-based aggregate queries. ──
+
+/// Trial balance: per-account totals (debit, credit, balance) over POSTED entries, accounts with activity
+/// only, ordered by code. Relocated from Db::trial_balance (the Read-on-account.account gate is now in
+/// run_report). v1: all companies.
+pub async fn trial_balance(pool: &sqlx::PgPool, _params: serde_json::Map<String, serde_json::Value>) -> Result<Vec<serde_json::Value>, DbError> {
+    let rows = sqlx::query(
+        "SELECT a.id, a.code, a.name, a.account_type, \
+                COALESCE(SUM(l.debit), 0) AS debit, COALESCE(SUM(l.credit), 0) AS credit \
+         FROM account_account a \
+         JOIN account_move_line l ON l.account_id = a.id \
+         JOIN account_move m ON m.id = l.move_id AND m.state = 'posted' \
+         GROUP BY a.id, a.code, a.name, a.account_type \
+         ORDER BY a.code",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            let debit: Decimal = r.try_get("debit").unwrap_or_default();
+            let credit: Decimal = r.try_get("credit").unwrap_or_default();
+            json!({
+                "account_id": r.try_get::<i64, _>("id").unwrap_or_default(),
+                "code": r.try_get::<Option<String>, _>("code").ok().flatten(),
+                "name": r.try_get::<Option<String>, _>("name").ok().flatten(),
+                "account_type": r.try_get::<Option<String>, _>("account_type").ok().flatten(),
+                "debit": debit.to_string(),
+                "credit": credit.to_string(),
+                "balance": (debit - credit).to_string(),
+            })
+        })
+        .collect())
+}
+
+/// Aged receivable/payable: open posted invoices bucketed by days past due, grouped by partner. Query
+/// param `kind` = receivable (out_invoice) / payable (in_invoice). Relocated from Db::aged_balance.
+pub async fn aged_balance(pool: &sqlx::PgPool, params: serde_json::Map<String, serde_json::Value>) -> Result<Vec<serde_json::Value>, DbError> {
+    let move_type = match params.get("kind").and_then(|v| v.as_str()).unwrap_or("") {
+        "receivable" => "out_invoice",
+        "payable" => "in_invoice",
+        _ => return Err(DbError::BadInput("'kind' must be 'receivable' or 'payable'".to_string())),
+    };
+    let rows = sqlx::query(
+        "SELECT m.partner_id, p.name AS partner_name, \
+                COALESCE(SUM(m.amount_residual) FILTER (WHERE m.invoice_date_due IS NULL OR m.invoice_date_due >= current_date), 0) AS bucket_current, \
+                COALESCE(SUM(m.amount_residual) FILTER (WHERE current_date - m.invoice_date_due BETWEEN 1 AND 30), 0) AS b1_30, \
+                COALESCE(SUM(m.amount_residual) FILTER (WHERE current_date - m.invoice_date_due BETWEEN 31 AND 60), 0) AS b31_60, \
+                COALESCE(SUM(m.amount_residual) FILTER (WHERE current_date - m.invoice_date_due BETWEEN 61 AND 90), 0) AS b61_90, \
+                COALESCE(SUM(m.amount_residual) FILTER (WHERE current_date - m.invoice_date_due > 90), 0) AS b90_plus, \
+                COALESCE(SUM(m.amount_residual), 0) AS total \
+         FROM account_move m \
+         LEFT JOIN res_partner p ON p.id = m.partner_id \
+         WHERE m.state = 'posted' AND m.move_type = $1 AND m.amount_residual > 0 \
+         GROUP BY m.partner_id, p.name \
+         ORDER BY p.name",
+    )
+    .bind(move_type)
+    .fetch_all(pool)
+    .await?;
+    let d = |r: &sqlx::postgres::PgRow, c: &str| -> String {
+        r.try_get::<Decimal, _>(c).unwrap_or_default().to_string()
+    };
+    Ok(rows
+        .iter()
+        .map(|r| {
+            json!({
+                "partner_id": r.try_get::<Option<i64>, _>("partner_id").ok().flatten(),
+                "partner_name": r.try_get::<Option<String>, _>("partner_name").ok().flatten(),
+                "current": d(r, "bucket_current"),
+                "b1_30": d(r, "b1_30"),
+                "b31_60": d(r, "b31_60"),
+                "b61_90": d(r, "b61_90"),
+                "b90_plus": d(r, "b90_plus"),
+                "total": d(r, "total"),
+            })
+        })
+        .collect())
+}
+
+/// General-ledger drill-down: every posted move line on one account in date order with a running balance.
+/// Query param `account_id`. Relocated from Db::general_ledger.
+pub async fn general_ledger(pool: &sqlx::PgPool, params: serde_json::Map<String, serde_json::Value>) -> Result<Vec<serde_json::Value>, DbError> {
+    let account_id: i64 = params
+        .get("account_id")
+        .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .ok_or_else(|| DbError::BadInput("'account_id' is required".to_string()))?;
+    let rows = sqlx::query(
+        "SELECT m.date::text AS date, m.name AS move_name, m.move_type, l.name AS label, \
+                l.partner_id, p.name AS partner_name, l.debit, l.credit \
+         FROM account_move_line l \
+         JOIN account_move m ON m.id = l.move_id AND m.state = 'posted' \
+         LEFT JOIN res_partner p ON p.id = l.partner_id \
+         WHERE l.account_id = $1 \
+         ORDER BY m.date, m.id, l.id",
+    )
+    .bind(account_id)
+    .fetch_all(pool)
+    .await?;
+    let mut running = Decimal::ZERO;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            let debit: Decimal = r.try_get("debit").unwrap_or_default();
+            let credit: Decimal = r.try_get("credit").unwrap_or_default();
+            running += debit - credit;
+            json!({
+                "date": r.try_get::<Option<String>, _>("date").ok().flatten(),
+                "move_name": r.try_get::<Option<String>, _>("move_name").ok().flatten(),
+                "move_type": r.try_get::<Option<String>, _>("move_type").ok().flatten(),
+                "label": r.try_get::<Option<String>, _>("label").ok().flatten(),
+                "partner_id": r.try_get::<Option<i64>, _>("partner_id").ok().flatten(),
+                "partner_name": r.try_get::<Option<String>, _>("partner_name").ok().flatten(),
+                "debit": debit.to_string(),
+                "credit": credit.to_string(),
+                "balance": running.to_string(),
+            })
+        })
+        .collect())
+}
+
 /// The exchange rate for `currency` on or before `as_of` (currency units per 1 base unit): the latest
 /// res.currency.rate row. No rows = base currency (1.0); rows but none on/before `as_of` = error.
 async fn currency_rate(pool: &sqlx::PgPool, currency: i64, as_of: &str) -> Result<Decimal, DbError> {

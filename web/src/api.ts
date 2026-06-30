@@ -372,7 +372,7 @@ export type AgedRow = {
 
 /** Aged open balances by partner, bucketed by days past due. `kind` = 'receivable' or 'payable'. */
 export async function reportAged(kind: 'receivable' | 'payable'): Promise<AgedRow[]> {
-  const { rows } = await asJson<{ rows: AgedRow[] }>(await request(`/api/reports/aged/${kind}`))
+  const { rows } = await asJson<{ rows: AgedRow[] }>(await request(`/api/reports/aged_balance?kind=${kind}`))
   return rows
 }
 

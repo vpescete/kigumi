@@ -462,9 +462,7 @@ fn build_data_router(
         // Variant generation: materialize a product.template's attribute combinations into variants.
         .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
         // Re-price a sale order's lines from its pricelist.
-        .route("/api/reports/trial_balance", get(trial_balance_handler))
-        .route("/api/reports/general_ledger/:account_id", get(general_ledger_handler))
-        .route("/api/reports/aged/:kind", get(aged_handler))
+        .route("/api/reports/:report", get(ledger_report_handler))
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
         // Apply the discount wizard: write its discount onto the target order's lines.
@@ -1408,49 +1406,26 @@ async fn generate_variants_handler(
     }
 }
 
-/// Trial balance report: per-account debit/credit/balance over posted entries. The frontend folds it
-/// into a P&L and a balance sheet. Read-gated on account.account.
-async fn trial_balance_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+/// The ONE generic read-only ledger-report dispatch: GET /api/reports/:report?<params>. Resolves the
+/// module-registered report by name, gates Read on its declared model (in run_ledger_report), and returns
+/// the JSON rows. Query params are passed through as strings (e.g. ?account_id=5, ?kind=receivable). Zero
+/// ERP report names in the router — a new report needs no edit here.
+async fn ledger_report_handler(
+    State(state): State<AppState>,
+    Path(report): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
     let ctx = match authenticate(backend, &headers) {
         Ok(c) => c,
         Err(r) => return r,
     };
-    match backend.db.trial_balance(&ctx, &backend.acls(), &backend.rules()).await {
+    let pmap: serde_json::Map<String, Json2> =
+        params.into_iter().map(|(k, v)| (k, Json2::String(v))).collect();
+    match backend.db.run_ledger_report(&ctx, &backend.acls(), &report, pmap).await {
         Ok(rows) => json_response(serde_json::json!({ "rows": rows }).to_string()),
-        Err(e) => write_error("trial_balance", e),
-    }
-}
-
-/// General-ledger drill-down: posted move lines on one account with a running balance.
-async fn general_ledger_handler(State(state): State<AppState>, Path(account_id): Path<i64>, headers: HeaderMap) -> Response {
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match backend.db.general_ledger(&ctx, &backend.acls(), &backend.rules(), account_id).await {
-        Ok(rows) => json_response(serde_json::json!({ "rows": rows }).to_string()),
-        Err(e) => write_error("general_ledger", e),
-    }
-}
-
-/// Aged balance report: open invoices bucketed by age past due, grouped by partner. `kind` =
-/// receivable (customer) or payable (vendor).
-async fn aged_handler(State(state): State<AppState>, Path(kind): Path<String>, headers: HeaderMap) -> Response {
-    let move_type = match kind.as_str() {
-        "receivable" => "out_invoice",
-        "payable" => "in_invoice",
-        _ => return (StatusCode::BAD_REQUEST, "kind must be 'receivable' or 'payable'").into_response(),
-    };
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match backend.db.aged_balance(&ctx, &backend.acls(), &backend.rules(), move_type).await {
-        Ok(rows) => json_response(serde_json::json!({ "rows": rows }).to_string()),
-        Err(e) => write_error("aged_balance", e),
+        Err(e) => write_error("report", e),
     }
 }
 

@@ -92,6 +92,33 @@ pub fn services_for(model: &str) -> Vec<&'static ServiceRegistration> {
         .collect()
 }
 
+/// A read-only REPORT fn — bespoke aggregate SQL over the pool returning JSON rows, with optional query
+/// params. The read-only, record-less sibling of a service (a report has no record id): gated only on Read
+/// of a declared model, then dispatched generically. The ERP report logic lives in the module that owns
+/// the tables; the core just gates + dispatches.
+pub type LedgerReportFn =
+    for<'a> fn(&'a sqlx::PgPool, Map<String, Json>) -> BoxServiceFut<'a, Result<Vec<Json>, DbError>>;
+
+/// Registration of a report by name, emitted by `register_report!`. `read_model` is the model whose Read
+/// ACL gates it (e.g. account.account); `groups` (if non-empty) further restricts who may run it.
+pub struct LedgerReportRegistration {
+    pub name: &'static str,
+    pub read_model: &'static str,
+    pub func: LedgerReportFn,
+    pub groups: &'static [&'static str],
+}
+meshble_core::inventory::collect!(LedgerReportRegistration);
+
+/// Looks up a registered report by name.
+pub fn ledger_report_for(name: &str) -> Option<&'static LedgerReportRegistration> {
+    meshble_core::inventory::iter::<LedgerReportRegistration>.into_iter().find(|r| r.name == name)
+}
+
+/// All registered report names (for a UI report menu).
+pub fn ledger_report_names() -> Vec<&'static str> {
+    meshble_core::inventory::iter::<LedgerReportRegistration>.into_iter().map(|r| r.name).collect()
+}
+
 /// The secured-primitive surface handed to a service body. A concrete struct (no trait, no `dyn`): its
 /// methods are `async fn`s delegating to `Db`'s secured CRUD under the caller's context, so the security
 /// engine is re-applied on every call. The ERP model-name literals a body resolves live in the MODULE,
@@ -208,5 +235,25 @@ impl Db {
         let mut cx = ServiceCtx { db: self, caller: ctx.clone(), acls, rules };
         let out = (reg.func)(&mut cx, ServiceInput { record_id: id, body }).await?;
         Ok(out.0)
+    }
+
+    /// The generic READ-ONLY report dispatcher. Gates on Read of the report's declared model (+ optional
+    /// group), then runs the module-registered report fn over the pool with the query params. ZERO ERP
+    /// literals — a new report needs no edit here. Returns the JSON rows.
+    pub async fn run_ledger_report(
+        &self,
+        ctx: &Ctx,
+        acls: &[Acl],
+        name: &str,
+        params: Map<String, Json>,
+    ) -> Result<Vec<Json>, DbError> {
+        let reg = ledger_report_for(name).ok_or_else(|| DbError::BadInput(format!("unknown report '{name}'")))?;
+        if !check_access(Operation::Read, reg.read_model, ctx, acls) {
+            return Err(DbError::AccessDenied { model: reg.read_model.to_string(), operation: "report" });
+        }
+        if !reg.groups.is_empty() && !ctx.is_su() && !reg.groups.iter().any(|g| ctx.is_member(g)) {
+            return Err(DbError::AccessDenied { model: reg.read_model.to_string(), operation: "report (group)" });
+        }
+        (reg.func)(&self.pool, params).await
     }
 }

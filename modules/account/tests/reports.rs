@@ -53,7 +53,7 @@ async fn trial_balance_aggregates_posted_entries() {
         ]
     }).as_object().unwrap()).await.unwrap();
 
-    let rows = db.trial_balance(&su, &[], &[]).await.unwrap();
+    let rows = db.run_ledger_report(&su, &[], "trial_balance", serde_json::Map::new()).await.unwrap();
     let money = |r: &serde_json::Value, f: &str| -> f64 { r[f].as_str().unwrap().parse().unwrap() };
     let by_code = |code: &str| rows.iter().find(|r| r["code"] == code).cloned();
 

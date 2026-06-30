@@ -49,7 +49,7 @@ async fn aged_balance_buckets_open_invoices_by_due_date() {
     // A DRAFT invoice must be excluded.
     db.insert_secured(&mv, &su, &[], &[], invoice("999", "2020-01-01").as_object().unwrap()).await.unwrap();
 
-    let rows = db.aged_balance(&su, &[], &[], "out_invoice").await.unwrap();
+    let rows = db.run_ledger_report(&su, &[], "aged_balance", serde_json::json!({"kind": "receivable"}).as_object().unwrap().clone()).await.unwrap();
     assert_eq!(rows.len(), 1, "one partner with open receivables");
     let r = &rows[0];
     let f = |k: &str| r[k].as_str().unwrap().parse::<f64>().unwrap();

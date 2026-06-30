@@ -55,7 +55,7 @@ async fn general_ledger_lists_posted_lines_with_a_running_balance() {
         "line_ids": [ { "account_id": inc, "debit": "0", "credit": "9" }, { "account_id": recv, "debit": "9", "credit": "0" } ]
     }).as_object().unwrap()).await.unwrap();
 
-    let rows = db.general_ledger(&su, &[], &[], recv).await.unwrap();
+    let rows = db.run_ledger_report(&su, &[], "general_ledger", serde_json::json!({"account_id": recv}).as_object().unwrap().clone()).await.unwrap();
     assert_eq!(rows.len(), 2, "two posted receivable lines (the draft is excluded)");
     assert_eq!(money(&rows[0], "debit"), 100.0);
     assert_eq!(money(&rows[0], "balance"), 100.0, "running balance after the first line");
@@ -63,7 +63,7 @@ async fn general_ledger_lists_posted_lines_with_a_running_balance() {
     assert_eq!(money(&rows[1], "balance"), 150.0, "running balance accumulates");
 
     // The income account's GL shows the credits, balance going negative (credit-natured).
-    let inc_rows = db.general_ledger(&su, &[], &[], inc).await.unwrap();
+    let inc_rows = db.run_ledger_report(&su, &[], "general_ledger", serde_json::json!({"account_id": inc}).as_object().unwrap().clone()).await.unwrap();
     assert_eq!(inc_rows.len(), 2);
     assert_eq!(money(&inc_rows[1], "balance"), -150.0, "income runs to -150 (Σ debit - credit)");
 

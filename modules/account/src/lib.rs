@@ -283,6 +283,12 @@ meshble::register_service!("sale.order", "create_invoice", services::create_invo
 meshble::register_service!("purchase.order", "create_vendor_bill", services::create_vendor_bill, true, &[]);
 meshble::register_service!("account.move", "register_payment", services::register_payment, true, &[]);
 
+// Read-only GL reports (record-less) dispatched by GET /api/reports/<name>, gated on Read of the named
+// model. The ERP query logic lives here; meshble-db just gates + dispatches.
+meshble::register_ledger_report!("trial_balance", "account.account", services::trial_balance, &[]);
+meshble::register_ledger_report!("aged_balance", "account.move", services::aged_balance, &[]);
+meshble::register_ledger_report!("general_ledger", "account.account", services::general_ledger, &[]);
+
 // Form layout: the journal entry header in one group, its lines in a notebook page.
 meshble::register_view!(
     "account.move",
