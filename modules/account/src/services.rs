@@ -389,7 +389,13 @@ pub async fn register_payment(cx: &mut ServiceCtx<'_>, input: ServiceInput) -> R
         _ => return Err(DbError::BadInput("'amount' is required".to_string())),
     }
     .map_err(|_| DbError::BadInput("payment amount must be a number".to_string()))?;
-    let journal_id = input.int("journal_id");
+    // Fail fast at the boundary (the old handler 400'd on a missing/non-integer journal_id rather than
+    // letting it coerce to 0 and surface as a late "journal not found").
+    let journal_id = input
+        .body
+        .get("journal_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| DbError::BadInput("'journal_id' is required".to_string()))?;
 
     if amount <= Decimal::ZERO {
         return Err(DbError::BadInput("payment amount must be positive".to_string()));

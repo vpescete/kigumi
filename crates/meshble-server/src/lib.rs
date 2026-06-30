@@ -1408,8 +1408,6 @@ async fn generate_variants_handler(
     }
 }
 
-/// Register a (full or partial) payment against a posted invoice. Pinned to account.move. Body:
-/// `{amount, journal_id}` (a bank/cash journal). Returns the posted payment move id.
 /// Trial balance report: per-account debit/credit/balance over posted entries. The frontend folds it
 /// into a P&L and a balance sheet. Read-gated on account.account.
 async fn trial_balance_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {

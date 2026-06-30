@@ -238,7 +238,8 @@ pub static ACLS: &[Acl] = &[
 ];
 
 /// `button_draft`: reset a posted or cancelled entry to draft (for correction). Posting is the
-/// cross-record `Db::post_move` (it reads the journal sequence), but un-posting is a pure state flip.
+/// cross-record `post` service (services::post / post_move, which reads the journal sequence), but
+/// un-posting is a pure state flip.
 fn reset_to_draft(i: &ActionInput) -> Result<ActionOutcome, String> {
     match i.str("state") {
         "posted" | "cancel" => Ok(ActionOutcome::new().set("state", Value::Str("draft".to_string()))),

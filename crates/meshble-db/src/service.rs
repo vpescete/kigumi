@@ -13,17 +13,17 @@
 //! reaches the DB solely through [`ServiceCtx`], whose secured-CRUD helpers re-apply the full security
 //! path (ACL + D6 + record rule + company scope) for every call, under the caller's context.
 //!
-//! v1 scope (this file): the secured-CRUD surface every relocated service needs — `find_one_secured`,
+//! Scope (this file): the secured-CRUD surface every relocated service needs — `find_one_secured`,
 //! `find_secured`, `insert_secured`, `update_secured` — each delegating to `Db`'s own pool methods, so a
-//! relocated method behaves byte-for-byte as before (own-transaction-per-write + full recompute/tracking).
-//! Single-transaction atomicity across writes (a live `tx()` handle, in-tx CRUD twins, `enqueue_event`,
-//! deferred grandparent recompute) is added with the account/stock batch, when the first service that
-//! genuinely needs one transaction (`post_move`) is migrated — see docs. Reports register read-only.
+//! relocated method behaves byte-for-byte as before (own-transaction-per-write + full recompute/tracking),
+//! plus the chart/sequence/CAS helpers (`first_match`, `next_value`, `ensure_sequence`, `guarded_cas`) and
+//! the raw-SQL escape (`pool`). The relocated ERP methods opened no transaction, so this surface is
+//! sufficient; single-transaction atomicity (a live `tx()` handle + in-tx CRUD twins) is added only when
+//! the stock batch, which uses FOR UPDATE, is migrated.
 
 use crate::{Db, DbError};
-use meshble_core::{check_access, Acl, Ctx, Domain, Operation, RecordRule, ResolvedModel, Value};
+use meshble_core::{check_access, Acl, Ctx, Domain, Operation, RecordRule, ResolvedModel};
 use serde_json::{Map, Value as Json};
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -174,10 +174,6 @@ impl<'a> ServiceCtx<'a> {
         self.db.update_secured(m, ctx, self.acls, self.rules, id, values).await
     }
 }
-
-/// Avoids an unused-import warning while `Value` is part of the seam's intended surface (in-tx twins,
-/// added with the account batch, return `BTreeMap<String, Value>` records).
-type _ServiceRecord = BTreeMap<String, Value>;
 
 impl Db {
     /// The generic service dispatcher — the `run_action` twin. ZERO ERP literals. Gates exactly like
