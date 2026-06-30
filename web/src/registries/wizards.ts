@@ -17,10 +17,10 @@ export const WIZARDS: Record<string, WizardSpec[]> = {
   'sale.order': [
     {
       wizardModel: 'sale.order.discount',
-      applyPath: 'apply_discount',
+      applyPath: 'service/apply_discount',
       label: 'Discount',
       fields: ['discount'],
-      resultToast: (r) => `Discount applied to ${r.discounted} line${r.discounted === 1 ? '' : 's'}`,
+      resultToast: (r) => `Discount applied to ${r.applied} line${r.applied === 1 ? '' : 's'}`,
     },
   ],
 }

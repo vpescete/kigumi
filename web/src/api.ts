@@ -378,7 +378,7 @@ export async function reportAged(kind: 'receivable' | 'payable'): Promise<AgedRo
 
 /** Registers a (full or partial) payment against a posted invoice; returns the payment move id. */
 export async function registerPayment(moveId: number, amount: string, journalId: number): Promise<number> {
-  const res = await request(`/api/account.move/${moveId}/register_payment`, {
+  const res = await request(`/api/account.move/${moveId}/service/register_payment`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ amount, journal_id: journalId }),
@@ -387,14 +387,11 @@ export async function registerPayment(moveId: number, amount: string, journalId:
   return payment
 }
 
-/** Product onchange for an order/invoice line: returns the values to default (name, price_unit,
- * product_uom_qty, uom_id) when a product is picked, so the client fills the line without typing. */
-export async function onchangeProduct(lineModel: string, productId: number): Promise<Record<string, unknown>> {
-  const res = await request(`/api/${lineModel}/_onchange`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ product_id: productId }),
-  })
+/** Line defaults for a picked product: returns the values to default (name, price_unit,
+ * product_uom_qty, uom_id), so the client fills the line without typing. Now the read-only `line_defaults`
+ * service on product.product (the product is the record), replacing the former model-level `/_onchange`. */
+export async function onchangeProduct(productId: number): Promise<Record<string, unknown>> {
+  const res = await request(`/api/product.product/${productId}/service/line_defaults`, { method: 'POST' })
   const { values } = await asJson<{ values: Record<string, unknown> }>(res)
   return values
 }

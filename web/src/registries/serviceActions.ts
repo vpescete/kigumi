@@ -3,7 +3,8 @@
 // result. The backend does not yet advertise these, so this small client registry is the seam.
 
 export interface ServiceAction {
-  /** POST /api/<model>/<id>/<endpoint> */
+  /** POST /api/<model>/<id>/<endpoint>. Relocated cross-record methods live under `service/<name>` (the
+   *  generic register_service! route); methods still pinned in the core keep their bare name for now. */
   endpoint: string
   label: string
   /** Confirmation prompt for irreversible operations (none = run immediately). */
@@ -15,18 +16,18 @@ export interface ServiceAction {
 export const SERVICE_ACTIONS: Record<string, ServiceAction[]> = {
   'sale.order': [
     {
-      endpoint: 'create_invoice',
+      endpoint: 'service/create_invoice',
       label: 'Create invoice',
       confirm: 'Create a posted invoice for this order?',
       resultToast: (r) => `Invoice created (entry #${r.invoice})`,
     },
     {
-      endpoint: 'apply_pricelist',
+      endpoint: 'service/apply_pricelist',
       label: 'Apply pricelist',
       resultToast: (r) => `Repriced ${r.priced} line${r.priced === 1 ? '' : 's'}`,
     },
     {
-      endpoint: 'apply_taxes',
+      endpoint: 'service/apply_taxes',
       label: 'Apply taxes',
       resultToast: (r) => `Taxed ${r.taxed} line${r.taxed === 1 ? '' : 's'}`,
     },
@@ -53,7 +54,7 @@ export const SERVICE_ACTIONS: Record<string, ServiceAction[]> = {
   ],
   'account.move': [
     {
-      endpoint: 'post',
+      endpoint: 'service/post',
       label: 'Post entry',
       confirm: 'Post this journal entry? Posted entries cannot be edited.',
       resultToast: (r) => `Entry ${r.posted} posted`,

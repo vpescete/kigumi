@@ -72,7 +72,7 @@ export function EditableRelation({
     // so the user does not type them. An existing quantity is preserved.
     if (name === 'product_id' && typeof value === 'number') {
       void api
-        .onchangeProduct(child.model, value)
+        .onchangeProduct(value)
         .then((values) =>
           onChange(
             next.map((ln) => {
