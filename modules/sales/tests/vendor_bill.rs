@@ -71,7 +71,7 @@ async fn confirmed_purchase_generates_a_posted_balanced_bill() {
     // Bill it as a plain sales.user (gates on purchase.order write; GL posting runs elevated).
     let buyer = Ctx::new(1, vec!["sales.user".to_string()]);
     let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
-    let move_id = db.create_vendor_bill(&buyer, acls, rules, oid).await.unwrap();
+    let move_id = db.run_service(&order, &buyer, acls, rules, oid, "create_vendor_bill", serde_json::Map::new()).await.unwrap()["bill"].as_i64().unwrap();
 
     let bill = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
     assert_eq!(bill["state"], "posted", "the bill is posted");
@@ -89,12 +89,12 @@ async fn confirmed_purchase_generates_a_posted_balanced_bill() {
     assert_eq!(after["invoice_status"], "invoiced", "the order is now billed");
 
     // Re-billing is rejected (the order is no longer to_invoice).
-    assert!(db.create_vendor_bill(&buyer, acls, rules, oid).await.is_err(), "cannot bill twice");
+    assert!(db.run_service(&order, &buyer, acls, rules, oid, "create_vendor_bill", serde_json::Map::new()).await.is_err(), "cannot bill twice");
 
     // Pay the vendor bill: in_invoice draws down the payable, crediting the bank.
     let acct = Ctx::new(2, vec!["account.user".to_string()]);
     let (a_acls, a_rules) = (meshble_mod_account::ACLS, meshble_mod_account::RECORD_RULES);
-    db.register_payment(&acct, a_acls, a_rules, move_id, "122".parse().unwrap(), bank_journal).await.unwrap();
+    db.run_service(&mv, &acct, a_acls, a_rules, move_id, "register_payment", serde_json::json!({"amount": "122", "journal_id": bank_journal}).as_object().unwrap().clone()).await.unwrap();
     let paid = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
     assert_eq!(money(&paid, "amount_residual"), 0.0, "the bill is settled");
     assert_eq!(paid["payment_state"], "paid");

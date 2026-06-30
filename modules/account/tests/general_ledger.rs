@@ -47,7 +47,7 @@ async fn general_ledger_lists_posted_lines_with_a_running_balance() {
                 { "account_id": recv, "debit": d2, "credit": c2 }
             ]
         }).as_object().unwrap()).await.unwrap();
-        db.post_move(&su, &[], &[], m).await.unwrap();
+        db.run_service(&mv, &su, &[], &[], m, "post", serde_json::Map::new()).await.unwrap();
     }
     // A DRAFT entry on the receivable — must NOT appear.
     db.insert_secured(&mv, &su, &[], &[], json!({

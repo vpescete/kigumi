@@ -47,20 +47,20 @@ async fn fiscal_lock_blocks_posting_in_a_locked_period() {
 
     // Dated inside the locked period (<= 2026-01-31) → posting is refused.
     let locked = db.insert_secured(&mv, &su, &[], &[], balanced("2026-01-15", Some(comp)).as_object().unwrap()).await.unwrap();
-    assert!(db.post_move(&su, &[], &[], locked).await.is_err(), "an entry in the locked period cannot be posted");
+    assert!(db.run_service(&mv, &su, &[], &[], locked, "post", serde_json::Map::new()).await.is_err(), "an entry in the locked period cannot be posted");
     assert_eq!(db.find_one_secured(&mv, &su, &[], &[], locked).await.unwrap().unwrap()["state"], "draft", "the refused entry stays draft");
 
     // The lock boundary date itself is locked (<=).
     let boundary = db.insert_secured(&mv, &su, &[], &[], balanced("2026-01-31", Some(comp)).as_object().unwrap()).await.unwrap();
-    assert!(db.post_move(&su, &[], &[], boundary).await.is_err(), "the lock date itself is closed");
+    assert!(db.run_service(&mv, &su, &[], &[], boundary, "post", serde_json::Map::new()).await.is_err(), "the lock date itself is closed");
 
     // Dated after the lock → posts.
     let after = db.insert_secured(&mv, &su, &[], &[], balanced("2026-06-01", Some(comp)).as_object().unwrap()).await.unwrap();
-    assert!(db.post_move(&su, &[], &[], after).await.is_ok(), "an entry after the lock posts");
+    assert!(db.run_service(&mv, &su, &[], &[], after, "post", serde_json::Map::new()).await.is_ok(), "an entry after the lock posts");
 
     // No company (shared) → no lock applies, even in the locked period.
     let shared = db.insert_secured(&mv, &su, &[], &[], balanced("2026-01-10", None).as_object().unwrap()).await.unwrap();
-    assert!(db.post_move(&su, &[], &[], shared).await.is_ok(), "an entry with no company is not locked");
+    assert!(db.run_service(&mv, &su, &[], &[], shared, "post", serde_json::Map::new()).await.is_ok(), "an entry with no company is not locked");
 
     for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

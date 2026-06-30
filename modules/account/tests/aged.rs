@@ -43,9 +43,9 @@ async fn aged_balance_buckets_open_invoices_by_due_date() {
     };
     // Way overdue (2020) → 90+; due far in the future → current.
     let a = db.insert_secured(&mv, &su, &[], &[], invoice("200", "2020-01-01").as_object().unwrap()).await.unwrap();
-    db.post_move(&su, &[], &[], a).await.unwrap();
+    db.run_service(&mv, &su, &[], &[], a, "post", serde_json::Map::new()).await.unwrap();
     let b = db.insert_secured(&mv, &su, &[], &[], invoice("50", "2099-01-01").as_object().unwrap()).await.unwrap();
-    db.post_move(&su, &[], &[], b).await.unwrap();
+    db.run_service(&mv, &su, &[], &[], b, "post", serde_json::Map::new()).await.unwrap();
     // A DRAFT invoice must be excluded.
     db.insert_secured(&mv, &su, &[], &[], invoice("999", "2020-01-01").as_object().unwrap()).await.unwrap();
 

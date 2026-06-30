@@ -17,6 +17,7 @@ async fn convert_amount_uses_the_dated_rate() {
         Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
     };
     let db = Db::connect(&url).await.unwrap();
+    let pool = sqlx::PgPool::connect(&url).await.unwrap(); // ServiceCtx::pool() analogue for the relocated FX helper
     let su = Ctx::new(0, vec![]).sudo();
 
     let plan = migration_plan().unwrap();
@@ -36,13 +37,13 @@ async fn convert_amount_uses_the_dated_rate() {
     let f = |d: rust_decimal::Decimal| d.to_string().parse::<f64>().unwrap();
 
     // 125 USD -> 100 EUR (divide by the USD rate; EUR base = 1.0).
-    assert_eq!(f(db.convert_amount("125".parse().unwrap(), usd, eur, "2099-01-01").await.unwrap()), 100.0);
+    assert_eq!(f(meshble_mod_account::services::convert_amount(&pool, "125".parse().unwrap(), usd, eur, "2099-01-01").await.unwrap()), 100.0);
     // 100 EUR -> 125 USD (multiply by the USD rate).
-    assert_eq!(f(db.convert_amount("100".parse().unwrap(), eur, usd, "2099-01-01").await.unwrap()), 125.0);
+    assert_eq!(f(meshble_mod_account::services::convert_amount(&pool, "100".parse().unwrap(), eur, usd, "2099-01-01").await.unwrap()), 125.0);
     // Same currency is identity.
-    assert_eq!(f(db.convert_amount("50".parse().unwrap(), eur, eur, "2099-01-01").await.unwrap()), 50.0);
+    assert_eq!(f(meshble_mod_account::services::convert_amount(&pool, "50".parse().unwrap(), eur, eur, "2099-01-01").await.unwrap()), 50.0);
     // GBP has rates but none on or before 2020 → error (never silently 1.0).
-    assert!(db.convert_amount("100".parse().unwrap(), gbp, eur, "2020-06-01").await.is_err(), "unknown historical rate errors");
+    assert!(meshble_mod_account::services::convert_amount(&pool, "100".parse().unwrap(), gbp, eur, "2020-06-01").await.is_err(), "unknown historical rate errors");
 
     for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

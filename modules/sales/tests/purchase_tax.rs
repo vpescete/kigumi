@@ -81,7 +81,7 @@ async fn purchase_taxes_roll_up_per_group_into_the_vendor_bill() {
     assert_eq!(money(&confirmed, "amount_untaxed"), 200.0);
     assert_eq!(money(&confirmed, "amount_tax"), 27.0, "22 VAT + 5 Eco");
 
-    let move_id = db.create_vendor_bill(&buyer, acls, rules, oid).await.unwrap();
+    let move_id = db.run_service(&order, &buyer, acls, rules, oid, "create_vendor_bill", serde_json::Map::new()).await.unwrap()["bill"].as_i64().unwrap();
     let bill = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
     assert_eq!(bill["state"], "posted");
     let lines = bill["line_ids"].as_array().unwrap();

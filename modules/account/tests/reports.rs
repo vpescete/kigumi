@@ -42,7 +42,7 @@ async fn trial_balance_aggregates_posted_entries() {
             { "account_id": recv, "debit": "100", "credit": "0" }
         ]
     }).as_object().unwrap()).await.unwrap();
-    db.post_move(&su, &[], &[], posted).await.unwrap();
+    db.run_service(&mv, &su, &[], &[], posted, "post", serde_json::Map::new()).await.unwrap();
 
     // A DRAFT entry for 50 — must NOT appear in the trial balance.
     db.insert_secured(&mv, &su, &[], &[], json!({

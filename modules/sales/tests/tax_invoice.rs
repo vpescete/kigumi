@@ -78,7 +78,7 @@ async fn invoice_posts_one_tax_line_per_group() {
     assert_eq!(money(&confirmed, "amount_untaxed"), 200.0);
     assert_eq!(money(&confirmed, "amount_tax"), 27.0, "22 VAT + 5 Eco");
 
-    let move_id = db.create_sale_invoice(&seller, acls, rules, oid).await.unwrap();
+    let move_id = db.run_service(&order, &seller, acls, rules, oid, "create_invoice", serde_json::Map::new()).await.unwrap()["invoice"].as_i64().unwrap();
     let inv = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
     assert_eq!(inv["state"], "posted");
     let lines = inv["line_ids"].as_array().unwrap();

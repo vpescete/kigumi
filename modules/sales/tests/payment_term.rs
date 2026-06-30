@@ -61,7 +61,7 @@ async fn payment_term_shifts_the_invoice_due_date() {
         "line_ids": [{ "product_id": prod, "product_uom_qty": 1, "price_unit": 100.0 }]
     }).as_object().unwrap()).await.unwrap();
     db.run_action(&order, &su, &[], &[], with_term, "confirm").await.unwrap();
-    let mid = db.create_sale_invoice(&seller, acls, rules, with_term).await.unwrap();
+    let mid = db.run_service(&order, &seller, acls, rules, with_term, "create_invoice", serde_json::Map::new()).await.unwrap()["invoice"].as_i64().unwrap();
     let inv = db.find_one_secured(&mv, &su, &[], &[], mid).await.unwrap().unwrap();
     let (date, due) = (inv["date"].as_str().unwrap(), inv["invoice_date_due"].as_str().unwrap());
     assert!(due > date, "a 30-day term moves the due date ({due}) past the invoice date ({date})");
@@ -72,7 +72,7 @@ async fn payment_term_shifts_the_invoice_due_date() {
         "line_ids": [{ "product_id": prod, "product_uom_qty": 1, "price_unit": 100.0 }]
     }).as_object().unwrap()).await.unwrap();
     db.run_action(&order, &su, &[], &[], no_term, "confirm").await.unwrap();
-    let mid2 = db.create_sale_invoice(&seller, acls, rules, no_term).await.unwrap();
+    let mid2 = db.run_service(&order, &seller, acls, rules, no_term, "create_invoice", serde_json::Map::new()).await.unwrap()["invoice"].as_i64().unwrap();
     let inv2 = db.find_one_secured(&mv, &su, &[], &[], mid2).await.unwrap().unwrap();
     assert_eq!(inv2["date"], inv2["invoice_date_due"], "no term means due == invoice date");
 

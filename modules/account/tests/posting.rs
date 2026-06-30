@@ -51,13 +51,13 @@ async fn post_numbers_then_freezes_the_entry() {
     }).as_object().unwrap()).await.unwrap();
 
     // Post: numbered from the INV journal sequence, state posted.
-    let number = db.post_move(&su, &[], &[], mid).await.unwrap();
+    let number = db.run_service(&mv, &su, &[], &[], mid, "post", serde_json::Map::new()).await.unwrap()["posted"].as_str().unwrap().to_string();
     assert!(number.starts_with("INV/"), "entry numbered from the journal sequence, got {number}");
     let posted = db.find_one_secured(&mv, &su, &[], &[], mid).await.unwrap().unwrap();
     assert_eq!(posted["state"], "posted");
     assert_eq!(posted["name"].as_str(), Some(number.as_str()), "the assigned number is stored as the entry name");
     // Re-posting is rejected (not a draft).
-    assert!(db.post_move(&su, &[], &[], mid).await.is_err(), "a posted entry cannot be posted again");
+    assert!(db.run_service(&mv, &su, &[], &[], mid, "post", serde_json::Map::new()).await.is_err(), "a posted entry cannot be posted again");
 
     // Posted immutability: a non-superuser cannot write the posted entry's lines.
     let clerk = Ctx::new(1, vec!["account.user".to_string(), "account.manager".to_string()]);

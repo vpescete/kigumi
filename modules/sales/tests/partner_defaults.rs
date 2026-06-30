@@ -85,7 +85,7 @@ async fn partner_accounting_defaults_flow_to_orders() {
 
     // Payment-term default: the invoice due date is today + 30 (from the partner).
     db.run_action(&order, &su, &[], &[], oid, "confirm").await.unwrap();
-    let mid = db.create_sale_invoice(&seller, acls, rules, oid).await.unwrap();
+    let mid = db.run_service(&order, &seller, acls, rules, oid, "create_invoice", serde_json::Map::new()).await.unwrap()["invoice"].as_i64().unwrap();
     let inv = db.find_one_secured(&mv, &su, &[], &[], mid).await.unwrap().unwrap();
     assert!(inv["invoice_date_due"].as_str().unwrap() > inv["date"].as_str().unwrap(), "the partner's 30-day term pushed the due date past the invoice date");
 

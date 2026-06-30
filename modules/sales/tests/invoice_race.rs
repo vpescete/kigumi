@@ -59,8 +59,8 @@ async fn concurrent_invoicing_claims_exactly_once() {
 
     // Fire two invoicings of the SAME order concurrently.
     let (a, b) = tokio::join!(
-        db.create_sale_invoice(&seller, acls, rules, oid),
-        db.create_sale_invoice(&seller, acls, rules, oid),
+        db.run_service(&order, &seller, acls, rules, oid, "create_invoice", serde_json::Map::new()),
+        db.run_service(&order, &seller, acls, rules, oid, "create_invoice", serde_json::Map::new()),
     );
     let oks = [a.is_ok(), b.is_ok()].iter().filter(|x| **x).count();
     assert_eq!(oks, 1, "exactly one concurrent invoicing wins the claim (got a={:?} b={:?})", a.is_ok(), b.is_ok());

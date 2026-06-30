@@ -4,6 +4,9 @@
 use meshble::prelude::*;
 use rust_decimal::Decimal;
 
+// Cross-record invoicing / billing / payment / posting engine (relocated from meshble-db onto the seam).
+pub mod services;
+
 /// Module manifest: own version + framework compatibility range + module dependencies.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "account",
@@ -270,6 +273,14 @@ pub static RECORD_RULES: &[RecordRule] = &[
 
 meshble::register_acls!(ACLS);
 meshble::register_rules!(RECORD_RULES);
+
+// Cross-record SERVICES (formerly hardcoded Db methods). The account module owns invoicing (it owns the
+// GL) and registers on the order models, resolved at runtime — no cross-module crate dep. No group gate:
+// the originals gated purely on the order/move Write ACL.
+meshble::register_service!("account.move", "post", services::post, true, &[]);
+meshble::register_service!("sale.order", "create_invoice", services::create_invoice, true, &[]);
+meshble::register_service!("purchase.order", "create_vendor_bill", services::create_vendor_bill, true, &[]);
+meshble::register_service!("account.move", "register_payment", services::register_payment, true, &[]);
 
 // Form layout: the journal entry header in one group, its lines in a notebook page.
 meshble::register_view!(

@@ -11,6 +11,11 @@ repository.workspace = true
 meshble = { workspace = true }
 # Exact-money arithmetic in the line balance / move totals.
 rust_decimal = "1"
+# JSON move/line payloads + report rows built by the invoicing/payment services.
+serde_json = "1"
+# Bespoke READ SQL + engine-owned writes (FX rates, company currency, residual draw-down) the
+# domain-based secured finds cannot express, run on the pool ServiceCtx hands out. Matches meshble-db.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "rust_decimal"] }
 # Depends on base for res.currency / res.partner / res.company.
 meshble-mod-base = { path = "../base", version = "1.0.0" }
 # account.move opts into the mail subsystem (chatter audit trail), so account depends on mail.

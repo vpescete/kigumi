@@ -71,12 +71,12 @@ async fn payment_books_a_realized_fx_loss() {
             { "account_id": recv, "name": "Receivable", "debit": "100", "credit": "0", "amount_currency": "100", "partner_id": cust, "company_id": comp }
         ]
     }).as_object().unwrap()).await.unwrap();
-    db.post_move(&su, &[], &[], move_id).await.unwrap();
+    db.run_service(&mv, &su, &[], &[], move_id, "post", serde_json::Map::new()).await.unwrap();
 
     // Pay the full 100 USD today (rate 2.0 ⇒ worth only 50 EUR).
     let acct = Ctx::new(2, vec!["account.user".to_string()]).in_companies(comp, vec![comp]);
     let (a_acls, a_rules) = (meshble_mod_account::ACLS, meshble_mod_account::RECORD_RULES);
-    let pay = db.register_payment(&acct, a_acls, a_rules, move_id, "100".parse().unwrap(), bank_journal).await.unwrap();
+    let pay = db.run_service(&mv, &acct, a_acls, a_rules, move_id, "register_payment", serde_json::json!({"amount": "100", "journal_id": bank_journal}).as_object().unwrap().clone()).await.unwrap()["payment"].as_i64().unwrap();
 
     let p = db.find_one_secured(&mv, &su, &[], &[], pay).await.unwrap().unwrap();
     assert_eq!(p["state"], "posted");

@@ -76,7 +76,7 @@ async fn foreign_invoice_posts_company_currency_lines_that_balance() {
 
     let seller = Ctx::new(1, vec!["sales.user".to_string()]).in_companies(comp, vec![comp]);
     let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
-    let move_id = db.create_sale_invoice(&seller, acls, rules, oid).await.unwrap();
+    let move_id = db.run_service(&order, &seller, acls, rules, oid, "create_invoice", serde_json::Map::new()).await.unwrap()["invoice"].as_i64().unwrap();
 
     let inv = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
     assert_eq!(inv["state"], "posted");

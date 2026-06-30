@@ -56,7 +56,7 @@ async fn register_payment_draws_down_the_residual() {
             { "account_id": recv, "name": "Receivable", "debit": "100", "credit": "0", "partner_id": cust }
         ]
     }).as_object().unwrap()).await.unwrap();
-    db.post_move(&su, &[], &[], move_id).await.unwrap();
+    db.run_service(&mv, &su, &[], &[], move_id, "post", serde_json::Map::new()).await.unwrap();
 
     let inv = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
     assert_eq!(inv["state"], "posted");
@@ -66,7 +66,7 @@ async fn register_payment_draws_down_the_residual() {
     // Pay as an accountant (gates on account.move write). First a partial 40.
     let acct = Ctx::new(2, vec!["account.user".to_string()]);
     let (a_acls, a_rules) = (meshble_mod_account::ACLS, meshble_mod_account::RECORD_RULES);
-    let pay1 = db.register_payment(&acct, a_acls, a_rules, move_id, "40".parse().unwrap(), bank_journal).await.unwrap();
+    let pay1 = db.run_service(&mv, &acct, a_acls, a_rules, move_id, "register_payment", serde_json::json!({"amount": "40", "journal_id": bank_journal}).as_object().unwrap().clone()).await.unwrap()["payment"].as_i64().unwrap();
 
     let p1 = db.find_one_secured(&mv, &su, &[], &[], pay1).await.unwrap().unwrap();
     assert_eq!(p1["state"], "posted", "payment is posted");
@@ -82,14 +82,14 @@ async fn register_payment_draws_down_the_residual() {
     assert_eq!(after1["reconciled"], false);
 
     // Settle the rest.
-    db.register_payment(&acct, a_acls, a_rules, move_id, "60".parse().unwrap(), bank_journal).await.unwrap();
+    db.run_service(&mv, &acct, a_acls, a_rules, move_id, "register_payment", serde_json::json!({"amount": "60", "journal_id": bank_journal}).as_object().unwrap().clone()).await.unwrap();
     let after2 = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
     assert_eq!(money(&after2, "amount_residual"), 0.0);
     assert_eq!(after2["payment_state"], "paid");
     assert_eq!(after2["reconciled"], true);
 
     // Overpayment / paying a settled invoice is rejected.
-    assert!(db.register_payment(&acct, a_acls, a_rules, move_id, "1".parse().unwrap(), bank_journal).await.is_err(), "cannot pay beyond the residual");
+    assert!(db.run_service(&mv, &acct, a_acls, a_rules, move_id, "register_payment", serde_json::json!({"amount": "1", "journal_id": bank_journal}).as_object().unwrap().clone()).await.is_err(), "cannot pay beyond the residual");
 
     for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

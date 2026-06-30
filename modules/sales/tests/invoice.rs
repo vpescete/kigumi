@@ -71,7 +71,7 @@ async fn confirmed_order_generates_a_posted_balanced_invoice() {
     // Invoice as a plain sales.user (no account groups): gate on order write, GL posting runs elevated.
     let seller = Ctx::new(1, vec!["sales.user".to_string()]);
     let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
-    let move_id = db.create_sale_invoice(&seller, acls, rules, oid).await.unwrap();
+    let move_id = db.run_service(&order, &seller, acls, rules, oid, "create_invoice", serde_json::Map::new()).await.unwrap()["invoice"].as_i64().unwrap();
 
     let inv = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
     assert_eq!(inv["state"], "posted", "the invoice is posted");
@@ -89,7 +89,7 @@ async fn confirmed_order_generates_a_posted_balanced_invoice() {
     assert_eq!(after["invoice_status"], "invoiced", "the order is now invoiced");
 
     // Re-invoicing is rejected (the order is no longer to_invoice).
-    assert!(db.create_sale_invoice(&seller, acls, rules, oid).await.is_err(), "cannot invoice twice");
+    assert!(db.run_service(&order, &seller, acls, rules, oid, "create_invoice", serde_json::Map::new()).await.is_err(), "cannot invoice twice");
 
     // A non-positive total (here a 100% discount → total 0) is refused — no degenerate/zero invoice,
     // and the order is NOT marked invoiced (the claim never happened).
@@ -98,7 +98,7 @@ async fn confirmed_order_generates_a_posted_balanced_invoice() {
         "line_ids": [{ "product_id": prod, "product_uom_qty": 1, "price_unit": 100.0, "discount": "100" }]
     }).as_object().unwrap()).await.unwrap();
     db.run_action(&order, &su, &[], &[], zero, "confirm").await.unwrap();
-    assert!(db.create_sale_invoice(&seller, acls, rules, zero).await.is_err(), "a non-positive total is refused");
+    assert!(db.run_service(&order, &seller, acls, rules, zero, "create_invoice", serde_json::Map::new()).await.is_err(), "a non-positive total is refused");
     assert_eq!(
         db.find_one_secured(&order, &su, &[], &[], zero).await.unwrap().unwrap()["invoice_status"],
         "to_invoice",

@@ -462,7 +462,6 @@ fn build_data_router(
         // Variant generation: materialize a product.template's attribute combinations into variants.
         .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
         // Re-price a sale order's lines from its pricelist.
-        .route("/api/:name/:id/register_payment", post(register_payment_handler))
         .route("/api/reports/trial_balance", get(trial_balance_handler))
         .route("/api/reports/general_ledger/:account_id", get(general_ledger_handler))
         .route("/api/reports/aged/:kind", get(aged_handler))
@@ -472,10 +471,7 @@ fn build_data_router(
         // Render a record's report as HTML (secured entirely by read access to the record).
         .route("/api/:name/:id/report/:report", get(report_handler))
         // Post a draft journal entry: balance re-check + per-journal numbering + state -> posted.
-        .route("/api/:name/:id/post", post(post_move_handler))
         // Generate a posted customer invoice (account.move) from a confirmed sale order.
-        .route("/api/:name/:id/create_invoice", post(create_invoice_handler))
-        .route("/api/:name/:id/create_vendor_bill", post(create_vendor_bill_handler))
         .route("/api/:name/:id/validate", post(validate_picking_handler))
         .route("/api/:name/:id/reserve", post(reserve_picking_handler))
         .route("/api/:name/:id/create_delivery", post(create_delivery_handler))
@@ -1414,35 +1410,6 @@ async fn generate_variants_handler(
 
 /// Register a (full or partial) payment against a posted invoice. Pinned to account.move. Body:
 /// `{amount, journal_id}` (a bank/cash journal). Returns the posted payment move id.
-async fn register_payment_handler(State(state): State<AppState>, Path((name, id)): Path<(String, i64)>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
-    if name != "account.move" {
-        return (StatusCode::BAD_REQUEST, "register_payment is only valid on account.move").into_response();
-    }
-    if let Err(r) = resolve_model(&state, &name) {
-        return r;
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    let amount_str = match body.get("amount") {
-        Some(Json2::String(s)) => s.clone(),
-        Some(Json2::Number(n)) => n.to_string(),
-        _ => return (StatusCode::BAD_REQUEST, "'amount' is required").into_response(),
-    };
-    let Ok(amount) = amount_str.parse::<rust_decimal::Decimal>() else {
-        return (StatusCode::BAD_REQUEST, "'amount' is not a number").into_response();
-    };
-    let Some(journal_id) = body.get("journal_id").and_then(|v| v.as_i64()) else {
-        return (StatusCode::BAD_REQUEST, "'journal_id' is required").into_response();
-    };
-    match backend.db.register_payment(&ctx, &backend.acls(), &backend.rules(), id, amount, journal_id).await {
-        Ok(pid) => json_response(serde_json::json!({ "payment": pid }).to_string()),
-        Err(e) => write_error("register_payment", e),
-    }
-}
-
 /// Trial balance report: per-account debit/credit/balance over posted entries. The frontend folds it
 /// into a P&L and a balance sheet. Read-gated on account.account.
 async fn trial_balance_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
@@ -1503,77 +1470,6 @@ fn value_to_json(v: &Value) -> Json2 {
     }
 }
 
-/// Generates a posted customer invoice (account.move) from a confirmed sale order. v1: pinned to
-/// sale.order. Authorization (WRITE on the order) + the GL posting live in the db layer.
-async fn create_invoice_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "sale.order" {
-        return (StatusCode::BAD_REQUEST, "create_invoice is only valid on sale.order").into_response();
-    }
-    if let Err(r) = resolve_model(&state, &name) {
-        return r;
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match backend.db.create_sale_invoice(&ctx, &backend.acls(), &backend.rules(), id).await {
-        Ok(move_id) => json_response(serde_json::json!({ "invoice": move_id }).to_string()),
-        Err(e) => write_error("create_invoice", e),
-    }
-}
-
-/// Posts a vendor bill (`account.move`, in_invoice) from a confirmed `purchase.order`. v1: pinned to
-/// purchase.order. Authorization (WRITE on purchase.order) lives in the db layer.
-async fn create_vendor_bill_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "purchase.order" {
-        return (StatusCode::BAD_REQUEST, "create_vendor_bill is only valid on purchase.order").into_response();
-    }
-    if let Err(r) = resolve_model(&state, &name) {
-        return r;
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match backend.db.create_vendor_bill(&ctx, &backend.acls(), &backend.rules(), id).await {
-        Ok(move_id) => json_response(serde_json::json!({ "bill": move_id }).to_string()),
-        Err(e) => write_error("create_vendor_bill", e),
-    }
-}
-
-/// Posts a draft `account.move` (balance re-check + per-journal numbering + state → posted). v1:
-/// pinned to account.move. Authorization (WRITE on account.move) lives in the db layer.
-async fn post_move_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "account.move" {
-        return (StatusCode::BAD_REQUEST, "post is only valid on account.move").into_response();
-    }
-    if let Err(r) = resolve_model(&state, &name) {
-        return r;
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match backend.db.post_move(&ctx, &backend.acls(), &backend.rules(), id).await {
-        Ok(number) => json_response(serde_json::json!({ "posted": number }).to_string()),
-        Err(e) => write_error("post", e),
-    }
-}
 
 /// Validates a draft `stock.picking` (moves done + quant updates + numbering, in one transaction). v1:
 /// pinned to stock.picking. Authorization (WRITE on stock.picking) lives in the db layer.
