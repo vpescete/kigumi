@@ -32,14 +32,14 @@ export const SERVICE_ACTIONS: Record<string, ServiceAction[]> = {
       resultToast: (r) => `Taxed ${r.taxed} line${r.taxed === 1 ? '' : 's'}`,
     },
     {
-      endpoint: 'create_delivery',
+      endpoint: 'service/create_delivery',
       label: 'Create delivery',
       resultToast: (r) => `Delivery created (draft transfer #${r.picking})`,
     },
   ],
   'purchase.order': [
     {
-      endpoint: 'create_receipt',
+      endpoint: 'service/create_receipt',
       label: 'Create receipt',
       resultToast: (r) => `Receipt created (draft transfer #${r.picking})`,
     },

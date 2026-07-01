@@ -463,13 +463,8 @@ fn build_data_router(
         .route("/api/reports/:report", get(ledger_report_handler))
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
-        // Apply the discount wizard: write its discount onto the target order's lines.
         // Render a record's report as HTML (secured entirely by read access to the record).
         .route("/api/:name/:id/report/:report", get(report_handler))
-        // Post a draft journal entry: balance re-check + per-journal numbering + state -> posted.
-        // Generate a posted customer invoice (account.move) from a confirmed sale order.
-        .route("/api/:name/:id/create_delivery", post(create_delivery_handler))
-        .route("/api/:name/:id/create_receipt", post(create_receipt_handler))
         // Attachments (ir.attachment): files on a record. List/download need host read; upload/delete
         // need host write. Bytes live in the content-addressed blob store; the row is metadata.
         .route("/api/:name/:id/attachments", get(list_attachments_handler).post(upload_attachment_handler))
@@ -1406,53 +1401,6 @@ fn value_to_json(v: &Value) -> Json2 {
         Value::Bool(b) => Json2::Bool(*b),
         Value::Null => Json2::Null,
         Value::List(xs) => Json2::Array(xs.iter().map(value_to_json).collect()),
-    }
-}
-
-
-async fn create_delivery_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "sale.order" {
-        return (StatusCode::BAD_REQUEST, "create_delivery is only valid on sale.order").into_response();
-    }
-    if let Err(r) = resolve_model(&state, &name) {
-        return r;
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match backend.db.create_delivery(&ctx, &backend.acls(), &backend.rules(), id).await {
-        Ok(picking) => json_status(StatusCode::CREATED, serde_json::json!({ "picking": picking }).to_string()),
-        Err(e) => write_error("create_delivery", e),
-    }
-}
-
-/// Creates a draft receipt transfer (Vendors → Stock) for a confirmed purchase order. v1: pinned to
-/// purchase.order. Authorization (WRITE on purchase.order) lives in the db layer.
-async fn create_receipt_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "purchase.order" {
-        return (StatusCode::BAD_REQUEST, "create_receipt is only valid on purchase.order").into_response();
-    }
-    if let Err(r) = resolve_model(&state, &name) {
-        return r;
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match backend.db.create_receipt(&ctx, &backend.acls(), &backend.rules(), id).await {
-        Ok(picking) => json_status(StatusCode::CREATED, serde_json::json!({ "picking": picking }).to_string()),
-        Err(e) => write_error("create_receipt", e),
     }
 }
 

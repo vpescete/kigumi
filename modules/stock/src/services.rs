@@ -296,3 +296,103 @@ pub async fn validate(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Resul
 
     Ok(ServiceOutput::json(json!({ "validated": number })))
 }
+
+/// Creates a DRAFT stock transfer from a confirmed order: one `stock.move` per goods line, between two
+/// locations resolved by usage and pinned to the order's company (company-deterministic, like the invoice
+/// account lookup). run_service has already gated the caller's order WRITE + visibility; the picking + moves
+/// are created ELEVATED, so a salesperson/buyer need not also hold stock-create rights. The transfer is left
+/// in draft for the warehouse to `validate` — this never moves stock itself. Returns `{ "picking": id }`.
+/// (v1: no delivered/received-qty tracking, so calling it twice makes two drafts.) Behavior-preserving
+/// relocation of the former Db::create_order_picking (pool-based, no transaction).
+async fn create_order_picking(
+    cx: &mut ServiceCtx<'_, '_>,
+    order_model_name: &str,
+    order_id: i64,
+    required_state: &str,
+    picking_type: &str,
+    src_usage: &str,
+    dst_usage: &str,
+) -> Result<ServiceOutput, DbError> {
+    let order_model = cx.resolve(order_model_name)?;
+    let line_model = cx.resolve(&format!("{order_model_name}.line"))?;
+    let location_model = cx
+        .resolve("stock.location")
+        .map_err(|_| DbError::BadInput("install the stock module to create transfers".to_string()))?;
+    let picking_model = cx.resolve("stock.picking")?;
+    let move_model = cx.resolve("stock.move")?;
+    let ctx = cx.caller().clone();
+
+    // The real authorization is "may write the order" — run_service already enforced it on the route model.
+    // Re-read the order under the caller's visibility to get its state / partner / company.
+    let order = cx
+        .find_one_secured(&order_model, &ctx, order_id)
+        .await?
+        .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
+    let state = order.get("state").and_then(|v| v.as_str()).unwrap_or("");
+    if state != required_state {
+        return Err(DbError::BadInput(format!("order is not ready (state '{state}', expected '{required_state}')")));
+    }
+    let partner = order.get("partner_id").and_then(|v| v.as_i64());
+    // Pin the order's company (else the caller's active company), so the endpoints resolve under exactly
+    // that company and a shared order only ever uses shared locations.
+    let company = order.get("company_id").and_then(|v| v.as_i64()).or(ctx.company_id);
+
+    // Resolving the endpoints and creating the transfer are a system effect, authorized by the order WRITE
+    // above — so they run elevated.
+    let elevated = cx.elevated();
+    let src = cx
+        .first_match(&location_model, "usage", src_usage, company)
+        .await?
+        .ok_or_else(|| DbError::BadInput(format!("no '{src_usage}' location is configured for this company")))?;
+    let dst = cx
+        .first_match(&location_model, "usage", dst_usage, company)
+        .await?
+        .ok_or_else(|| DbError::BadInput(format!("no '{dst_usage}' location is configured for this company")))?;
+
+    // One move per line carrying a product and a positive quantity.
+    let lines = cx
+        .find_secured(&line_model, &ctx, Some(&Domain::field("order_id").eq(order_id)))
+        .await?;
+    let mut moves: Vec<(i64, Decimal)> = Vec::new();
+    for l in &lines {
+        let qty: Decimal =
+            l.get("product_uom_qty").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or_default();
+        if let Some(pid) = l.get("product_id").and_then(|v| v.as_i64()) {
+            if qty > Decimal::ZERO {
+                moves.push((pid, qty));
+            }
+        }
+    }
+    if moves.is_empty() {
+        return Err(DbError::BadInput("the order has no goods lines to transfer".to_string()));
+    }
+
+    let mut payload = json!({
+        "picking_type": picking_type, "location_id": src, "location_dest_id": dst, "state": "draft",
+    });
+    if let Some(p) = partner {
+        payload["partner_id"] = p.into();
+    }
+    if let Some(c) = company {
+        payload["company_id"] = c.into();
+    }
+    let picking_id = cx.insert_secured(&picking_model, &elevated, payload.as_object().unwrap()).await?;
+    for (pid, qty) in moves {
+        let mp = json!({
+            "picking_id": picking_id, "product_id": pid, "product_uom_qty": qty.to_string(),
+            "location_id": src, "location_dest_id": dst, "state": "draft",
+        });
+        cx.insert_secured(&move_model, &elevated, mp.as_object().unwrap()).await?;
+    }
+    Ok(ServiceOutput::json(json!({ "picking": picking_id })))
+}
+
+/// Draft delivery (Stock → Customers) for a confirmed sale order. See [`create_order_picking`].
+pub async fn create_delivery(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+    create_order_picking(cx, "sale.order", input.record_id, "sale", "delivery", "internal", "customer").await
+}
+
+/// Draft receipt (Vendors → Stock) for a confirmed purchase order. See [`create_order_picking`].
+pub async fn create_receipt(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+    create_order_picking(cx, "purchase.order", input.record_id, "purchase", "receipt", "supplier", "internal").await
+}

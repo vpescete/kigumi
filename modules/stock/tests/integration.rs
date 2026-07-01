@@ -61,7 +61,7 @@ async fn orders_create_transfers_that_move_stock() {
     // -- Purchase → receipt (Vendors → Stock), 9 units --
     let porder = ins(&po, json!({ "partner_id": acme, "company_id": comp, "currency_id": cur, "state": "purchase" })).await;
     ins(&pol, json!({ "order_id": porder, "product_id": prod, "product_uom_qty": "9" })).await;
-    let receipt = db.create_receipt(&su, &[], &[], porder).await.unwrap();
+    let receipt = db.run_service(&po, &su, &[], &[], porder, "create_receipt", serde_json::Map::new()).await.unwrap()["picking"].as_i64().unwrap();
 
     let rp = db.find_one_secured(&picking, &su, &[], &[], receipt).await.unwrap().unwrap();
     assert_eq!(rp["picking_type"], "receipt");
@@ -80,7 +80,7 @@ async fn orders_create_transfers_that_move_stock() {
     // -- Sale → delivery (Stock → Customers), 4 units --
     let sorder = ins(&so, json!({ "partner_id": acme, "company_id": comp, "currency_id": cur, "state": "sale" })).await;
     ins(&sol, json!({ "order_id": sorder, "product_id": prod, "product_uom_qty": "4", "price_unit": "100" })).await;
-    let delivery = db.create_delivery(&su, &[], &[], sorder).await.unwrap();
+    let delivery = db.run_service(&so, &su, &[], &[], sorder, "create_delivery", serde_json::Map::new()).await.unwrap()["picking"].as_i64().unwrap();
 
     let dp = db.find_one_secured(&picking, &su, &[], &[], delivery).await.unwrap().unwrap();
     assert_eq!(dp["picking_type"], "delivery");
@@ -96,11 +96,11 @@ async fn orders_create_transfers_that_move_stock() {
     // -- A draft (unconfirmed) order cannot create a transfer --
     let draft = ins(&so, json!({ "partner_id": acme, "company_id": comp, "currency_id": cur, "state": "draft" })).await;
     ins(&sol, json!({ "order_id": draft, "product_id": prod, "product_uom_qty": "1", "price_unit": "1" })).await;
-    assert!(db.create_delivery(&su, &[], &[], draft).await.is_err(), "a draft order cannot be delivered");
+    assert!(db.run_service(&so, &su, &[], &[], draft, "create_delivery", serde_json::Map::new()).await.is_err(), "a draft order cannot be delivered");
 
     // -- A confirmed order with no goods lines cannot create a transfer --
     let empty = ins(&so, json!({ "partner_id": acme, "company_id": comp, "currency_id": cur, "state": "sale" })).await;
-    assert!(db.create_delivery(&su, &[], &[], empty).await.is_err(), "an order with no lines has nothing to deliver");
+    assert!(db.run_service(&so, &su, &[], &[], empty, "create_delivery", serde_json::Map::new()).await.is_err(), "an order with no lines has nothing to deliver");
 
     for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

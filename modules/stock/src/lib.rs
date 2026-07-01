@@ -221,6 +221,11 @@ meshble::register_rules!(RECORD_RULES);
 // run on the ServiceCtx v2 service transaction. No group gate: the originals gated on the picking Write ACL.
 meshble::register_service!("stock.picking", "reserve", services::reserve, true, &[]);
 meshble::register_service!("stock.picking", "validate", services::validate, true, &[]);
+// Draft transfer creation from a confirmed order — a stock effect, registered on the order models the
+// stock module depends on (sales owns sale.order / purchase.order). Pool-based (no tx); gated on the
+// order's Write ACL, no group gate (matching the originals).
+meshble::register_service!("sale.order", "create_delivery", services::create_delivery, true, &[]);
+meshble::register_service!("purchase.order", "create_receipt", services::create_receipt, true, &[]);
 
 // Form views: how each model is laid out on a form. The header carries identity + status; the moves
 // of a transfer live in a notebook page (the One2many the frontend renders inline).
