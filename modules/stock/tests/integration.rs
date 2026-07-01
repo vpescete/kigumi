@@ -74,7 +74,7 @@ async fn orders_create_transfers_that_move_stock() {
     assert_eq!(rmoves[0]["product_id"].as_i64(), Some(prod));
     assert_eq!(rmoves[0]["product_uom_qty"].as_str().and_then(|s| s.parse::<f64>().ok()), Some(9.0));
 
-    db.validate_picking(&su, &[], &[], receipt).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], receipt, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(on_hand(&db, &su, &product, prod).await, 9.0, "receipt raises on-hand to 9");
 
     // -- Sale → delivery (Stock → Customers), 4 units --
@@ -90,7 +90,7 @@ async fn orders_create_transfers_that_move_stock() {
     assert_eq!(dmoves.len(), 1);
     assert_eq!(dmoves[0]["product_uom_qty"].as_str().and_then(|s| s.parse::<f64>().ok()), Some(4.0));
 
-    db.validate_picking(&su, &[], &[], delivery).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], delivery, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(on_hand(&db, &su, &product, prod).await, 5.0, "delivery lowers on-hand to 5");
 
     // -- A draft (unconfirmed) order cannot create a transfer --

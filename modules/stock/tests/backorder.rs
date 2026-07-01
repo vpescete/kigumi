@@ -64,7 +64,7 @@ async fn partial_validate_backorders_the_remainder_and_never_goes_negative() {
     let receipt = ins(&picking, json!({ "picking_type": "receipt", "location_id": vendors, "location_dest_id": stock, "company_id": comp })).await;
     let m1 = ins(&mv, json!({ "picking_id": receipt, "product_id": prod, "product_uom_qty": "7", "location_id": vendors, "location_dest_id": stock })).await;
     db.update_secured(&mv, &su, &[], &[], m1, json!({ "quantity_done": "3" }).as_object().unwrap()).await.unwrap();
-    db.validate_picking(&su, &[], &[], receipt).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], receipt, "validate", serde_json::Map::new()).await.unwrap();
 
     assert_eq!(quant_at(&db, &su, &quant, prod, stock).await, 3.0, "only the done 3 landed in Stock");
     assert_eq!(db.find_one_secured(&picking, &su, &[], &[], receipt).await.unwrap().unwrap()["state"], "done");
@@ -80,7 +80,7 @@ async fn partial_validate_backorders_the_remainder_and_never_goes_negative() {
     // --- 2) Over-delivery guard: on-hand 3, deliver 10 → clamp to 3, never negative, backorder 7 ---
     let delivery = ins(&picking, json!({ "picking_type": "delivery", "location_id": stock, "location_dest_id": customers, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": delivery, "product_id": prod, "product_uom_qty": "10", "location_id": stock, "location_dest_id": customers })).await;
-    db.validate_picking(&su, &[], &[], delivery).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], delivery, "validate", serde_json::Map::new()).await.unwrap();
 
     assert_eq!(quant_at(&db, &su, &quant, prod, stock).await, 0.0, "Stock clamped to 0 — never negative");
     assert_eq!(quant_at(&db, &su, &quant, prod, customers).await, 3.0, "only the 3 on hand shipped");

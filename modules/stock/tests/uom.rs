@@ -72,27 +72,27 @@ async fn moves_convert_their_uom_to_the_reference_unit() {
     // Receive 2 DOZEN -> 24 reference units on hand.
     let receipt = ins(&picking, json!({ "picking_type": "receipt", "location_id": vendors, "location_dest_id": stock, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": receipt, "product_id": prod, "product_uom_qty": "2", "product_uom_id": dozen, "location_id": vendors, "location_dest_id": stock })).await;
-    db.validate_picking(&su, &[], &[], receipt).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], receipt, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(on_hand(&db, &su, &product, prod).await, 24.0, "2 dozen = 24 reference units");
     assert_eq!(quant_field(&db, &su, &quant, prod, stock, "quantity").await, 24.0);
 
     // Deliver 1 DOZEN -> 12 left.
     let d1 = ins(&picking, json!({ "picking_type": "delivery", "location_id": stock, "location_dest_id": customers, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": d1, "product_id": prod, "product_uom_qty": "1", "product_uom_id": dozen, "location_id": stock, "location_dest_id": customers })).await;
-    db.validate_picking(&su, &[], &[], d1).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], d1, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(on_hand(&db, &su, &product, prod).await, 12.0, "delivering 1 dozen removes 12");
 
     // Deliver 10 REFERENCE units (no uom) -> 2 left. Mixing units against the same reference quant works.
     let d2 = ins(&picking, json!({ "picking_type": "delivery", "location_id": stock, "location_dest_id": customers, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": d2, "product_id": prod, "product_uom_qty": "10", "location_id": stock, "location_dest_id": customers })).await;
-    db.validate_picking(&su, &[], &[], d2).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], d2, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(on_hand(&db, &su, &product, prod).await, 2.0, "delivering 10 units removes 10");
 
     // Reserve a half-dozen (6 reference) against the 2 on hand: reserved is clamped to availability, in
     // the reference unit. A delivery move of 0.5 dozen reserves only the available 2.
     let d3 = ins(&picking, json!({ "picking_type": "delivery", "location_id": stock, "location_dest_id": customers, "company_id": comp })).await;
     let m3 = ins(&mv, json!({ "picking_id": d3, "product_id": prod, "product_uom_qty": "0.5", "product_uom_id": dozen, "location_id": stock, "location_dest_id": customers })).await;
-    db.reserve_picking(&su, &[], &[], d3).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], d3, "reserve", serde_json::Map::new()).await.unwrap();
     let m3r = db.find_one_secured(&mv, &su, &[], &[], m3).await.unwrap().unwrap()["reserved_qty"].as_str().unwrap().parse::<f64>().unwrap();
     assert_eq!(m3r, 2.0, "0.5 dozen = 6 wanted, only 2 free -> reserved 2 reference units");
     assert_eq!(quant_field(&db, &su, &quant, prod, stock, "reserved_quantity").await, 2.0);

@@ -4,6 +4,9 @@
 
 use meshble::prelude::*;
 
+// The reservation/validation engine (relocated from meshble-db onto the service seam).
+pub mod services;
+
 /// Module manifest: own version + framework compatibility range + module dependencies.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "stock",
@@ -213,6 +216,11 @@ pub static RECORD_RULES: &[RecordRule] = &[
 
 meshble::register_acls!(ACLS);
 meshble::register_rules!(RECORD_RULES);
+
+// The reservation/validation engine — TRANSACTIONAL cross-record services (FOR UPDATE quant locking) that
+// run on the ServiceCtx v2 service transaction. No group gate: the originals gated on the picking Write ACL.
+meshble::register_service!("stock.picking", "reserve", services::reserve, true, &[]);
+meshble::register_service!("stock.picking", "validate", services::validate, true, &[]);
 
 // Form views: how each model is laid out on a form. The header carries identity + status; the moves
 // of a transfer live in a notebook page (the One2many the frontend renders inline).

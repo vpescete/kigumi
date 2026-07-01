@@ -128,6 +128,11 @@ pub struct ServiceCtx<'a, 't> {
     caller: Ctx,
     acls: &'a [Acl],
     rules: &'a [RecordRule],
+    /// Secured inserts to run POST-COMMIT, in order, each on its own transaction (via `defer_insert`) — for
+    /// a follow-on record that must NOT roll the main tx back if it fails (e.g. a stock backorder: the
+    /// validation stays durable even if the backorder can't be created). run_service drains this after the
+    /// body's tx commits.
+    deferred: Vec<(ResolvedModel, Ctx, Map<String, Json>)>,
 }
 
 impl<'a, 't> ServiceCtx<'a, 't> {
@@ -141,6 +146,31 @@ impl<'a, 't> ServiceCtx<'a, 't> {
     /// on Ok (rolls back on Err). Pool-based services (the secured-CRUD methods) leave it untouched.
     pub fn tx(&mut self) -> &mut sqlx::Transaction<'t, sqlx::Postgres> {
         self.tx
+    }
+    /// Emits a domain event on the SERVICE transaction — atomic with the body's writes (a rolled-back
+    /// service emits nothing). For a tx-bound service whose event is part of its atomic effect, e.g.
+    /// `stock.picking.done` when a transfer is validated. author_uid is the caller.
+    pub async fn emit_event(&mut self, event_type: &str, model: &str, record_id: i64, company_id: Option<i64>, changes: Json) -> Result<(), DbError> {
+        let uid = self.caller.uid;
+        self.db
+            .enqueue_event_in_tx(
+                self.tx,
+                &crate::OutboxEvent {
+                    event_type: event_type.to_string(),
+                    model: model.to_string(),
+                    record_id,
+                    author_uid: Some(uid),
+                    company_id,
+                    change_summary: changes,
+                },
+            )
+            .await
+    }
+    /// Queues a secured insert to run AFTER the body's tx commits (each on its own transaction, in order).
+    /// For a follow-on record whose failure must NOT roll back the main effect — e.g. a stock backorder:
+    /// the validation stays durable even if the backorder can't be created (documented non-atomicity).
+    pub fn defer_insert(&mut self, model: ResolvedModel, ctx: Ctx, payload: Map<String, Json>) {
+        self.deferred.push((model, ctx, payload));
     }
     /// Explicit, greppable elevation past the gate for engine-owned rows (GL lines, join rows, sequences).
     pub fn elevated(&self) -> Ctx {
@@ -242,12 +272,17 @@ impl Db {
         // ONE transaction for the whole body: a tx-bound service (FOR UPDATE / CAS / atomic multi-write)
         // runs its SQL on cx.tx() and commits here; a pool-based service leaves it empty (a no-op commit).
         let mut tx = self.pool.begin().await?;
-        let result = {
-            let mut cx = ServiceCtx { db: self, tx: &mut tx, caller: ctx.clone(), acls, rules };
-            (reg.func)(&mut cx, ServiceInput { record_id: id, body }).await
-        }; // cx dropped → the tx borrow is released
+        let mut cx = ServiceCtx { db: self, tx: &mut tx, caller: ctx.clone(), acls, rules, deferred: Vec::new() };
+        let result = (reg.func)(&mut cx, ServiceInput { record_id: id, body }).await;
+        let deferred = std::mem::take(&mut cx.deferred);
+        drop(cx); // release the tx borrow before commit
         let out = result?; // Err → tx drops (rollback) and returns
         tx.commit().await?;
+        // Post-commit follow-on inserts (best-effort ordering, each its own tx) — the main effect is already
+        // durable, so a failure here surfaces to the caller without un-doing the committed work.
+        for (m, c, payload) in &deferred {
+            self.insert_secured(m, c, acls, rules, payload).await?;
+        }
         Ok(out.0)
     }
 

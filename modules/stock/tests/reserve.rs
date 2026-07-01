@@ -71,7 +71,7 @@ async fn reservation_protects_the_first_transfer() {
     // Receive 10 widgets into Stock.
     let receipt = ins(&picking, json!({ "picking_type": "receipt", "location_id": vendors, "location_dest_id": stock, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": receipt, "product_id": prod, "product_uom_qty": "10", "location_id": vendors, "location_dest_id": stock })).await;
-    db.validate_picking(&su, &[], &[], receipt).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], receipt, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(on_hand(&db, &su, &product, prod).await, 10.0);
 
     // Two deliveries each demand 7 (combined 14 > 10 on hand).
@@ -81,9 +81,9 @@ async fn reservation_protects_the_first_transfer() {
     let mv_b = ins(&mv, json!({ "picking_id": del_b, "product_id": prod, "product_uom_qty": "7", "location_id": stock, "location_dest_id": customers })).await;
 
     // A reserves first → gets its full 7. B reserves next → only 3 left.
-    assert_eq!(db.reserve_picking(&su, &[], &[], del_a).await.unwrap(), 1, "A reserves one move");
+    assert_eq!(db.run_service(&picking, &su, &[], &[], del_a, "reserve", serde_json::Map::new()).await.unwrap()["reserved"].as_i64().unwrap(), 1, "A reserves one move");
     assert_eq!(quant_field(&db, &su, &quant, prod, stock, "reserved_quantity").await, 7.0, "Stock has 7 reserved after A");
-    assert_eq!(db.reserve_picking(&su, &[], &[], del_b).await.unwrap(), 1, "B reserves one move");
+    assert_eq!(db.run_service(&picking, &su, &[], &[], del_b, "reserve", serde_json::Map::new()).await.unwrap()["reserved"].as_i64().unwrap(), 1, "B reserves one move");
     assert_eq!(quant_field(&db, &su, &quant, prod, stock, "reserved_quantity").await, 10.0, "Stock fully reserved after B");
 
     let mv_a_reserved = db.find_one_secured(&mv, &su, &[], &[], mv_a).await.unwrap().unwrap()["reserved_qty"].as_str().unwrap().parse::<f64>().unwrap();
@@ -92,16 +92,16 @@ async fn reservation_protects_the_first_transfer() {
     assert_eq!(mv_b_reserved, 3.0, "move B holds only the remaining 3");
 
     // Re-reserving A is a no-op (already at its demand): idempotent.
-    assert_eq!(db.reserve_picking(&su, &[], &[], del_a).await.unwrap(), 0, "re-reserve grants nothing new");
+    assert_eq!(db.run_service(&picking, &su, &[], &[], del_a, "reserve", serde_json::Map::new()).await.unwrap()["reserved"].as_i64().unwrap(), 0, "re-reserve grants nothing new");
     assert_eq!(quant_field(&db, &su, &quant, prod, stock, "reserved_quantity").await, 10.0, "reservation unchanged");
 
     // B validates FIRST. Without reservation it would grab 7 and starve A; with it, B gets only its 3.
-    db.validate_picking(&su, &[], &[], del_b).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], del_b, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(on_hand(&db, &su, &product, prod).await, 7.0, "B shipped only 3 -> 7 left");
     assert_eq!(quant_field(&db, &su, &quant, prod, stock, "reserved_quantity").await, 7.0, "A's 7 reservation survives B");
 
     // A validates and gets its full reserved 7.
-    db.validate_picking(&su, &[], &[], del_a).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], del_a, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(on_hand(&db, &su, &product, prod).await, 0.0, "A shipped its full 7 -> 0 left");
     assert_eq!(quant_field(&db, &su, &quant, prod, stock, "reserved_quantity").await, 0.0, "no reservation leaks");
     assert_eq!(quant_field(&db, &su, &quant, prod, stock, "quantity").await, 0.0, "stock never went negative");

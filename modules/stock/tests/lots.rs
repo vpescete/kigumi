@@ -80,7 +80,7 @@ async fn stock_is_tracked_per_lot_and_serial() {
     let receipt = ins(&picking, json!({ "picking_type": "receipt", "location_id": vendors, "location_dest_id": stock, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": receipt, "product_id": prod, "product_uom_qty": "10", "lot_id": lot_a, "location_id": vendors, "location_dest_id": stock })).await;
     ins(&mv, json!({ "picking_id": receipt, "product_id": prod, "product_uom_qty": "5", "lot_id": lot_b, "location_id": vendors, "location_dest_id": stock })).await;
-    db.validate_picking(&su, &[], &[], receipt).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], receipt, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(lot_qty(&db, &su, &quant, prod, stock, lot_a).await, 10.0, "LOT-A quant is 10");
     assert_eq!(lot_qty(&db, &su, &quant, prod, stock, lot_b).await, 5.0, "LOT-B quant is 5");
     assert_eq!(on_hand(&db, &su, &product, prod).await, 15.0, "on-hand sums across lots");
@@ -88,7 +88,7 @@ async fn stock_is_tracked_per_lot_and_serial() {
     // Deliver 3 of LOT-A: only LOT-A drops.
     let deliver = ins(&picking, json!({ "picking_type": "delivery", "location_id": stock, "location_dest_id": customers, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": deliver, "product_id": prod, "product_uom_qty": "3", "lot_id": lot_a, "location_id": stock, "location_dest_id": customers })).await;
-    db.validate_picking(&su, &[], &[], deliver).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], deliver, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(lot_qty(&db, &su, &quant, prod, stock, lot_a).await, 7.0, "LOT-A dropped to 7");
     assert_eq!(lot_qty(&db, &su, &quant, prod, stock, lot_b).await, 5.0, "LOT-B untouched");
     assert_eq!(on_hand(&db, &su, &product, prod).await, 12.0);
@@ -102,18 +102,18 @@ async fn stock_is_tracked_per_lot_and_serial() {
     // A valid serial receipt: exactly one unit, with its serial.
     let sin = ins(&picking, json!({ "picking_type": "receipt", "location_id": vendors, "location_dest_id": stock, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": sin, "product_id": serprod, "product_uom_qty": "1", "lot_id": ser1, "location_id": vendors, "location_dest_id": stock })).await;
-    db.validate_picking(&su, &[], &[], sin).await.unwrap();
+    db.run_service(&picking, &su, &[], &[], sin, "validate", serde_json::Map::new()).await.unwrap();
     assert_eq!(on_hand(&db, &su, &product, serprod).await, 1.0);
 
     // A serial move of 2 units is rejected (a serial is exactly one).
     let bad_qty = ins(&picking, json!({ "picking_type": "receipt", "location_id": vendors, "location_dest_id": stock, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": bad_qty, "product_id": serprod, "product_uom_qty": "2", "lot_id": ser1, "location_id": vendors, "location_dest_id": stock })).await;
-    assert!(db.validate_picking(&su, &[], &[], bad_qty).await.is_err(), "a serial move of 2 is rejected");
+    assert!(db.run_service(&picking, &su, &[], &[], bad_qty, "validate", serde_json::Map::new()).await.is_err(), "a serial move of 2 is rejected");
 
     // A serial move with no serial number is rejected.
     let no_lot = ins(&picking, json!({ "picking_type": "receipt", "location_id": vendors, "location_dest_id": stock, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": no_lot, "product_id": serprod, "product_uom_qty": "1", "location_id": vendors, "location_dest_id": stock })).await;
-    assert!(db.validate_picking(&su, &[], &[], no_lot).await.is_err(), "a serial move without a serial is rejected");
+    assert!(db.run_service(&picking, &su, &[], &[], no_lot, "validate", serde_json::Map::new()).await.is_err(), "a serial move without a serial is rejected");
 
     for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

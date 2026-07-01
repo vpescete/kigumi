@@ -11,6 +11,11 @@ repository.workspace = true
 meshble = { workspace = true }
 # Exact-quantity arithmetic in the quant/move math.
 rust_decimal = "1"
+# JSON move/backorder payloads.
+serde_json = "1"
+# The reservation/validation engine runs FOR UPDATE quant locking + quant math as raw SQL on the service
+# transaction ServiceCtx hands out (cx.tx()). Matches meshble-db's sqlx config.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "rust_decimal"] }
 # Depends on base (company), sales (product.product), and mail (pickings carry a chatter thread).
 meshble-mod-base = { path = "../base", version = "1.0.0" }
 meshble-mod-sales = { path = "../sales", version = "1.0.0" }
