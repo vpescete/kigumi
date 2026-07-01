@@ -31,9 +31,9 @@ pub mod prelude {
     // The cross-record service seam (DB-typed, defined in meshble-db) — registered via register_service!.
     // `DbError` is the service result's error type, so a module needs no direct meshble-db dependency.
     pub use meshble_db::{
-        ledger_report_for, ledger_report_names, service_for, services_for, BoxServiceFut, DbError,
-        LedgerReportFn, LedgerReportRegistration, ServiceCtx, ServiceFn, ServiceInput, ServiceOutput,
-        ServiceRegistration,
+        ledger_report_for, ledger_report_names, service_for, services_for, write_triggers_for,
+        BoxServiceFut, DbError, LedgerReportFn, LedgerReportRegistration, ServiceCtx, ServiceFn,
+        ServiceInput, ServiceOutput, ServiceRegistration, WriteTriggerFn, WriteTriggerRegistration,
     };
 }
 
@@ -179,6 +179,25 @@ macro_rules! register_ledger_report {
                 read_model: $read_model,
                 func: |pool, params| ::std::boxed::Box::pin($func(pool, params)),
                 groups: $groups,
+            }
+        }
+    };
+}
+
+/// Registers an in-tx WRITE TRIGGER: `func` runs on the caller's transaction after a secured write to
+/// `model` when one of `watch` columns changed (empty = every write), for a stored effect the `depends`
+/// recompute can't express on read — e.g. a Many2many aggregate summed across a join. `func` is an
+/// `async fn(&mut Transaction, id, changed_cols) -> Result<(), DbError>`; a returned `Err` rolls the write
+/// back. The macro emits the one `Box::pin` adapting the async fn to the stored fn pointer.
+/// `meshble::register_write_trigger!("product.template.attribute.value", &["price_extra"], recompute);`
+#[macro_export]
+macro_rules! register_write_trigger {
+    ($model:expr, $watch:expr, $func:path) => {
+        $crate::inventory::submit! {
+            $crate::prelude::WriteTriggerRegistration {
+                model: $model,
+                watch: $watch,
+                func: |tx, id, changed| ::std::boxed::Box::pin($func(tx, id, changed)),
             }
         }
     };

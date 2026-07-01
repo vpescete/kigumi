@@ -62,7 +62,7 @@ export const SERVICE_ACTIONS: Record<string, ServiceAction[]> = {
   ],
   'product.template': [
     {
-      endpoint: 'generate_variants',
+      endpoint: 'service/generate_variants',
       label: 'Generate variants',
       resultToast: (r) => `Variants: ${r.created} created, ${r.kept} kept, ${r.archived} archived`,
     },

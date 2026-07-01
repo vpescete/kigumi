@@ -6,6 +6,8 @@ use meshble::prelude::*;
 pub mod services;
 // The pure tax engine (relocated from meshble-db: tax math is ERP, owned by this module).
 pub mod tax;
+// The product-variant generation engine (relocated from meshble-db: the product graph is ERP).
+pub mod variants;
 
 /// Module manifest: its own version + compatibility range with the framework.
 /// Equivalent to Odoo's `__manifest__.py`, but with verifiable versions.
@@ -979,6 +981,13 @@ meshble::register_service!("product.product", "line_defaults", services::line_de
 // sales.manager — a group requirement here would narrow access (manager-only callers) vs the original.
 meshble::register_service!("sale.order", "apply_taxes", services::apply_taxes, true, &[]);
 meshble::register_service!("purchase.order", "apply_purchase_taxes", services::apply_purchase_taxes, true, &[]);
+// Generate/reconcile a template's variants: POST /api/product.template/:id/service/generate_variants. No
+// group gate (&[]): the original gated purely on product.template Write, which the ACL already restricts to
+// managers. The reconciliation runs on one tx under a per-template advisory lock via ServiceCtx::tx.
+meshble::register_service!("product.template", "generate_variants", variants::generate, true, &[]);
+// A PTAV price_extra edit re-materializes price_extra on the affected variants (the M2M aggregate the
+// compute engine can't express on read) — the former in-core M15.1 hook, now a module write trigger.
+meshble::register_write_trigger!("product.template.attribute.value", &["price_extra"], variants::ptav_price_extra_recompute);
 
 /// `default_get` for the discount wizard: seed `order_id` from the open context's active record. With
 /// no active record the seed is empty (the required `order_id` then makes the open fail — by design).

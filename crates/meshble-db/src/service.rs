@@ -17,9 +17,10 @@
 //! `find_secured`, `insert_secured`, `update_secured` — each delegating to `Db`'s own pool methods, so a
 //! relocated method behaves byte-for-byte as before (own-transaction-per-write + full recompute/tracking),
 //! plus the chart/sequence/CAS helpers (`first_match`, `next_value`, `ensure_sequence`, `guarded_cas`) and
-//! the raw-SQL escape (`pool`). The relocated ERP methods opened no transaction, so this surface is
-//! sufficient; single-transaction atomicity (a live `tx()` handle + in-tx CRUD twins) is added only when
-//! the stock batch, which uses FOR UPDATE, is migrated.
+//! the raw-SQL escape (`pool`). For a body needing single-transaction atomicity, `run_service` opens ONE
+//! transaction the body reaches via `tx()` (FOR UPDATE locking / raw multi-row writes), with `insert_in_tx`
+//! (secured insert on that tx), `emit_event` (a domain event atomic with it), and `defer_insert` (a
+//! post-commit follow-on insert). Stock reservation/validation and the variant generator use this surface.
 
 use crate::{Db, DbError};
 use meshble_core::{check_access, Acl, Ctx, Domain, Operation, RecordRule, ResolvedModel};
@@ -116,6 +117,36 @@ pub fn ledger_report_for(name: &str) -> Option<&'static LedgerReportRegistration
 /// All registered report names (for a UI report menu).
 pub fn ledger_report_names() -> Vec<&'static str> {
     meshble_core::inventory::iter::<LedgerReportRegistration>.into_iter().map(|r| r.name).collect()
+}
+
+/// An in-tx WRITE TRIGGER — a module hook that runs on the caller's transaction AFTER a secured write to
+/// `model`, when one of `watch`ed columns changed (empty = any). The framework's own `depends`-driven
+/// recompute handles same-record + child aggregates; this seam covers the effects it can't express on read
+/// — chiefly a Many2many aggregate stored across a join (e.g. a product variant's `price_extra` summed over
+/// its attribute-value cells). Runs on `&mut Transaction` only (no ACL re-entry), so it stays a pure,
+/// engine-owned in-tx side effect, atomic with the write. ZERO ERP literals reach this crate — the model
+/// name and the SQL live in the module that owns the tables.
+pub type WriteTriggerFn = for<'c, 't> fn(
+    &'c mut sqlx::Transaction<'t, sqlx::Postgres>,
+    i64,
+    &'c [&'c str],
+) -> BoxServiceFut<'c, Result<(), DbError>>;
+
+/// Registration of a write trigger, emitted by `register_write_trigger!`.
+pub struct WriteTriggerRegistration {
+    pub model: &'static str,
+    /// Columns whose change fires the trigger; empty fires on every write that matched a row.
+    pub watch: &'static [&'static str],
+    pub func: WriteTriggerFn,
+}
+meshble_core::inventory::collect!(WriteTriggerRegistration);
+
+/// The write triggers registered on `model` (empty when none — the common case, iterated per secured write).
+pub fn write_triggers_for(model: &str) -> Vec<&'static WriteTriggerRegistration> {
+    meshble_core::inventory::iter::<WriteTriggerRegistration>
+        .into_iter()
+        .filter(|t| t.model == model)
+        .collect()
 }
 
 /// The secured-primitive surface handed to a service body. A concrete struct (no trait, no `dyn`): its
@@ -234,6 +265,16 @@ impl<'a, 't> ServiceCtx<'a, 't> {
     pub async fn insert_secured(&self, m: &ResolvedModel, ctx: &Ctx, values: &Map<String, Json>) -> Result<i64, DbError> {
         self.db.insert_secured(m, ctx, self.acls, self.rules, values).await
     }
+    /// A secured insert on the LIVE service transaction (not its own), returning the new id — the in-tx
+    /// twin of `insert_secured`. For a service that builds a batch of related rows which must commit
+    /// atomically together, e.g. the variant generator inserting each variant plus its join rows under one
+    /// per-template advisory lock. Like the pre-relocation engine's own `insert_secured_in_tx` use, it does
+    /// NOT run the post-commit grandparent recompute (the caller owns the tx); use it where the inserted
+    /// model has no aggregate parent to roll up.
+    pub async fn insert_in_tx(&mut self, m: &ResolvedModel, ctx: &Ctx, values: &Map<String, Json>) -> Result<i64, DbError> {
+        let (id, _record) = self.db.insert_secured_in_tx(m, ctx, self.acls, self.rules, values, self.tx).await?;
+        Ok(id)
+    }
     pub async fn update_secured(&self, m: &ResolvedModel, ctx: &Ctx, id: i64, values: &Map<String, Json>) -> Result<u64, DbError> {
         self.db.update_secured(m, ctx, self.acls, self.rules, id, values).await
     }
@@ -241,9 +282,9 @@ impl<'a, 't> ServiceCtx<'a, 't> {
 
 impl Db {
     /// The generic service dispatcher — the `run_action` twin. ZERO ERP literals. Gates exactly like
-    /// `run_action` (ACL + group + record-rule/company visibility), then runs the registered body and
-    /// returns its JSON result. v1 services manage their own per-write transactions via [`ServiceCtx`];
-    /// the single-transaction variant arrives with the account/stock batch.
+    /// `run_action` (ACL + group + record-rule/company visibility), then runs the registered body on ONE
+    /// transaction (committed on Ok, rolled back on Err) and returns its JSON result. Pool-based services
+    /// leave the tx untouched (a no-op commit); tx-bound ones drive it through [`ServiceCtx::tx`].
     pub async fn run_service(
         &self,
         model: &ResolvedModel,

@@ -459,9 +459,7 @@ fn build_data_router(
         // register_service! and meshble-db dispatches by capability — no per-service handler, no model-name
         // literal. The named ERP endpoints below are migrating onto this and will be deleted.
         .route("/api/:name/:id/service/:service", post(service_handler))
-        // Variant generation: materialize a product.template's attribute combinations into variants.
-        .route("/api/:name/:id/generate_variants", post(generate_variants_handler))
-        // Re-price a sale order's lines from its pricelist.
+        // Read-only ledger reports (trial balance, general ledger, aged balance): GET /api/reports/:report.
         .route("/api/reports/:report", get(ledger_report_handler))
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
@@ -1371,36 +1369,6 @@ async fn service_handler(
     match backend.db.run_service(&model, &ctx, &backend.acls(), &backend.rules(), id, &service, body_map).await {
         Ok(json) => json_response(json.to_string()),
         Err(e) => write_error("service", e),
-    }
-}
-
-/// Generates `product.product` variants for a `product.template` (the cartesian product of its
-/// attribute lines). v1: product-template-specific, so the path name is pinned. Authorization +
-/// reconciliation live in the db layer; this handler only authenticates and shapes the response.
-async fn generate_variants_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "product.template" {
-        return (StatusCode::BAD_REQUEST, "generate_variants is only valid on product.template")
-            .into_response();
-    }
-    // 404 if product.template is not served (its module isn't installed).
-    if let Err(r) = resolve_model(&state, &name) {
-        return r;
-    }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match backend.db.generate_variants(&ctx, &backend.acls(), &backend.rules(), id).await {
-        Ok(o) => json_response(
-            serde_json::json!({ "created": o.created, "archived": o.archived, "kept": o.kept })
-                .to_string(),
-        ),
-        Err(e) => write_error("generate_variants", e),
     }
 }
 
