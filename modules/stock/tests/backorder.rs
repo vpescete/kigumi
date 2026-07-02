@@ -2,16 +2,16 @@
 //! quantity_done, spills the remainder into a draft backorder, and an internal source never goes
 //! negative (a delivery clamps to on-hand). Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
     let _ = (
-        &meshble_mod_stock::MANIFEST,
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
+        &kigumi_mod_stock::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
     );
 }
 

@@ -1,10 +1,10 @@
 # Moduli
 
-Meshble è un framework ERP headless guidato da schema: ogni funzionalità di dominio è impacchettata in un **modulo**. Un modulo è una crate Rust che, tramite un `ModuleManifest` e una manciata di macro `register_*!`, dichiara i propri modelli, le ACL, le record rule, le azioni e i metodi di servizio nel registro a compile time. Questa pagina descrive il sistema dei moduli — il manifest, la dichiarazione delle dipendenze, la chiusura delle dipendenze, la semantica di install/uninstall, il registro di installazione e il controllo di compatibilità con il framework — e poi cataloga i moduli inclusi (`base`, `mail`, `sales`, `account`, `stock`) con i modelli che spediscono e le loro feature principali. Per scrivere un modulo proprio, vedi [moduli-custom.md](./moduli-custom.md).
+Kigumi è un framework ERP headless guidato da schema: ogni funzionalità di dominio è impacchettata in un **modulo**. Un modulo è una crate Rust che, tramite un `ModuleManifest` e una manciata di macro `register_*!`, dichiara i propri modelli, le ACL, le record rule, le azioni e i metodi di servizio nel registro a compile time. Questa pagina descrive il sistema dei moduli — il manifest, la dichiarazione delle dipendenze, la chiusura delle dipendenze, la semantica di install/uninstall, il registro di installazione e il controllo di compatibilità con il framework — e poi cataloga i moduli inclusi (`base`, `mail`, `sales`, `account`, `stock`) con i modelli che spediscono e le loro feature principali. Per scrivere un modulo proprio, vedi [moduli-custom.md](./moduli-custom.md).
 
 ## Il `ModuleManifest`
 
-Ogni modulo dichiara un `ModuleManifest` statico — dati dichiarativi validati a build/install time. La struttura è definita in `crates/meshble-core/src/manifest.rs`:
+Ogni modulo dichiara un `ModuleManifest` statico — dati dichiarativi validati a build/install time. La struttura è definita in `crates/kigumi-core/src/manifest.rs`:
 
 ```rust
 pub struct ModuleManifest {
@@ -25,7 +25,7 @@ pub struct ModuleManifest {
 | `version` | `&'static str` | Versione SemVer del modulo, indipendente da quella del framework. |
 | `framework` | `&'static str` | Range SemVer di compatibilità con il framework (es. `">=0.1, <0.2"`). |
 | `depends` | `&'static [ModuleDep]` | Dipendenze da altri moduli, ognuna con il proprio range di versione. |
-| `summary` | `&'static str` | Descrizione breve, mostrata da `meshble module list`. |
+| `summary` | `&'static str` | Descrizione breve, mostrata da `kigumi module list`. |
 
 Ogni dipendenza è un `ModuleDep`, ovvero il nome del modulo richiesto più un vincolo di versione SemVer:
 
@@ -50,21 +50,21 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     depends: &[],
     summary: "Foundational models: currency, partner, company",
 };
-meshble::register_module!(MANIFEST);
+kigumi::register_module!(MANIFEST);
 ```
 
-La macro (definita in `crates/meshble/src/lib.rs`) emette una `ModuleRegistration` nel registro a compile time tramite `inventory`, conservando anche il `module_path!()` della crate. Quel percorso è ciò che consente a `module_of(model)` di risalire dal modello al modulo che lo possiede — la base del gating per modulo installato in migrazione e in servizio.
+La macro (definita in `crates/kigumi/src/lib.rs`) emette una `ModuleRegistration` nel registro a compile time tramite `inventory`, conservando anche il `module_path!()` della crate. Quel percorso è ciò che consente a `module_of(model)` di risalire dal modello al modulo che lo possiede — la base del gating per modulo installato in migrazione e in servizio.
 
-Perché le registrazioni `inventory` siano presenti nel binario, la crate del modulo deve essere effettivamente linkata. Il binario `meshble` lo forza in `apps/meshble-cli/src/main.rs`:
+Perché le registrazioni `inventory` siano presenti nel binario, la crate del modulo deve essere effettivamente linkata. Il binario `kigumi` lo forza in `apps/kigumi-cli/src/main.rs`:
 
 ```rust
 fn link_modules() {
     let _ = (
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_account::MANIFEST,
-        &meshble_mod_stock::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_account::MANIFEST,
+        &kigumi_mod_stock::MANIFEST,
     );
 }
 ```
@@ -73,7 +73,7 @@ Un modulo è **disponibile** quando la sua crate è linkata nel binario (compile
 
 ## Il controllo di compatibilità con il framework
 
-Prima di qualunque risoluzione, ogni manifest viene confrontato con la versione del framework dalla funzione `check_compat` (in `crates/meshble-core/src/manifest.rs`). La versione del framework è la costante `FRAMEWORK_VERSION`, derivata da `CARGO_PKG_VERSION` di `meshble-core` (definita in `crates/meshble-core/src/lib.rs`) — al momento `0.1.0`. Tutti i moduli inclusi dichiarano `framework = ">=0.1, <0.2"`, quindi sono compatibili con questa linea.
+Prima di qualunque risoluzione, ogni manifest viene confrontato con la versione del framework dalla funzione `check_compat` (in `crates/kigumi-core/src/manifest.rs`). La versione del framework è la costante `FRAMEWORK_VERSION`, derivata da `CARGO_PKG_VERSION` di `kigumi-core` (definita in `crates/kigumi-core/src/lib.rs`) — al momento `0.1.0`. Tutti i moduli inclusi dichiarano `framework = ">=0.1, <0.2"`, quindi sono compatibili con questa linea.
 
 ```rust
 pub fn check_compat(
@@ -120,11 +120,11 @@ Le possibili condizioni di errore sono enumerate da `ResolutionError`:
 | `SelfDependency` | Un modulo elenca se stesso tra le dipendenze. |
 | `DependencyCycle` | Il grafo delle dipendenze contiene un ciclo. |
 
-Il wrapper `resolve_modules` (in `crates/meshble-core/src/registry.rs`) alimenta `resolve_module_set` con tutti i manifest registrati nel catalogo e con `FRAMEWORK_VERSION`.
+Il wrapper `resolve_modules` (in `crates/kigumi-core/src/registry.rs`) alimenta `resolve_module_set` con tutti i manifest registrati nel catalogo e con `FRAMEWORK_VERSION`.
 
 ## La chiusura delle dipendenze
 
-Quando installi un modulo non ne installi solo quello: installi la sua **chiusura transitiva**. La funzione `module_closure(name)` (in `crates/meshble-core/src/registry.rs`) restituisce il modulo più tutte le sue dipendenze transitive, in ordine di dipendenza (dipendenze prima):
+Quando installi un modulo non ne installi solo quello: installi la sua **chiusura transitiva**. La funzione `module_closure(name)` (in `crates/kigumi-core/src/registry.rs`) restituisce il modulo più tutte le sue dipendenze transitive, in ordine di dipendenza (dipendenze prima):
 
 ```rust
 pub fn module_closure(name: &str) -> Result<Vec<&'static str>, String> {
@@ -138,15 +138,15 @@ Per esempio, `module_closure("sales")` restituisce `["base", "mail", "sales"]`, 
 
 ## Install e uninstall
 
-I moduli si gestiscono dalla CLI (`apps/meshble-cli/src/main.rs`), sottocomando `module`:
+I moduli si gestiscono dalla CLI (`apps/kigumi-cli/src/main.rs`), sottocomando `module`:
 
 ```text
-meshble module list              # elenca i moduli linkati e se ciascuno è installato
-meshble module install <name>    # installa un modulo + la sua chiusura, poi migra le tabelle
-meshble module uninstall <name>  # disinstalla un modulo (tabelle e dati KEPT)
+kigumi module list              # elenca i moduli linkati e se ciascuno è installato
+kigumi module install <name>    # installa un modulo + la sua chiusura, poi migra le tabelle
+kigumi module uninstall <name>  # disinstalla un modulo (tabelle e dati KEPT)
 ```
 
-`meshble module list` stampa una riga per modulo con nome, versione, stato (`installed` / `available`) e summary:
+`kigumi module list` stampa una riga per modulo con nome, versione, stato (`installed` / `available`) e summary:
 
 ```text
   base       1.0.0    [installed]  Foundational models: currency, partner, company
@@ -156,7 +156,7 @@ meshble module uninstall <name>  # disinstalla un modulo (tabelle e dati KEPT)
 
 ### Install
 
-`meshble module install <name>` calcola la chiusura con `module_closure(&name)`, marca come installati i moduli non ancora presenti e poi richiama `migrate_installed`, che crea (idempotentemente) le tabelle dei moduli appena installati:
+`kigumi module install <name>` calcola la chiusura con `module_closure(&name)`, marca come installati i moduli non ancora presenti e poi richiama `migrate_installed`, che crea (idempotentemente) le tabelle dei moduli appena installati:
 
 ```rust
 ModuleCmd::Install { name } => {
@@ -178,7 +178,7 @@ ModuleCmd::Install { name } => {
 
 ### Uninstall — i dati restano
 
-`meshble module uninstall <name>` ha due guardie e una semantica non distruttiva:
+`kigumi module uninstall <name>` ha due guardie e una semantica non distruttiva:
 
 1. **`base` non è disinstallabile** (è il modulo fondante): `cannot uninstall 'base' (the foundational module)`.
 2. **Guardia a valle**: se un modulo installato dipende ancora da quello richiesto, l'uninstall è rifiutato finché non si disinstallano prima i dipendenti.
@@ -199,7 +199,7 @@ Questo è deliberatamente non distruttivo e reversibile: l'uninstall è un *disa
 
 ## Il registro di installazione per modulo
 
-Lo stato "installato" vive in una tabella dedicata, `installed_module`, gestita da `crates/meshble-db/src/module_store.rs`:
+Lo stato "installato" vive in una tabella dedicata, `installed_module`, gestita da `crates/kigumi-db/src/module_store.rs`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS installed_module
@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS installed_module
 
 Un modulo è **disponibile** quando la sua crate è linkata (compile time); è **installato** quando ha una riga qui. Le operazioni sul registro sono `installed_modules()`, `is_module_installed(name)`, `mark_module_installed(name, version)` e `mark_module_uninstalled(name)`.
 
-Esiste una seconda tabella, `meshble_module` (in `crates/meshble-db/src/migration.rs`), che è il **ledger di migrazione per modello**: traccia la versione fino a cui le tabelle di ciascun modulo sono state migrate, usata da `install_or_upgrade` (con un `pg_advisory_xact_lock` per serializzare install/upgrade concorrenti dello stesso modulo). Il metodo `has_prior_migration` distingue un DB davvero nuovo da uno aggiornato prima che esistesse la selezione dei moduli.
+Esiste una seconda tabella, `kigumi_module` (in `crates/kigumi-db/src/migration.rs`), che è il **ledger di migrazione per modello**: traccia la versione fino a cui le tabelle di ciascun modulo sono state migrate, usata da `install_or_upgrade` (con un `pg_advisory_xact_lock` per serializzare install/upgrade concorrenti dello stesso modulo). Il metodo `has_prior_migration` distingue un DB davvero nuovo da uno aggiornato prima che esistesse la selezione dei moduli.
 
 ### Migrazione guidata dall'installato
 
@@ -232,15 +232,15 @@ if db.installed_modules().await?.is_empty() {
 
 ## Catalogo dei moduli inclusi
 
-Cinque moduli sono inclusi e linkati nel binario `meshble`. Tutti dichiarano `version = "1.0.0"` e `framework = ">=0.1, <0.2"`.
+Cinque moduli sono inclusi e linkati nel binario `kigumi`. Tutti dichiarano `version = "1.0.0"` e `framework = ">=0.1, <0.2"`.
 
 | Modulo | Crate | Dipende da (verificato dal MANIFEST) |
 |--------|-------|--------------------------------------|
-| `base` | `meshble-mod-base` | *(nessuna)* |
-| `mail` | `meshble-mod-mail` | `base ^1.0` |
-| `sales` | `meshble-mod-sales` | `base ^1.0`, `mail ^1.0` |
-| `account` | `meshble-mod-account` | `base ^1.0`, `mail ^1.0` |
-| `stock` | `meshble-mod-stock` | `base ^1.0`, `sales ^1.0`, `mail ^1.0` |
+| `base` | `kigumi-mod-base` | *(nessuna)* |
+| `mail` | `kigumi-mod-mail` | `base ^1.0` |
+| `sales` | `kigumi-mod-sales` | `base ^1.0`, `mail ^1.0` |
+| `account` | `kigumi-mod-account` | `base ^1.0`, `mail ^1.0` |
+| `stock` | `kigumi-mod-stock` | `base ^1.0`, `sales ^1.0`, `mail ^1.0` |
 
 ### `base`
 
@@ -256,20 +256,20 @@ Modelli:
 | `res.partner` | `res_partner` | Anagrafica: aziende e persone (clienti, fornitori, contatti); gerarchia `parent_id` auto-referenziale. |
 | `res.company` | `res_company` | Unità di isolamento dati in multi-azienda; ha valuta (`currency_id`, richiesta) e partner (`partner_id`) collegati. |
 | `res.groups` | `res_groups` | Lista (read-only) dei gruppi referenziati da ACL/rule; serve all'UI per picker e filtri. |
-| `res.users` | `meshble_user` | Proiezione read-only del sottosistema di autenticazione; tabella **esterna** (mai migrata dal metamodello), via `register_external!("res.users")`. |
-| `ir.attachment` | `meshble_attachment` | File allegato a qualunque record via link polimorfico `(res_model, res_id)`; i byte vivono nel blob store content-addressed indicizzato per `checksum`. |
+| `res.users` | `kigumi_user` | Proiezione read-only del sottosistema di autenticazione; tabella **esterna** (mai migrata dal metamodello), via `register_external!("res.users")`. |
+| `ir.attachment` | `kigumi_attachment` | File allegato a qualunque record via link polimorfico `(res_model, res_id)`; i byte vivono nel blob store content-addressed indicizzato per `checksum`. |
 
 Feature principali:
 
 - **Sequenze** per la numerazione dei documenti: `base` effettua il seeding delle sequenze `SO` e `PO` (es. `SO/00001`, `PO/00001`) usate dalle azioni di conferma di sale/purchase.
-- **Settings runtime** (chiave/valore tipato) gestiti via `meshble config set/get/print`; il seeding install-time imposta `base_url` (vuoto) e `mode` (`production`) senza mai sovrascrivere una modifica dell'operatore.
+- **Settings runtime** (chiave/valore tipato) gestiti via `kigumi config set/get/print`; il seeding install-time imposta `base_url` (vuoto) e `mode` (`production`) senza mai sovrascrivere una modifica dell'operatore.
 - **Multi-azienda**: `res.company` è l'unità di isolamento; i modelli transazionali portano un `company_id` proprio (es. `sale.order`), mentre i partner sono condivisi.
 - **Seeding di base**: su un'istanza nuova viene creata una valuta (`Euro`/`EUR`) e un'azienda (`Main Company`); `res.groups` viene popolato dai gruppi referenziati dalle ACL/rule registrate.
 - ACL: il gruppo `user` legge i dati di riferimento e la lista gruppi (e può creare/modificare i partner); `res.users` e `ir.attachment` (CRUD generico) sono `admin`-only — gli utenti raggiungono i file tramite gli endpoint dedicati `/api/:name/:id/attachments` (più `/api/attachment/:aid/content` per il download e `/api/attachment/:aid` per la cancellazione), gated sull'accesso al record host.
 
 ### `mail`
 
-Sottosistema di chatter headless. Un modello aderisce con **una riga** (`meshble::register_mailed!("sale.order")`), senza mixin: guadagna un thread di messaggi indirizzato dal link polimorfico `(res_model, res_id)`, e il framework ripulisce quel thread alla cancellazione del record.
+Sottosistema di chatter headless. Un modello aderisce con **una riga** (`kigumi::register_mailed!("sale.order")`), senza mixin: guadagna un thread di messaggi indirizzato dal link polimorfico `(res_model, res_id)`, e il framework ripulisce quel thread alla cancellazione del record.
 
 `depends: &[ModuleDep { name: "base", req: "^1.0" }]` (`modules/mail/src/lib.rs`). Dipende da `base` perché `res.users` è l'autore del messaggio / assegnatario dell'attività.
 
@@ -403,7 +403,7 @@ Rappresentato come grafo (le frecce vanno dal dipendente alle sue dipendenze; `b
 
 `base` non dipende da nulla; `mail` dipende solo da `base`; `sales` e `account` dipendono entrambi da `base` e `mail`; `stock` dipende da `base`, `sales` e `mail`.
 
-`resolve_module_set` ordina topologicamente questo grafo (Kahn, con tiebreak alfabetico). L'ordine di installazione risultante (dipendenze prima dei dipendenti), confermato da `meshble version`, è:
+`resolve_module_set` ordina topologicamente questo grafo (Kahn, con tiebreak alfabetico). L'ordine di installazione risultante (dipendenze prima dei dipendenti), confermato da `kigumi version`, è:
 
 1. `base`
 2. `mail`
@@ -419,7 +419,7 @@ Concretamente, `module_closure` produce le chiusure attese (sempre nell'ordine v
 - `module_closure("sales")` → `["base", "mail", "sales"]`
 - `module_closure("stock")` → `["base", "mail", "sales", "stock"]`
 
-`base` è sempre installato per primo su un database nuovo; gli altri moduli sono opt-in via `meshble module install <name>`.
+`base` è sempre installato per primo su un database nuovo; gli altri moduli sono opt-in via `kigumi module install <name>`.
 
 ## Vedi anche
 

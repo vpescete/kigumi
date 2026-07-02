@@ -2,16 +2,16 @@
 //! single lumped tax line), so an invoice with VAT + an Eco fee posts two distinct tax lines. The move
 //! still balances (receivable = untaxed + Σ per-group tax). Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
     let _ = (
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
-        &meshble_mod_account::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
+        &kigumi_mod_account::MANIFEST,
     );
 }
 
@@ -71,7 +71,7 @@ async fn invoice_posts_one_tax_line_per_group() {
     db.insert_secured(&line, &su, &[], &[], json!({ "order_id": oid, "product_id": prod, "product_uom_qty": 1, "price_unit": 100.0, "tax_ids": [eco5] }).as_object().unwrap()).await.unwrap();
 
     let seller = Ctx::new(1, vec!["sales.user".to_string()]);
-    let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
+    let (acls, rules) = (kigumi_mod_sales::ACLS, kigumi_mod_sales::RECORD_RULES);
     db.run_service(&order, &seller, acls, rules, oid, "apply_taxes", serde_json::Map::new()).await.unwrap();
     db.run_action(&order, &su, &[], &[], oid, "confirm").await.unwrap();
     let confirmed = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();

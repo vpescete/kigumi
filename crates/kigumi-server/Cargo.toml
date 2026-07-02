@@ -1,0 +1,25 @@
+[package]
+name = "kigumi-server"
+description = "Headless HTTP server (axum): serves the OpenAPI spec, model list, and UI contracts from a model set"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kigumi-core = { workspace = true }
+kigumi-schema = { workspace = true }
+kigumi-db = { workspace = true }
+kigumi-auth = { workspace = true }
+kigumi-storage = { workspace = true }
+axum = "0.7"
+serde_json = "1"
+rust_decimal = "1"
+genpdf = "0.2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "rust_decimal"] }
+tempfile = "3"

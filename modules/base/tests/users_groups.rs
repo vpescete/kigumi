@@ -1,15 +1,15 @@
 //! M6/D11: res.users + res.groups as read-only metamodel models. res.users is an EXTERNAL table
-//! (a projection of the auth subsystem's `meshble_user`) — excluded from migration and projected
+//! (a projection of the auth subsystem's `kigumi_user`) — excluded from migration and projected
 //! WITHOUT the password hash. res.groups is a normal seeded list. Live Postgres; skipped without
 //! DATABASE_URL. Lightweight on purpose (no full-catalog migrate) to avoid racing other test
 //! binaries on the shared reference tables.
 
-use meshble::prelude::*;
-use meshble_auth::hash_password;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_auth::hash_password;
+use kigumi_db::Db;
 
 fn link() {
-    let _ = &meshble_mod_base::MANIFEST;
+    let _ = &kigumi_mod_base::MANIFEST;
 }
 
 #[tokio::test]
@@ -35,7 +35,7 @@ async fn res_users_is_an_external_readonly_projection() {
     };
     let db = Db::connect(&url).await.unwrap();
     let su = Ctx::new(0, vec![]).sudo();
-    db.ensure_auth_schema().await.unwrap(); // owns meshble_user (the external table)
+    db.ensure_auth_schema().await.unwrap(); // owns kigumi_user (the external table)
 
     // A user created through the AUTH subsystem (upsert is idempotent on login)...
     db.upsert_user("ada-d11", &hash_password("x").unwrap(), &["user", "admin"]).await.unwrap();

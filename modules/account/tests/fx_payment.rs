@@ -3,12 +3,12 @@
 //! rate and relieves the receivable at the invoice-date rate; the difference is a balancing FX line, so
 //! the company-currency entry still nets to zero. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
-    let _ = (&meshble_mod_account::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_account::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 fn money(v: &serde_json::Value, field: &str) -> f64 {
@@ -74,7 +74,7 @@ async fn payment_books_a_realized_fx_gain() {
 
     // Pay the full 100 USD today (rate 1.0 ⇒ worth 100 EUR).
     let acct = Ctx::new(2, vec!["account.user".to_string()]).in_companies(comp, vec![comp]);
-    let (a_acls, a_rules) = (meshble_mod_account::ACLS, meshble_mod_account::RECORD_RULES);
+    let (a_acls, a_rules) = (kigumi_mod_account::ACLS, kigumi_mod_account::RECORD_RULES);
     let pay = db.run_service(&mv, &acct, a_acls, a_rules, move_id, "register_payment", serde_json::json!({"amount": "100", "journal_id": bank_journal}).as_object().unwrap().clone()).await.unwrap()["payment"].as_i64().unwrap();
 
     let p = db.find_one_secured(&mv, &su, &[], &[], pay).await.unwrap().unwrap();

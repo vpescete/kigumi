@@ -1,6 +1,6 @@
-# Meshble Web — navigable design-system mockups
+# Kigumi Web — navigable design-system mockups
 
-Five **genuinely distinct** design systems for the Meshble admin UI, chosen by navigating real
+Five **genuinely distinct** design systems for the Kigumi admin UI, chosen by navigating real
 screens. Each is a complete token set built with anti-slop taste rules: a distinctive **font pairing**
 (never default Inter), a full **type scale per role** (display / h1 / h2 / subtitle / body / label /
 caption / mono — different fonts for headings vs body vs numbers), a **built palette** around one

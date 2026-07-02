@@ -47,7 +47,7 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
       <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-sm font-bold text-accent-fg">M</div>
       {!collapsed && (
         <div className="whitespace-nowrap leading-tight">
-          <div className="font-semibold text-text">Meshble</div>
+          <div className="font-semibold text-text">Kigumi</div>
           <div className="t-mono text-[10px] text-muted">precision ERP</div>
         </div>
       )}
@@ -273,7 +273,7 @@ function UserMenu() {
                   role="menuitemradio"
                   aria-checked={theme === t.id}
                   onClick={() => setTheme(t.id)}
-                  title={`${t.name}${t.author && t.author !== 'Meshble' ? ` · ${t.author}` : ''}`}
+                  title={`${t.name}${t.author && t.author !== 'Kigumi' ? ` · ${t.author}` : ''}`}
                   className={cx(
                     'truncate rounded-md border px-2 py-1 text-xs font-medium',
                     theme === t.id ? 'border-accent/40 bg-accent-soft text-accent' : 'border-border text-muted hover:bg-surface2 hover:text-text',

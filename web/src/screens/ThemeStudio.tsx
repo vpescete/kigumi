@@ -226,7 +226,7 @@ function PreviewBoard() {
   return (
     <div className="p-6 space-y-6" style={{ fontFamily: 'var(--font-body)' }}>
       <div>
-        <div className="t-display text-text">Aa Meshble</div>
+        <div className="t-display text-text">Aa Kigumi</div>
         <div className="t-h1 text-text mt-2">Sales Orders</div>
         <div className="t-h2 text-text mt-1.5">Order S00012</div>
         <div className="t-subtitle text-muted mt-1.5">Acme Corporation · 09 Jun 2026</div>

@@ -1,4 +1,4 @@
-# Meshble Design System — Graphite (DESIGN.md)
+# Kigumi Design System — Graphite (DESIGN.md)
 
 > The blend: **structure from shadcn/ui, finish from Untitled UI, identity from Graphite.**
 > Hand-rolled React primitives, zero new dependencies, 100% token-driven so all themes inherit every change automatically. No hard-coded hex in any component.

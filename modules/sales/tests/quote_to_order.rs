@@ -3,14 +3,14 @@
 //! nested lines, check the stored computes roll up (subtotal/margin → amount_total/margin), then run
 //! the `confirm` action and check the state transition + SO numbering.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 /// Force the module crates to link so their `inventory` registrations are present (sales depends on
 /// base and mail — sale.order opts into the mail subsystem, so mail's catalog must be migrated too).
 fn link() {
-    let _ = (&meshble_mod_sales::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_sales::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 /// A computed money field comes back as an exact JSON string; parse it for scale-independent asserts.
@@ -90,7 +90,7 @@ async fn quote_to_order_rolls_up_and_confirms() {
     // locked done they vanish for the clerk (line_parent_not_done), while su still sees them.
     let clerk = Ctx::new(1, vec!["sales.user".to_string()]);
     let line = resolve_registered("sale.order.line").unwrap();
-    let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
+    let (acls, rules) = (kigumi_mod_sales::ACLS, kigumi_mod_sales::RECORD_RULES);
     assert_eq!(db.count_secured(&line, &clerk, acls, rules, None).await.unwrap(), 2, "clerk sees lines of a live order");
 
     db.run_action(&order, &su, &[], &[], oid, "done").await.unwrap();

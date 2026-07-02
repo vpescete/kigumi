@@ -3,12 +3,12 @@
 //! posted entry's lines are then frozen for a non-superuser until it is reset to draft. Requires
 //! DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
-    let _ = (&meshble_mod_account::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_account::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 #[tokio::test]
@@ -61,7 +61,7 @@ async fn post_numbers_then_freezes_the_entry() {
 
     // Posted immutability: a non-superuser cannot write the posted entry's lines.
     let clerk = Ctx::new(1, vec!["account.user".to_string(), "account.manager".to_string()]);
-    let (acls, rules) = (meshble_mod_account::ACLS, meshble_mod_account::RECORD_RULES);
+    let (acls, rules) = (kigumi_mod_account::ACLS, kigumi_mod_account::RECORD_RULES);
     let lines = db.find_secured(&line, &su, &[], &[], Some(&Domain::field("move_id").eq(mid))).await.unwrap();
     let lid = lines[0]["id"].as_i64().unwrap();
     let frozen = db.update_secured(&line, &clerk, acls, rules, lid, json!({ "name": "tampered" }).as_object().unwrap()).await.unwrap();

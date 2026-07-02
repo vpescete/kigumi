@@ -3,16 +3,16 @@
 //! Driven by a plain sales.user with no account groups; the GL posting runs elevated. The bill is then
 //! paid via register_payment (in_invoice -> payable). Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
     let _ = (
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
-        &meshble_mod_account::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
+        &kigumi_mod_account::MANIFEST,
     );
 }
 
@@ -70,7 +70,7 @@ async fn confirmed_purchase_generates_a_posted_balanced_bill() {
 
     // Bill it as a plain sales.user (gates on purchase.order write; GL posting runs elevated).
     let buyer = Ctx::new(1, vec!["sales.user".to_string()]);
-    let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
+    let (acls, rules) = (kigumi_mod_sales::ACLS, kigumi_mod_sales::RECORD_RULES);
     let move_id = db.run_service(&order, &buyer, acls, rules, oid, "create_vendor_bill", serde_json::Map::new()).await.unwrap()["bill"].as_i64().unwrap();
 
     let bill = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
@@ -93,7 +93,7 @@ async fn confirmed_purchase_generates_a_posted_balanced_bill() {
 
     // Pay the vendor bill: in_invoice draws down the payable, crediting the bank.
     let acct = Ctx::new(2, vec!["account.user".to_string()]);
-    let (a_acls, a_rules) = (meshble_mod_account::ACLS, meshble_mod_account::RECORD_RULES);
+    let (a_acls, a_rules) = (kigumi_mod_account::ACLS, kigumi_mod_account::RECORD_RULES);
     db.run_service(&mv, &acct, a_acls, a_rules, move_id, "register_payment", serde_json::json!({"amount": "122", "journal_id": bank_journal}).as_object().unwrap().clone()).await.unwrap();
     let paid = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
     assert_eq!(money(&paid, "amount_residual"), 0.0, "the bill is settled");

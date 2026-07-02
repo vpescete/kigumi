@@ -4,7 +4,7 @@ import type { Theme } from '../contract'
 export const editorial: Theme = {
   id: 'editorial',
   name: 'Editorial',
-  author: 'Meshble',
+  author: 'Kigumi',
   version: '1.0.0',
   compat: '^0.1',
   defaultMode: 'light',

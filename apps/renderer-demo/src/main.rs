@@ -1,15 +1,15 @@
 //! Runnable demo wiring the whole stack: defines a `task` model with `#[model]`, migrates and
-//! seeds it on Postgres, and serves the headless API (`meshble-server`) plus the agnostic
+//! seeds it on Postgres, and serves the headless API (`kigumi-server`) plus the agnostic
 //! reference renderer (`webui/app.html`) on one port. Prints a ready-to-use deep link with a JWT.
 //!
-//! Run: `DATABASE_URL=postgres://you@127.0.0.1/meshble_test cargo run -p meshble-renderer-demo`
+//! Run: `DATABASE_URL=postgres://you@127.0.0.1/kigumi_test cargo run -p kigumi-renderer-demo`
 
 use axum::response::Html;
 use axum::routing::get;
-use meshble::prelude::*;
-use meshble_auth::{hash_password, Authenticator};
-use meshble_db::Db;
-use meshble_server::router_with_data;
+use kigumi::prelude::*;
+use kigumi_auth::{hash_password, Authenticator};
+use kigumi_db::Db;
+use kigumi_server::router_with_data;
 
 /// The demo model — note the field "types" are the `#[model]` DSL keywords.
 #[model(name = "task", table = "task")]
@@ -33,12 +33,12 @@ static ACLS: &[Acl] = &[Acl {
 static RULES: &[RecordRule] = &[];
 
 const UI: &str = include_str!("../../../webui/app.html");
-const SECRET: &str = "meshble-demo-secret-change-me";
+const SECRET: &str = "kigumi-demo-secret-change-me";
 
 #[tokio::main]
 async fn main() {
     let url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://127.0.0.1/meshble_test".to_string());
+        .unwrap_or_else(|_| "postgres://127.0.0.1/kigumi_test".to_string());
     let db = Db::connect(&url).await.expect("connect to Postgres (set DATABASE_URL)");
     let model = resolve(Task::descriptor(), &[]).unwrap();
 
@@ -62,13 +62,13 @@ async fn main() {
 
     let token = Authenticator::new(SECRET).issue_access(1, vec!["user".to_string()], None, vec![], 86_400).unwrap();
     let db_app = Db::connect(&url).await.unwrap();
-    let blobs = std::sync::Arc::new(meshble_server::FsBlobStore::new(std::env::temp_dir().join("meshble_demo_blobs")));
+    let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_demo_blobs")));
     let app = router_with_data(vec![model], db_app, ACLS, RULES, SECRET, blobs)
         .route("/", get(|| async { Html(UI) }));
 
     let addr = "127.0.0.1:8099";
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
-    println!("\n  Meshble reference renderer");
+    println!("\n  Kigumi reference renderer");
     println!("  Open:   http://{addr}/");
     println!("  Login:  admin / admin   (or deep link with a token below)");
     println!("  Token:  http://{addr}/?token={token}\n");

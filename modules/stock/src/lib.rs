@@ -2,9 +2,9 @@
 //! Slice 1 (M17.1): the structural data — locations, warehouses and quants (on-hand per
 //! product + location). Movements and the quant-update mechanism land in M17.2.
 
-use meshble::prelude::*;
+use kigumi::prelude::*;
 
-// The reservation/validation engine (relocated from meshble-db onto the service seam).
+// The reservation/validation engine (relocated from kigumi-db onto the service seam).
 pub mod services;
 
 /// Module manifest: own version + framework compatibility range + module dependencies.
@@ -19,7 +19,7 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     ],
     summary: "Inventory — locations, quants, pickings and moves",
 };
-meshble::register_module!(MANIFEST);
+kigumi::register_module!(MANIFEST);
 
 /// A stock location (Odoo's `stock.location`): a place stock sits. `usage` drives behavior — only
 /// `internal` counts as real on-hand; supplier/customer/inventory are virtual (infinite) source/sinks.
@@ -102,7 +102,7 @@ pub struct StockLot {
 }
 
 // stock.picking carries a chatter thread (transfer history) and a tracked state.
-meshble::register_mailed!("stock.picking");
+kigumi::register_mailed!("stock.picking");
 
 /// A transfer (Odoo's `stock.picking`): a document grouping moves from a source to a destination
 /// location. `validate` (the cross-record service method) sets its moves done and updates the quants.
@@ -214,22 +214,22 @@ pub static RECORD_RULES: &[RecordRule] = &[
     RecordRule { model: "stock.move", groups: &[], ops: &[Operation::Delete], domain: RuleDomain::Static(move_picking_not_done) },
 ];
 
-meshble::register_acls!(ACLS);
-meshble::register_rules!(RECORD_RULES);
+kigumi::register_acls!(ACLS);
+kigumi::register_rules!(RECORD_RULES);
 
 // The reservation/validation engine — TRANSACTIONAL cross-record services (FOR UPDATE quant locking) that
 // run on the ServiceCtx v2 service transaction. No group gate: the originals gated on the picking Write ACL.
-meshble::register_service!("stock.picking", "reserve", services::reserve, true, &[]);
-meshble::register_service!("stock.picking", "validate", services::validate, true, &[]);
+kigumi::register_service!("stock.picking", "reserve", services::reserve, true, &[]);
+kigumi::register_service!("stock.picking", "validate", services::validate, true, &[]);
 // Draft transfer creation from a confirmed order — a stock effect, registered on the order models the
 // stock module depends on (sales owns sale.order / purchase.order). Pool-based (no tx); gated on the
 // order's Write ACL, no group gate (matching the originals).
-meshble::register_service!("sale.order", "create_delivery", services::create_delivery, true, &[]);
-meshble::register_service!("purchase.order", "create_receipt", services::create_receipt, true, &[]);
+kigumi::register_service!("sale.order", "create_delivery", services::create_delivery, true, &[]);
+kigumi::register_service!("purchase.order", "create_receipt", services::create_receipt, true, &[]);
 
 // Form views: how each model is laid out on a form. The header carries identity + status; the moves
 // of a transfer live in a notebook page (the One2many the frontend renders inline).
-meshble::register_view!(
+kigumi::register_view!(
     "stock.picking",
     &[
         FieldGroup {
@@ -253,7 +253,7 @@ meshble::register_view!(
     &[NotebookPage { title: "Moves", fields: &["move_ids"] }]
 );
 
-meshble::register_view!(
+kigumi::register_view!(
     "stock.move",
     &[FieldGroup {
         title: None,
@@ -269,7 +269,7 @@ meshble::register_view!(
     &[]
 );
 
-meshble::register_view!(
+kigumi::register_view!(
     "stock.location",
     &[FieldGroup {
         title: None,
@@ -284,7 +284,7 @@ meshble::register_view!(
     &[]
 );
 
-meshble::register_view!(
+kigumi::register_view!(
     "stock.warehouse",
     &[FieldGroup {
         title: None,
@@ -299,7 +299,7 @@ meshble::register_view!(
     &[]
 );
 
-meshble::register_view!(
+kigumi::register_view!(
     "stock.quant",
     &[FieldGroup {
         title: None,

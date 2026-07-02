@@ -1,0 +1,17 @@
+[package]
+name = "kigumi-config"
+description = "Typed, layered instance configuration (defaults < kigumi.toml < env), validated fail-fast; secrets from env only"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+figment = { version = "0.10", features = ["toml", "env"] }
+url = "2"
+thiserror = "1"
+
+[[bin]]
+name = "kigumi-config"
+path = "src/bin/kigumi_config.rs"

@@ -1,6 +1,6 @@
 //! The product-variant generation engine — a module-owned service on `product.template`, registered on
 //! the `register_service!` seam and dispatched by `POST /api/product.template/:id/service/generate_variants`.
-//! Behavior-preserving relocation of the former `Db::generate_variants`: meshble-db no longer names any
+//! Behavior-preserving relocation of the former `Db::generate_variants`: kigumi-db no longer names any
 //! product model, so the variant engine ships with the sales module that owns those tables.
 //!
 //! It builds the cartesian product of a template's attribute lines, reconciles it against the template's
@@ -9,13 +9,13 @@
 //! per-template advisory lock (via `ServiceCtx::tx` / `insert_in_tx`), so concurrent generations of the same
 //! template serialize and a batch of variants plus its join rows commits atomically.
 
-use meshble::prelude::*; // ServiceCtx, ServiceInput, ServiceOutput, DbError, Domain, Ctx, ResolvedModel
+use kigumi::prelude::*; // ServiceCtx, ServiceInput, ServiceOutput, DbError, Domain, Ctx, ResolvedModel
 use serde_json::json;
 use sqlx::Row;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 // The product-variant model graph the generator operates on. The ERP model-name literals belong here, in
-// the module that owns the tables — meshble-db resolves none of them.
+// the module that owns the tables — kigumi-db resolves none of them.
 const VG_VARIANT: &str = "product.product";
 const VG_LINE: &str = "product.template.attribute.line";
 const VG_PTAV: &str = "product.template.attribute.value";

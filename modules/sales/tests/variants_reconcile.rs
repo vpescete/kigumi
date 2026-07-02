@@ -6,12 +6,12 @@
 
 use std::collections::BTreeSet;
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
-    let _ = (&meshble_mod_sales::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_sales::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 async fn create(db: &Db, model: &ResolvedModel, su: &Ctx, v: serde_json::Value) -> i64 {

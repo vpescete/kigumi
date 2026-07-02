@@ -1,10 +1,10 @@
 # API REST e contratto-UI
 
-Meshble è un framework ERP headless: l'unica superficie di integrazione è un'API HTTP generata dal catalogo dei modelli installati. Questa pagina documenta l'intera API esposta dal crate `meshble-server` (router axum in `crates/meshble-server/src/lib.rs`): il flusso di autenticazione JWT, le route dati CRUD con il loro envelope di risposta, gli endpoint dei metodi di servizio (variant, pricelist, wizard, sconto, report, posting, fatturazione, validazione trasferimenti), gli endpoint di allegati e chatter (messaggi, attività, follower), la forma del contratto-UI emesso per modello, il documento OpenAPI, il formato degli errori con i relativi status code e gli endpoint di health. Per il contesto su come questi pezzi si compongono vedi [architettura.md](architettura.md); per l'avvio del server vedi [installazione.md](installazione.md) e [README.md](README.md); per ACL, record rule e scope multi-azienda vedi [sicurezza.md](sicurezza.md).
+Kigumi è un framework ERP headless: l'unica superficie di integrazione è un'API HTTP generata dal catalogo dei modelli installati. Questa pagina documenta l'intera API esposta dal crate `kigumi-server` (router axum in `crates/kigumi-server/src/lib.rs`): il flusso di autenticazione JWT, le route dati CRUD con il loro envelope di risposta, gli endpoint dei metodi di servizio (variant, pricelist, wizard, sconto, report, posting, fatturazione, validazione trasferimenti), gli endpoint di allegati e chatter (messaggi, attività, follower), la forma del contratto-UI emesso per modello, il documento OpenAPI, il formato degli errori con i relativi status code e gli endpoint di health. Per il contesto su come questi pezzi si compongono vedi [architettura.md](architettura.md); per l'avvio del server vedi [installazione.md](installazione.md) e [README.md](README.md); per ACL, record rule e scope multi-azienda vedi [sicurezza.md](sicurezza.md).
 
 ## Come è montato il router
 
-Il server espone due livelli a seconda di come l'host (la CLI `meshble serve`) lo costruisce:
+Il server espone due livelli a seconda di come l'host (la CLI `kigumi serve`) lo costruisce:
 
 - **Router solo-metadati** — `router(models)`: monta unicamente `GET /openapi.json`, `GET /api/models` e `GET /api/:name/view`. Nessun database, nessuna autenticazione.
 - **Router completo** — `router_with_data(...)` (o `router_with_data_rasterized(...)` per attaccare un rasterizzatore PDF): aggiunge il blocco `/auth/*`, gli endpoint di health, e tutte le route dati CRUD + metodi di servizio + allegati + chatter, con un `DataBackend` che porta database, ACL, record rule, `Authenticator` e blob store.
@@ -20,11 +20,11 @@ fn base_router() -> Router<AppState> {
 }
 ```
 
-Il segmento `:name` è il **nome puntato del modello** (es. `sale.order`, `res.partner`, `product.template`), non il nome di tabella. La CLI passa il segreto di firma come `s.secrets.jwt_secret`, cioè la env var **`MESHBLE_JWT_SECRET`** (vedi [configurazione.md](configurazione.md)). Il limite massimo del corpo richiesta è 25 MiB (`DefaultBodyLimit::max(MAX_BODY_BYTES)`, con `MAX_BODY_BYTES = 25 * 1024 * 1024`).
+Il segmento `:name` è il **nome puntato del modello** (es. `sale.order`, `res.partner`, `product.template`), non il nome di tabella. La CLI passa il segreto di firma come `s.secrets.jwt_secret`, cioè la env var **`KIGUMI_JWT_SECRET`** (vedi [configurazione.md](configurazione.md)). Il limite massimo del corpo richiesta è 25 MiB (`DefaultBodyLimit::max(MAX_BODY_BYTES)`, con `MAX_BODY_BYTES = 25 * 1024 * 1024`).
 
 ## Autenticazione
 
-L'autenticazione è basata su token JWT HS256 firmati con `MESHBLE_JWT_SECRET`. La logica di emissione e verifica vive nel crate `meshble-auth` (`Authenticator`). Esistono due **tipi** di token, distinti dal claim `kind`:
+L'autenticazione è basata su token JWT HS256 firmati con `KIGUMI_JWT_SECRET`. La logica di emissione e verifica vive nel crate `kigumi-auth` (`Authenticator`). Esistono due **tipi** di token, distinti dal claim `kind`:
 
 - **access token** — breve durata (`ACCESS_TTL = 900` secondi, 15 minuti). Si verifica in un `Ctx` (uid, gruppi, scope multi-azienda) per ogni richiesta dati. Porta dentro di sé i gruppi e lo scope, così ogni richiesta è verificabile senza round-trip al database.
 - **refresh token** — lunga durata (`REFRESH_TTL = 2_592_000` secondi, 30 giorni), tracciato server-side da un `jti` e revocabile/ruotabile.
@@ -49,15 +49,15 @@ Credenziali non valide → `401 invalid credentials`.
 ```bash
 TOKEN=$(curl -s -X POST http://127.0.0.1:8099/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"login":"admin","password":"'"$MESHBLE_ADMIN_PASSWORD"'"}' \
+  -d '{"login":"admin","password":"'"$KIGUMI_ADMIN_PASSWORD"'"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
 ```
 
-> L'utente `admin` viene creato al primo `meshble serve` a partire da `MESHBLE_ADMIN_PASSWORD` (se nessun admin esiste ancora); vedi [installazione.md](installazione.md).
+> L'utente `admin` viene creato al primo `kigumi serve` a partire da `KIGUMI_ADMIN_PASSWORD` (se nessun admin esiste ancora); vedi [installazione.md](installazione.md).
 
 ### Header `Authorization: Bearer`
 
-Ogni route dati richiede l'header `Authorization: Bearer <access_token>`. La verifica avviene nel wrapper `authenticate` del server, che delega all'`Authenticator::verify_bearer` di `meshble-auth`: l'header deve iniziare con il prefisso letterale `Bearer ` e il token deve essere un access token valido. Il fallimento produce `401 unauthorized`. Il `Ctx` derivato è l'unica identità di cui si fida il server: un client non può dichiarare un gruppo senza un token firmato dal segreto.
+Ogni route dati richiede l'header `Authorization: Bearer <access_token>`. La verifica avviene nel wrapper `authenticate` del server, che delega all'`Authenticator::verify_bearer` di `kigumi-auth`: l'header deve iniziare con il prefisso letterale `Bearer ` e il token deve essere un access token valido. Il fallimento produce `401 unauthorized`. Il `Ctx` derivato è l'unica identità di cui si fida il server: un client non può dichiarare un gruppo senza un token firmato dal segreto.
 
 ```bash
 curl -s http://127.0.0.1:8099/api/res.partner \
@@ -87,7 +87,7 @@ Restituisce l'identità del chiamante autenticato, cioè il `Ctx` derivato dal b
 
 ## Endpoint dati (CRUD)
 
-Tutte le route sotto `/api/:name` richiedono un access token e applicano il motore ACL + record rule + scope multi-azienda nello strato `meshble-db` (i metodi `*_secured`). L'autorizzazione **non** è nel server: l'handler autentica, modella la risposta e mappa gli errori.
+Tutte le route sotto `/api/:name` richiedono un access token e applicano il motore ACL + record rule + scope multi-azienda nello strato `kigumi-db` (i metodi `*_secured`). L'autorizzazione **non** è nel server: l'handler autentica, modella la risposta e mappa gli errori.
 
 | Route | Metodo | Cosa fa |
 |---|---|---|
@@ -204,7 +204,7 @@ Gli errori (azione sconosciuta, accesso negato, transizione non valida) seguono 
 
 ## Endpoint dei metodi di servizio
 
-Questi sono metodi di business specifici per modello. L'handler verifica il **pin** del modello (un nome diverso → `400`), autentica e modella la risposta; l'autorizzazione e la logica transazionale vivono nello strato `meshble-db`. Se il modello non è servito (modulo non installato) → `404`.
+Questi sono metodi di business specifici per modello. L'handler verifica il **pin** del modello (un nome diverso → `400`), autentica e modella la risposta; l'autorizzazione e la logica transazionale vivono nello strato `kigumi-db`. Se il modello non è servito (modulo non installato) → `404`.
 
 | Route | Metodo | Modello richiesto | Risultato JSON | Status |
 |---|---|---|---|---|
@@ -292,7 +292,7 @@ Dettagli:
 
 ## Contratto-UI
 
-`GET /api/:name/view` restituisce il **contratto-UI** del modello: un JSON agnostico consumabile da qualunque frontend, prodotto da `to_ui_contract` in `crates/meshble-schema/src/lib.rs`. È la stessa fonte di verità del DDL e dell'OpenAPI, proiettata per il rendering del form e della tabella. Un nome di modello sconosciuto → `404 unknown model: <name>`.
+`GET /api/:name/view` restituisce il **contratto-UI** del modello: un JSON agnostico consumabile da qualunque frontend, prodotto da `to_ui_contract` in `crates/kigumi-schema/src/lib.rs`. È la stessa fonte di verità del DDL e dell'OpenAPI, proiettata per il rendering del form e della tabella. Un nome di modello sconosciuto → `404 unknown model: <name>`.
 
 Forma generale:
 
@@ -388,7 +388,7 @@ Il layout del form dichiarato dal modello (`view_for`), oppure `null` quando il 
 
 ## Documento OpenAPI
 
-`GET /openapi.json` restituisce un documento **OpenAPI 3.1.0** generato dal catalogo dei modelli (`openapi` in `crates/meshble-schema/src/openapi.rs`). È pretty-printed, con `info.title = "Meshble API"` e `info.version = "0.1.0"`. È pensato per generare SDK tipizzati (TS/Python/Go) con tooling standard (openapi-generator), senza client scritti a mano.
+`GET /openapi.json` restituisce un documento **OpenAPI 3.1.0** generato dal catalogo dei modelli (`openapi` in `crates/kigumi-schema/src/openapi.rs`). È pretty-printed, con `info.title = "Kigumi API"` e `info.version = "0.1.0"`. È pensato per generare SDK tipizzati (TS/Python/Go) con tooling standard (openapi-generator), senza client scritti a mano.
 
 Per ogni modello emette:
 
@@ -458,11 +458,11 @@ curl -s http://127.0.0.1:8099/ready    # {"status":"ready"} oppure 503
 
 ## Riferimenti
 
-- Router e handler, envelope, status code, `write_error`: `crates/meshble-server/src/lib.rs`
-- Contratto-UI e OpenAPI: `crates/meshble-schema/src/lib.rs`, `crates/meshble-schema/src/openapi.rs`
-- Emissione/verifica dei token: `crates/meshble-auth/src/lib.rs`
-- AST di dominio (filtri, `invisible_when`/`readonly_when`): `crates/meshble-core/src/domain.rs`
-- Vista del form (gruppi e pagine): `crates/meshble-core/src/view.rs`
+- Router e handler, envelope, status code, `write_error`: `crates/kigumi-server/src/lib.rs`
+- Contratto-UI e OpenAPI: `crates/kigumi-schema/src/lib.rs`, `crates/kigumi-schema/src/openapi.rs`
+- Emissione/verifica dei token: `crates/kigumi-auth/src/lib.rs`
+- AST di dominio (filtri, `invisible_when`/`readonly_when`): `crates/kigumi-core/src/domain.rs`
+- Vista del form (gruppi e pagine): `crates/kigumi-core/src/view.rs`
 - Client TypeScript della stessa API: `web/src/api.ts`
 
 Vedi anche [moduli.md](moduli.md) e [moduli-custom.md](moduli-custom.md) per come i modelli, le azioni, i report, le viste e i wizard vengono dichiarati e registrati a compile time.

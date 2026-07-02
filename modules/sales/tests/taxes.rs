@@ -2,16 +2,16 @@
 //! (not hand-typed) by `apply_taxes`, and the existing line/order compute cascade then rolls it into
 //! price_tax / amount_tax / amount_total. Driven by a plain sales.user. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
     let _ = (
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
-        &meshble_mod_account::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
+        &kigumi_mod_account::MANIFEST,
     );
 }
 
@@ -63,7 +63,7 @@ async fn apply_taxes_derives_the_rate_from_account_tax() {
 
     // Derive the rate from account.tax, as a plain sales.user (gates on order write).
     let seller = Ctx::new(1, vec!["sales.user".to_string()]);
-    let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
+    let (acls, rules) = (kigumi_mod_sales::ACLS, kigumi_mod_sales::RECORD_RULES);
     let n = db.run_service(&order, &seller, acls, rules, oid, "apply_taxes", serde_json::Map::new()).await.unwrap()["taxed"].as_u64().unwrap();
     assert_eq!(n, 1, "one line processed");
 

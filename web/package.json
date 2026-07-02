@@ -1,9 +1,9 @@
 {
-  "name": "meshble-web",
+  "name": "kigumi-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Meshble admin UI — navigable design-system mockups (Linear / Stripe / Notion)",
+  "description": "Kigumi admin UI — navigable design-system mockups (Linear / Stripe / Notion)",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

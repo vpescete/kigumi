@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 // Plain SPA. No backend dependency — the mockups run on in-memory data so the three design systems
 // can be navigated and compared without the Rust server running.
 // In dev the React app and the Rust API are separate processes; proxy the API paths to the running
-// `meshble serve` (default bind 127.0.0.1:8099) so the browser stays same-origin (no CORS needed).
+// `kigumi serve` (default bind 127.0.0.1:8099) so the browser stays same-origin (no CORS needed).
 export default defineConfig({
   plugins: [react()],
   server: {

@@ -1,16 +1,16 @@
 //! Lot/serial tracking: stock is held per (product, location, lot); on-hand sums across lots. A serial
 //! is exactly one unit and must carry its serial number. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
     let _ = (
-        &meshble_mod_stock::MANIFEST,
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
+        &kigumi_mod_stock::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
     );
 }
 

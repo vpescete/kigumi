@@ -18,7 +18,7 @@
 **Problemi**: lockstep serie↔modulo (re-release forzata ad ogni major), depends senza
 versione (nessuna garanzia di compatibilità), migrazioni come script imperativi non tipizzati.
 
-## 2. Il modello Meshble
+## 2. Il modello Kigumi
 
 ### 2.1 Due piani distinti: catalogo (compile time) vs attivazione (runtime)
 
@@ -38,7 +38,7 @@ compile time. È il meglio dei due mondi.
 ### 2.2 Versione del framework
 
 - **SemVer puro**, Cargo-native. Oggi `0.1.0` (workspace `Cargo.toml`). Esposta come
-  `meshble_core::FRAMEWORK_VERSION`.
+  `kigumi_core::FRAMEWORK_VERSION`.
 - Pre-1.0: minor = possibili breaking. Dopo 1.0: major = breaking, minor = additivo, patch = fix.
 - **Stabilità community**: a 1.0 si dichiara un contratto di stabilità del metamodello e delle
   API pubbliche; branch **LTS** per major con supporto pluriennale (analogo alle serie Odoo,
@@ -46,7 +46,7 @@ compile time. È il meglio dei due mondi.
 
 ### 2.3 Versione e manifest del modulo
 
-Ogni modulo dichiara (`ModuleManifest` in `meshble-core`, oggi usato da `modules/sales`):
+Ogni modulo dichiara (`ModuleManifest` in `kigumi-core`, oggi usato da `modules/sales`):
 
 ```rust
 pub static MANIFEST: ModuleManifest = ModuleManifest {
@@ -75,7 +75,7 @@ Differenze con Odoo, tutte verificabili:
 
 ## 3. Confronto
 
-| Aspetto | Odoo 19 | Meshble |
+| Aspetto | Odoo 19 | Kigumi |
 |---|---|---|
 | Versione framework | serie `19.0` | SemVer (`0.1.0`), LTS a 1.0 |
 | Versione modulo | lockstep `19.0.x.y.z` | SemVer indipendente + range di compat |

@@ -3,14 +3,14 @@
 //! cap so a permanently-broken endpoint never retries forever. The HTTP transport is stubbed by a closure
 //! (the real one lives in the CLI). Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::{Db, WebhookDelivery};
+use kigumi::prelude::*;
+use kigumi_db::{Db, WebhookDelivery};
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 fn link() {
-    let _ = (&meshble_mod_sales::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_sales::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 #[tokio::test]

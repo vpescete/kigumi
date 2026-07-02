@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Meshble — reference renderer</title>
+<title>Kigumi — reference renderer</title>
 <style>
   :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e6e9ef; --muted:#8a93a6; --accent:#5b9dff; }
   * { box-sizing:border-box; }
@@ -32,7 +32,7 @@
 </head>
 <body>
 <header>
-  <h1>Meshble <span>· reference renderer</span></h1>
+  <h1>Kigumi <span>· reference renderer</span></h1>
   <select id="model"></select>
   <input id="login" placeholder="login" style="width:100px" />
   <input id="password" type="password" placeholder="password" style="width:110px" />
@@ -59,9 +59,9 @@ const status = (m, isErr) => { const el = $("#status"); el.textContent = m || ""
 
 // Token: ?token=... (deep link), else the input, persisted in localStorage.
 const urlTok = new URLSearchParams(location.search).get("token");
-if (urlTok) localStorage.setItem("meshble_token", urlTok);
-$("#token").value = localStorage.getItem("meshble_token") || "";
-$("#token").addEventListener("change", () => localStorage.setItem("meshble_token", $("#token").value));
+if (urlTok) localStorage.setItem("kigumi_token", urlTok);
+$("#token").value = localStorage.getItem("kigumi_token") || "";
+$("#token").addEventListener("change", () => localStorage.setItem("kigumi_token", $("#token").value));
 
 const headers = () => {
   const h = { "content-type": "application/json" };
@@ -70,13 +70,13 @@ const headers = () => {
   return h;
 };
 async function tryRefresh() {
-  const refresh = localStorage.getItem("meshble_refresh");
+  const refresh = localStorage.getItem("kigumi_refresh");
   if (!refresh) return false;
   const res = await fetch("/auth/refresh", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ refresh_token: refresh }) });
   if (!res.ok) return false;
   const t = await res.json();
-  localStorage.setItem("meshble_token", t.access_token);
-  localStorage.setItem("meshble_refresh", t.refresh_token);
+  localStorage.setItem("kigumi_token", t.access_token);
+  localStorage.setItem("kigumi_refresh", t.refresh_token);
   $("#token").value = t.access_token;
   return true;
 }
@@ -93,16 +93,16 @@ async function login() {
     const res = await fetch("/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ login: $("#login").value.trim(), password: $("#password").value }) });
     if (!res.ok) throw new Error("login failed");
     const t = await res.json();
-    localStorage.setItem("meshble_token", t.access_token);
-    localStorage.setItem("meshble_refresh", t.refresh_token);
+    localStorage.setItem("kigumi_token", t.access_token);
+    localStorage.setItem("kigumi_refresh", t.refresh_token);
     $("#token").value = t.access_token; $("#password").value = "";
     status("Logged in."); await init();
   } catch (e) { status("Login failed.", true); }
 }
 async function logout() {
-  const refresh = localStorage.getItem("meshble_refresh");
+  const refresh = localStorage.getItem("kigumi_refresh");
   if (refresh) await fetch("/auth/logout", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ refresh_token: refresh }) }).catch(() => {});
-  localStorage.removeItem("meshble_token"); localStorage.removeItem("meshble_refresh");
+  localStorage.removeItem("kigumi_token"); localStorage.removeItem("kigumi_refresh");
   $("#token").value = ""; $("#list").innerHTML = '<span class="muted">Logged out.</span>'; status("Logged out.");
 }
 

@@ -2,13 +2,13 @@
 //! account, an income account and a sale journal, round-trip them, and confirm the ACL reserves
 //! account creation to account.manager. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 /// Link the module crates so their inventory registrations are present (account depends on base + mail).
 fn link() {
-    let _ = (&meshble_mod_account::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_account::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 #[tokio::test]
@@ -52,7 +52,7 @@ async fn chart_and_journals_round_trip_and_acl() {
     // ACL: account.user (non-manager) cannot create accounts — that is reserved to account.manager.
     let clerk = Ctx::new(1, vec!["account.user".to_string()]);
     let denied = db
-        .insert_secured(&account, &clerk, meshble_mod_account::ACLS, &[], json!({ "code": "999", "name": "X", "account_type": "expense", "company_id": comp }).as_object().unwrap())
+        .insert_secured(&account, &clerk, kigumi_mod_account::ACLS, &[], json!({ "code": "999", "name": "X", "account_type": "expense", "company_id": comp }).as_object().unwrap())
         .await;
     assert!(denied.is_err(), "account.user cannot create accounts (manager-only)");
 

@@ -2,7 +2,7 @@
 
 > Design doc (decisioni fissate, prima del codice). Definisce i *contract* e le scelte per tre temi
 > operativi che Odoo risolve ma con limiti. Indurito con una design review avversariale (29 findings,
-> 5 blocker) — le decisioni qui riflettono i fix. Tutto si appoggia su pezzi che Meshble ha già:
+> 5 blocker) — le decisioni qui riflettono i fix. Tutto si appoggia su pezzi che Kigumi ha già:
 > versioning SemVer di framework e moduli, migrazioni versionate atomiche, metamodel ispezionabile,
 > domini tipizzati, auth JWT, persistenza sqlx/Postgres.
 
@@ -24,14 +24,14 @@ Zip monolitico `dump.sql` + `filestore/` + `manifest.json` minimale, master pass
 artefatto enorme e **accoppiato**, nessun incrementale, restore tutto-o-niente, **nessuna verifica di
 compatibilità** (un dump di versione diversa rompe in silenzio).
 
-### Design Meshble
+### Design Kigumi
 Separare *dove vivono i binari* da *cos'è il backup*.
 
 #### 1.1 Blob store dietro un trait (streaming, hash verificato)
 I binari (allegati) vivono dietro un'astrazione intercambiabile, content-addressed.
 
 ```rust
-// crates/meshble-storage
+// crates/kigumi-storage
 #[async_trait]
 pub trait BlobStore: Send + Sync {
     /// Streams `src` in, computing sha256 as it goes; MUST reject if it != `sha256` (the
@@ -52,12 +52,12 @@ pub trait BlobStore: Send + Sync {
 
 Modello allegato (referenzia per hash, non per percorso):
 ```
-meshble_attachment(id, name, mime, size_bytes, sha256, store, created_at, res_model, res_id)
+kigumi_attachment(id, name, mime, size_bytes, sha256, store, created_at, res_model, res_id)
 ```
 Blob immutabili e deduplicati ⇒ nessuno stato "a metà".
 
 #### 1.2 Artefatto di snapshot (manifest-driven)
-`meshble db dump` produce un tar:
+`kigumi db dump` produce un tar:
 ```
 manifest.json     # metadati + verifica compatibilità + firma
 db.dump           # pg_dump -Fc (custom format)
@@ -66,9 +66,9 @@ blobs/            # (solo --full) blob content-addressed referenziati
 ```jsonc
 {
   "format": 1,
-  "meshble":  { "framework_version": "0.1.0" },
+  "kigumi":  { "framework_version": "0.1.0" },
   "engine":   { "pg_server_version": "16.3", "pg_dump_version": "16.3", "archive_format": "custom" },
-  "instance": { "name": "acme-prod", "db": "meshble_prod", "base_url": "https://erp.acme.com",
+  "instance": { "name": "acme-prod", "db": "kigumi_prod", "base_url": "https://erp.acme.com",
                 "created_at": "2026-06-16T12:00:00Z" },
   "modules":  [ { "name": "base", "version": "1.0.0" }, { "name": "sales", "version": "0.3.1" } ],
   "migration_head": "0007_add_sale_discount",
@@ -89,17 +89,17 @@ Più ricco di Odoo: riusa versioni moduli + head migrazioni + versione engine �
 
 #### 1.3 CLI
 ```
-meshble db dump    [--db-only | --full] [--encrypt] [-o snapshot.tar]
-meshble db restore <snapshot.tar> [--into <db>] [--migrate] [--production-clone] [--force-clean]
-meshble db verify  [<db>]            # integrità referenziale DB↔blob (vedi §1.5)
-meshble blobs gc                     # vedi §1.6
+kigumi db dump    [--db-only | --full] [--encrypt] [-o snapshot.tar]
+kigumi db restore <snapshot.tar> [--into <db>] [--migrate] [--production-clone] [--force-clean]
+kigumi db verify  [<db>]            # integrità referenziale DB↔blob (vedi §1.5)
+kigumi blobs gc                     # vedi §1.6
 ```
 
 #### 1.4 Restore — macchina a stati fail-closed
 Restore è multi-stadio e **non** idempotente per natura (pg_restore, copia blob, migrazioni,
 neutralize): lo rendiamo una macchina a stati tracciata.
 
-1. **Journal**: scrive subito una riga `meshble_restore_journal(state='in_progress', …)`. Finché
+1. **Journal**: scrive subito una riga `kigumi_restore_journal(state='in_progress', …)`. Finché
    esiste, l'istanza **rifiuta di servire** ed è trattata come **neutralizzata** (fail-closed).
 2. **Target**: `--into` di default ripristina in un **DB temporaneo e fa swap atomico** (rename) a
    fine successo → niente stato lacerato su crash; su DB esistente non-vuoto serve `--force-clean`
@@ -118,9 +118,9 @@ al riavvio, ri-eseguibile.
 
 #### 1.5 Integrità referenziale DB↔blob
 Il fast-path `--db-only` può lasciare allegati che puntano a blob assenti. Dopo ogni restore (e on
-demand con `meshble db verify`): enumera `SELECT DISTINCT store, sha256 FROM meshble_attachment`,
+demand con `kigumi db verify`): enumera `SELECT DISTINCT store, sha256 FROM kigumi_attachment`,
 chiama `exists()` per ciascuno, e o **fallisce** elencando gli hash mancanti, o li registra in
-`meshble_missing_blob` degradando con grazia. `--db-only` **rifiuta** se mancano blob, salvo
+`kigumi_missing_blob` degradando con grazia. `--db-only` **rifiuta** se mancano blob, salvo
 `--allow-missing-blobs` o uno store condiviso raggiungibile dichiarato.
 
 #### 1.6 GC dei blob orfani — safe sotto concorrenza
@@ -133,7 +133,7 @@ completo dei DB che lo condividono (vedi §1.8).
 #### 1.7 Autenticità e autorizzazione
 - I checksum rilevano corruzione, non manomissione → il **manifest è firmato** (chiave dal secret
   manager); il restore verifica la firma o dichiara esplicitamente la sorgente come fidata.
-- L'**admin token** (`MESHBLE_ADMIN_TOKEN`) è **capability-scoped**: `dump` (read) ≠
+- L'**admin token** (`KIGUMI_ADMIN_TOKEN`) è **capability-scoped**: `dump` (read) ≠
   `restore` (distruttivo, esegue SQL d'archivio) ≠ `gc`. Ogni dump/restore emette un **evento di
   audit** (chi, quando, hash del manifest).
 
@@ -156,20 +156,20 @@ Dedup · fast-path DB-only · restore incrementale e *resumable* · restore **ve
 `odoo.conf` (INI) con **segreti in chiaro**, precedenze ambigue, **nessuna validazione**. Inoltre Odoo
 mescola config di boot e impostazioni runtime (`ir.config_parameter` nel DB) senza un confine netto.
 
-### Design Meshble
+### Design Kigumi
 
 #### 2.1 Due piani distinti: boot-time vs runtime
 - **Boot-time** (file/env, letti una volta all'avvio, immutabili a caldo): bind, workers, pool,
-  connessione DB, JWT secret, storage backend, log. Vivono in `meshble.toml` + env.
+  connessione DB, JWT secret, storage backend, log. Vivono in `kigumi.toml` + env.
 - **Runtime** (nel DB, mutabili senza restart, **autorità unica** = DB): `base_url`, `banner`,
   `mode`, `neutralized`, feature flag, impostazioni dei moduli. È l'equivalente tipizzato di
-  `ir.config_parameter`: tabella `meshble_setting(key, value, type)` + API tipizzata.
+  `ir.config_parameter`: tabella `kigumi_setting(key, value, type)` + API tipizzata.
 
 Questo elimina il conflitto "stessa cosa in due posti": una impostazione runtime cambiata via API non
 viene sovrascritta da un TOML stantio al riavvio.
 
 #### 2.2 Sorgenti e precedenza (boot-time)
-`default < meshble.toml < env < flag CLI` (crate `figment`, deserializzato in struct `serde` `Config`),
+`default < kigumi.toml < env < flag CLI` (crate `figment`, deserializzato in struct `serde` `Config`),
 validazione all'avvio (fail-fast). **`config check` è l'autorità**: fa anche i controlli cross-field e
 di presenza segreti che un JSON Schema non può esprimere (lo schema generato è solo sintattico).
 
@@ -194,7 +194,7 @@ connect_timeout = "5s"
 
 [storage]
 backend = "fs"              # fs | s3
-path = "/var/lib/meshble/blobs"
+path = "/var/lib/kigumi/blobs"
 
 [auth]
 access_ttl = 900
@@ -222,14 +222,14 @@ Sezioni **core** strict: un typo (`[serever]`, `bnid`) → l'istanza non parte. 
 load → un modulo può avere le sue impostazioni senza rompere il boot.
 
 #### 2.5 Segreti → solo da env / secret manager + rotazione
-`DATABASE_URL`, `MESHBLE_JWT_SECRET` (+ `MESHBLE_JWT_SECRET_OLD` accettati in verifica per la
-**rotazione** kid-keyed senza logout di massa), `MESHBLE_SMTP_PASSWORD`, chiavi S3,
-`MESHBLE_ADMIN_TOKEN`. Presenza verificata all'avvio. `config print` redige **a livello di campo**
+`DATABASE_URL`, `KIGUMI_JWT_SECRET` (+ `KIGUMI_JWT_SECRET_OLD` accettati in verifica per la
+**rotazione** kid-keyed senza logout di massa), `KIGUMI_SMTP_PASSWORD`, chiavi S3,
+`KIGUMI_ADMIN_TOKEN`. Presenza verificata all'avvio. `config print` redige **a livello di campo**
 sulla `Config` tipizzata (di `DATABASE_URL` mostra host/db/user, **redige solo la password**) → un log
 di supporto non perde il segreto né nasconde il dbname.
 
 #### 2.6 Deployment
-Un `meshble.toml` **senza segreti** è l'artefatto in **tutti** gli ambienti (anche container); env per
+Un `kigumi.toml` **senza segreti** è l'artefatto in **tutti** gli ambienti (anche container); env per
 i segreti e per pochi override. (Niente "env-only in prod": lascerebbe `bind`/`modules.load` senza casa
 in Kubernetes.)
 
@@ -247,11 +247,11 @@ rotazione · identità di connessione non ambigua · `config check` autoritativo
 `neutralize.sql` per modulo al restore. Limite di fondo: **muta i dati** — se il runtime non viene
 neutralizzato, o si reimporta config, l'istanza torna a comunicare. Ed è **skippabile**.
 
-### Design Meshble — gate runtime imposto + scrub dichiarativo + banner, fail-closed
+### Design Kigumi — gate runtime imposto + scrub dichiarativo + banner, fail-closed
 
 #### 3.1 Stato d'istanza e segnale "neutralizzato" robusto
 ```
-meshble_instance(id=1, name, base_url, mode, neutralized bool, banner,
+kigumi_instance(id=1, name, base_url, mode, neutralized bool, banner,
                  restored_from, restored_at, updated_at)
 ```
 `neutralized` **effettivo** = OR di più segnali, così una `UPDATE … SET neutralized=false` via psql da
@@ -259,8 +259,8 @@ sola **non basta** a riarmare l'outbound:
 ```
 effective_neutralized =
     db.neutralized
- OR env MESHBLE_NEUTRALIZED=1
- OR file sentinella /var/lib/meshble/NEUTRALIZED
+ OR env KIGUMI_NEUTRALIZED=1
+ OR file sentinella /var/lib/kigumi/NEUTRALIZED
  OR (base_url corrente ≠ instance.base_url di provenienza)   // un clone si tradisce da solo
 ```
 
@@ -268,7 +268,7 @@ effective_neutralized =
 Il punto debole di Odoo ("ricordati di chiamarlo ovunque") si elimina mettendo il gate **nell'unico
 canale di I/O in uscita** esposto ai moduli:
 ```rust
-// I client grezzi (reqwest, SMTP) sono PRIVATI a meshble-core. I moduli vedono solo questi:
+// I client grezzi (reqwest, SMTP) sono PRIVATI a kigumi-core. I moduli vedono solo questi:
 pub struct GatedHttp   { gate: Arc<OutboundGate>, /* raw client privato */ }
 pub struct GatedMailer { gate: Arc<OutboundGate>, /* raw smtp privato  */ }
 // Ogni invio consulta il gate; un modulo non ha modo di ottenere il client grezzo.
@@ -280,7 +280,7 @@ lint che vieta `reqwest`/SMTP diretti nei crate dei moduli.)
 #### 3.3 Boot fail-closed (il momento più pericoloso)
 Il primo boot di un clone pieno di lavoro arretrato (outbox con 5000 mail, cron scaduti) è il rischio
 massimo. Contratto di avvio:
-1. lo stato `meshble_instance` è letto **sincronamente** prima di costruire **qualsiasi** sender,
+1. lo stato `kigumi_instance` è letto **sincronamente** prima di costruire **qualsiasi** sender,
    scheduler, worker di outbox/retry;
 2. riga assente o illeggibile ⇒ **neutralized=true** (Block/Sink);
 3. scheduler/outbox prendono il gate come **dipendenza obbligatoria del costruttore** → non possono
@@ -316,14 +316,14 @@ un contract: retention limitata, redazione opzionale di corpo/destinatari, acces
 modalità **"drop entirely"** per deployment sensibili. Neutralized ≠ "i dati spariscono".
 
 #### 3.7 Restore = neutralize per default + provenienza
-- `meshble db restore` **neutralizza per default** e registra `restored_from`/`restored_at`;
+- `kigumi db restore` **neutralizza per default** e registra `restored_from`/`restored_at`;
 - live solo con `--production-clone` + admin token **e** `base_url` coincidente col manifest;
 - `base_url` diverso ⇒ neutralize forzato (un clone su altro host non può fingersi prod).
 
 #### 3.8 Banner e un-neutralize
 `effective_neutralized` + `banner` esposti nell'UI-contract agnostico (o `/api/instance`) → il frontend
 mostra la fascia. La **promozione** di una copia DR a prod è un bisogno reale ma lo scrub è
-irreversibile: esiste un comando esplicito **`meshble instance unneutralize`** (admin token) che (a)
+irreversibile: esiste un comando esplicito **`kigumi instance unneutralize`** (admin token) che (a)
 richiede di **re-fornire i segreti** cancellati / riconfigurare i provider, (b) emette audit, (c) è
 l'**unico writer sancito** di `neutralized=false`.
 
@@ -340,20 +340,20 @@ restore→migrazione→scrub corretto · un-neutralize controllato.
 |----|------|-----------|
 | A1 | blob store default | `FsBlobStore` content-addressed (pluggable S3); `DbBlobStore` fuori dalla v1 |
 | A2 | trait blob | **streaming** (AsyncRead) + `put` verifica `sha256(bytes)==hash` |
-| A3 | identità admin | `MESHBLE_ADMIN_TOKEN` da env, **capability-scoped** (dump/restore/gc) + audit |
+| A3 | identità admin | `KIGUMI_ADMIN_TOKEN` da env, **capability-scoped** (dump/restore/gc) + audit |
 | A4 | restore target | temp-db + **swap atomico** di default; DB esistente solo con `--force-clean` |
 | A5 | restore atomicità | **journal** fail-closed (istanza neutralizzata finché incompleto); blob resumable |
 | A6 | migrazioni su restore | **opt-in `--migrate`**; default resta all'head del dump, rifiuta mismatch |
-| A7 | integrità blob | pass referenziale post-restore + `meshble db verify`; `--db-only` rifiuta blob mancanti |
+| A7 | integrità blob | pass referenziale post-restore + `kigumi db verify`; `--db-only` rifiuta blob mancanti |
 | A8 | GC | mark-sweep con grace period **o** maintenance mode; multi-DB esige tutti i DB |
 | A9 | sicurezza artefatto | cifratura envelope opzionale (`age`) + **firma** del manifest |
 | A10 | multi-tenant | default namespace per-tenant; dedup cross-DB solo con reference table esplicita |
-| C1 | formato config | `meshble.toml` + env + `figment`, validata; `config check` autoritativo |
-| C2 | boot vs runtime | boot=file/env (immutabile); runtime=DB (`meshble_setting`, autorità unica) |
+| C1 | formato config | `kigumi.toml` + env + `figment`, validata; `config check` autoritativo |
+| C2 | boot vs runtime | boot=file/env (immutabile); runtime=DB (`kigumi_setting`, autorità unica) |
 | C3 | connessione | `DATABASE_URL` unica identità; `[database]` solo tuning; conflitto ⇒ fail-fast |
 | C4 | chiavi ignote | core strict; `[modules.<name>]` aperto, validato dal modulo |
 | C5 | segreti | solo env; rotazione JWT kid-keyed (primario + vecchi accettati); redazione per-campo |
-| C6 | deployment | `meshble.toml` senza segreti in tutti gli ambienti + env per segreti/override |
+| C6 | deployment | `kigumi.toml` senza segreti in tutti gli ambienti + env per segreti/override |
 | N1 | gate | imposto al **transport** (GatedHttp/GatedMailer), client grezzi privati |
 | N2 | boot | fail-closed: stato letto prima dei worker; assente ⇒ neutralized; gate obbligatorio |
 | N3 | segnale | `effective = OR(db, env, sentinella, base_url-mismatch)` |

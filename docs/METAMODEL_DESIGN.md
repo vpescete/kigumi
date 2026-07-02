@@ -1,4 +1,4 @@
-# Meshble — design del metamodello (Rust)
+# Kigumi — design del metamodello (Rust)
 
 > Rifondazione della base di Odoo in Rust. Obiettivo: stesso valore (metamodello
 > dichiarativo + estendibilità per composizione), senza i difetti strutturali
@@ -31,7 +31,7 @@ tipizzato → **errore di compilazione**, non di produzione.
 ## 1. Perché "agnostico" cambia l'architettura
 
 Odoo accoppia server e client sulla semantica (il web client OWL conosce modelli, domini,
-onchange). Questo blocca client alternativi. Meshble inverte:
+onchange). Questo blocca client alternativi. Kigumi inverte:
 
 - **Il core è headless.** Non sa nulla di HTML/React/OWL. Espone **solo** API tipizzate +
   un **contratto UI dichiarativo in JSON** (lista campi, widget suggerito, layout, regole di
@@ -43,7 +43,7 @@ onchange). Questo blocca client alternativi. Meshble inverte:
   OpenAPI come con qualsiasi API moderna.
 
 ```
-┌── meshble-core (Rust, headless) ──────────────────────────┐
+┌── kigumi-core (Rust, headless) ──────────────────────────┐
 │  Registry (Arc, condiviso, no GIL)                        │
 │  ORM set-based · domini AST tipizzati · security engine   │
 └───┬───────────────┬────────────────┬─────────────────────┘
@@ -64,7 +64,7 @@ nella sua lingua. Nessuno deve imparare un framework proprietario per essere pro
 Sorgente di verità. Esempio `sale.order` (forma target):
 
 ```rust
-use meshble::prelude::*;
+use kigumi::prelude::*;
 
 #[model(name = "sale.order", table = "sale_order")]
 pub struct SaleOrder {
@@ -114,7 +114,7 @@ impl SaleOrder {
 `#[model]` genera, a compile time:
 1. La struct concreta + un `impl Model for SaleOrder` con un **descrittore statico**
    (`ModelDescriptor`) ispezionabile: campi, tipi, relazioni, compute, dipendenze, azioni.
-   → l'opposto della classe runtime di Odoo: qui `meshble describe sale.order` stampa la
+   → l'opposto della classe runtime di Odoo: qui `kigumi describe sale.order` stampa la
    definizione *risolta*.
 2. Le funzioni di accesso tipizzate (`self.line_ids(ctx) -> RecordSet<SaleOrderLine>`).
 3. La registrazione nel `Registry` via `inventory` (raccolta a compile time, vedi §4).
@@ -221,7 +221,7 @@ Niente XML interpretato, niente OWL. Una **vista è un documento JSON** prodotto
 
 ---
 
-## 6. Mappa: difetto Odoo → soluzione Meshble
+## 6. Mappa: difetto Odoo → soluzione Kigumi
 
 | Difetto Odoo (file:riga) | Soluzione |
 |---|---|
@@ -241,16 +241,16 @@ Niente XML interpretato, niente OWL. Una **vista è un documento JSON** prodotto
 ## 7. Layout del workspace (cargo)
 
 ```
-meshble/
+kigumi/
 ├── Cargo.toml                 # workspace
 ├── crates/
-│   ├── meshble-core/          # Registry, ORM traits, Ctx, RecordSet, domini AST
-│   ├── meshble-macros/        # proc-macro: #[model], #[field], #[extend], #[action]
-│   ├── meshble-schema/        # ResolvedModel → DDL, OpenAPI, GraphQL, UI-contract
-│   ├── meshble-db/            # persistenza Postgres (sqlx): DDL + query parametrizzate dal Domain
-│   ├── meshble-auth/          # auth: verifica JWT HS256 (Bearer) → Ctx fidato
-│   ├── meshble-server/        # axum: serve OpenAPI spec, model list, contratti-UI, CRUD dal catalogo
-│   └── meshble/               # facade: prelude, re-export
+│   ├── kigumi-core/          # Registry, ORM traits, Ctx, RecordSet, domini AST
+│   ├── kigumi-macros/        # proc-macro: #[model], #[field], #[extend], #[action]
+│   ├── kigumi-schema/        # ResolvedModel → DDL, OpenAPI, GraphQL, UI-contract
+│   ├── kigumi-db/            # persistenza Postgres (sqlx): DDL + query parametrizzate dal Domain
+│   ├── kigumi-auth/          # auth: verifica JWT HS256 (Bearer) → Ctx fidato
+│   ├── kigumi-server/        # axum: serve OpenAPI spec, model list, contratti-UI, CRUD dal catalogo
+│   └── kigumi/               # facade: prelude, re-export
 ├── modules/
 │   └── sales/                 # primo modulo applicativo (sale.order) — dogfooding
 └── docs/
@@ -267,7 +267,7 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
 1. **Walking skeleton** (questo commit): `Model` trait + `ResolvedModel` descrittore scritti
    *a mano* (no macro ancora), un modello `sale.order`, generazione del DDL e del UI-contract,
    un endpoint REST read. Prova end-to-end che il metamodello → 3 proiezioni regge. *Compila.*
-2. ~~**Proc-macro `#[model]`**: sostituisce la definizione a mano.~~ ✅ Fatta — `meshble-macros`
+2. ~~**Proc-macro `#[model]`**: sostituisce la definizione a mano.~~ ✅ Fatta — `kigumi-macros`
    genera `ModelDescriptor` + `impl Model` dal DSL della struct; output identico alla fase 1.
 3. **`#[extend]` + risoluzione composizione**. ✅ Fatto: `#[extend]` + auto-registrazione via
    `inventory` + `resolve_registered()` (catalogo modelli) **e** `resolve_module_set()` /
@@ -280,22 +280,22 @@ Stack scelto (tutti mainstream → community-friendly): **tokio** (async), **axu
    `invisible_when`/`readonly_when` sono nel contratto-UI come **AST JSON portabile**
    (`Domain::to_json`), validate contro il modello — stesso domain che il server compila in SQL.
 5. **OpenAPI/GraphQL + generazione SDK**. 🟡 In corso: proiezione **OpenAPI 3.1**
-   (`meshble_schema::openapi`) generata dal catalogo modelli (schemas + paths) → spec consumabile
-   da chiunque, SDK via `openapi-generator`. Server headless `meshble-server` (axum):
+   (`kigumi_schema::openapi`) generata dal catalogo modelli (schemas + paths) → spec consumabile
+   da chiunque, SDK via `openapi-generator`. Server headless `kigumi-server` (axum):
    metadata (`/openapi.json`, `/api/models`, `/api/{m}/view`) **+ CRUD dati sicuro**
    (`GET/POST/PATCH/DELETE /api/{m}[/{id}]`): ogni operazione passa per ACL + record rules
-   (`*_secured` di `meshble-db`), input validato a confine (required/option/kind), errori
-   403/400/404/500-opaco. **Auth**: JWT HS256 (`meshble-auth`, crate pluggable) — `Authorization:
+   (`*_secured` di `kigumi-db`), input validato a confine (required/option/kind), errori
+   403/400/404/500-opaco. **Auth**: JWT HS256 (`kigumi-auth`, crate pluggable) — `Authorization:
    Bearer` verificato (firma + alg pinned + exp) → `Ctx` fidato; assente/invalido → 401 (prima
    del DB). **Lifecycle**: `/auth/login` (password **argon2**, login a tempo-costante),
    `/auth/refresh` (refresh token **stateful**: revoca+rotazione atomica, no double-spend),
    `/auth/logout` (revoca); access/refresh **tipizzati** (un refresh non vale come bearer).
    Indurito da audit (null-bypass, timing enumeration, race rotazione; auth-token boundary: 0). ⬅ resta **GraphQL**.
-6. **Persistenza reale (sqlx) + migrazioni generate**. ✅ Fatto: `meshble-db` (crate separato,
+6. **Persistenza reale (sqlx) + migrazioni generate**. ✅ Fatto: `kigumi-db` (crate separato,
    backend pluggable — il core resta headless) esegue il DDL generato e le query con `WHERE`
    compilato dal `Domain` e **parametrizzato** (anti-injection provato a runtime), con read
    **security-enforced** (ACL + record rules). **Migrazioni versionate** (`install_or_upgrade`,
-   tabelle `meshble_module`/`meshble_migration`): atomiche (transazione), serializzate
+   tabelle `kigumi_module`/`kigumi_migration`): atomiche (transazione), serializzate
    (`pg_advisory_xact_lock`), idempotenti, con check duplicati e reachability. Indurito da audit
    adversarial (leak errori, race, gap di versione).
 

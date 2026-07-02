@@ -1,4 +1,4 @@
-# Roadmap verso Meshble v1 (funzionante)
+# Roadmap verso Kigumi v1 (funzionante)
 
 > Piano per arrivare a una v1 *realmente usabile* da un team interno: auth completa, modelli base,
 > gestione utenti/gruppi, sicurezza come dato, un verticale business di prova (Sales), frontend sulla
@@ -17,15 +17,15 @@ Le decisioni che richiedono approvazione sono in fondo (D1–D10) e in memoria `
 **Obiettivo:** trasformare la libreria dogfooded in qualcosa che si avvia, migra, seeda e si opera con
 un comando — e rendere l'auth lifecycle davvero *server-enforced*. Solo wiring di pezzi esistenti →
 rischio minimo, target eseguibile continuo per le milestone successive.
-- `apps/meshble-cli` (clap): `serve` (Settings → Db::connect → migrate moduli → router_with_data),
+- `apps/kigumi-cli` (clap): `serve` (Settings → Db::connect → migrate moduli → router_with_data),
   `migrate`, `config check|print` (assorbe il bin attuale), `user create|set-password|grant`, `version`.
 - Bootstrap admin + seed idempotente promossi fuori da renderer-demo: schema auth, gruppi, admin da
-  `MESHBLE_ADMIN_PASSWORD` (fail-fast se assente, **mai** admin/admin hardcoded), `--demo-data` opzionale.
+  `KIGUMI_ADMIN_PASSWORD` (fail-fast se assente, **mai** admin/admin hardcoded), `--demo-data` opzionale.
 - Refresh endpoint → `claim_refresh` (rotazione jti) e logout → `revoke_refresh` (oggi persistiti ma
   inutilizzati → revoca reale, non lato-client). `GET /auth/me`. `/health` + `/ready`.
 - CORS configurabile (tower-http); proxy Vite in `web/` verso il server reale.
 
-**Exit:** `meshble migrate && meshble serve` parte su Postgres fresco, bootstrappa l'admin da env, e il
+**Exit:** `kigumi migrate && kigumi serve` parte su Postgres fresco, bootstrappa l'admin da env, e il
 flusso `login → /auth/me → refresh (vecchio jti rifiutato al riuso) → logout (token revocato) →
 /health/ready` è corretto. Renderer-demo ridotto a esempio sottile sulla CLI.
 
@@ -47,12 +47,12 @@ ORA le scelte strutturali costose-dopo (convenzione `company_id`, money decimale
 - `res.currency` (code/symbol/rounding/decimal_places/active/position); `res.partner` (is_company,
   parent_id self-ref, email/phone/address, currency_id, active); `res.company` (+ convenzione FK
   `company_id`, `Ctx.company_id`, record rule same-company globale; una company seedata).
-- `meshble_setting(key,value,type)` store runtime + API tipizzata (il DB è l'autorità, OPERATIONS §2.1);
-  `ir.sequence` (`meshble_sequence` + `next_value()` con advisory lock per-code, no_gap opt-in,
+- `kigumi_setting(key,value,type)` store runtime + API tipizzata (il DB è l'autorità, OPERATIONS §2.1);
+  `ir.sequence` (`kigumi_sequence` + `next_value()` con advisory lock per-code, no_gap opt-in,
   prefix/suffix/padding). `rust_decimal` → NUMERIC per i monetari.
 
 **Exit:** migrate fresco produce i tre modelli completi con una company; `next_value('SO')` concorrente
-no_gap è gapless; `meshble_setting` round-trippa valori tipizzati ed è autorità su TOML per i runtime;
+no_gap è gapless; `kigumi_setting` round-trippa valori tipizzati ed è autorità su TOML per i runtime;
 i monetari sono decimali esatti.
 
 ### M3 — Correttezza in scrittura: default, vincoli UNIQUE/CHECK, comandi x2many
@@ -101,14 +101,14 @@ CSV. Fondamento per team multi-ruolo e schermate admin. Dopo il verticale, così
   guardia contro la rimozione dell'ultimo admin).
 
 **Exit:** utenti/gruppi(ereditarietà)/ACL/rule sono righe CRUD-abili; un edit admin ha effetto entro una
-finestra via reload hook; la migrazione `meshble_user→res.users` ri-deriva identici i gruppi effettivi;
+finestra via reload hook; la migrazione `kigumi_user→res.users` ri-deriva identici i gruppi effettivi;
 il sistema rifiuta di togliere l'ultimo grant admin.
 
 ### M7 — Hardening identità: password lifecycle, reset, rate-limit/lockout, audit, API key, rotazione JWT, field-level write
 **Obiettivo:** portare l'auth a grado ERP interno.
 - Password policy + self-service `POST /auth/password` (revoca i refresh); reset admin (token monouso,
   scadenza, constant-time); rate limiting + lockout in Postgres (pre-argon2, enumeration-safe); audit
-  auth (`meshble_auth_audit`); API token/service account (`mshb_`-prefix, hashed, scope, revocabili);
+  auth (`kigumi_auth_audit`); API token/service account (`mshb_`-prefix, hashed, scope, revocabili);
   rotazione JWT (verifica su {current, old} via `jwt_secret_old`); **field-level WRITE security**
   (read-hiding differito, **D6**).
 
@@ -118,10 +118,10 @@ nella finestra; una scrittura non autorizzata di campo → 403.
 
 ### M8 — Storage + allegati + backup/restore/neutralize (durabilità operativa)
 **Obiettivo:** istanze sicure da operare e clonare.
-- `meshble-storage`: `BlobStore` + `FsBlobStore` streaming content-addressed (hash-verified, sharded,
+- `kigumi-storage`: `BlobStore` + `FsBlobStore` streaming content-addressed (hash-verified, sharded,
   dedup), backend dalla Config; S3 dietro feature flag (**D10**). `ir.attachment` via BlobStore (sha256,
   link res_model/res_id) attraverso CRUD sicuro; upload/download streaming.
-- `meshble db dump/restore/verify` + `blobs gc` (tar manifest+pg_dump+blobs, journal fail-closed,
+- `kigumi db dump/restore/verify` + `blobs gc` (tar manifest+pg_dump+blobs, journal fail-closed,
   temp-DB+swap con fallback in-place — **D8**, gate head-match, verify referenziale, GC mark-sweep);
   motore di neutralizzazione (default-ON al restore, dopo le migrazioni, blank dei segreti + mode=dev
   salvo `--production-clone`); envelope di cifratura `age` (**D10**).
@@ -147,7 +147,7 @@ rule — tutto sul server live, con E2E Playwright verde.
 
 ### M10 — Ship hardening: Docker, CI, coverage, docs
 **Obiettivo:** impacchettare, gateare e documentare la v1.
-- Dockerfile multi-stage (cargo-chef) + docker-compose (meshble + postgres:16 healthcheck + volumi,
+- Dockerfile multi-stage (cargo-chef) + docker-compose (kigumi + postgres:16 healthcheck + volumi,
   incl. volume blob); entrypoint `migrate && serve`; client postgres per dump/restore. GitHub Actions
   (fmt, clippy -D, build, test workspace con Postgres service, coverage `cargo-llvm-cov` con soglia
   ratchet — **D9**, docker-build). Uplift test su ops; README quickstart EN + `GETTING_STARTED.md` +
@@ -184,7 +184,7 @@ un nuovo dev fa clone → compose up → bootstrap admin → prima chiamata API 
 - **D4 → oggetti tipizzati** `{op,id,values}` per i comandi x2many.
 - **D5 → entrambi** (operatori suffisso default + JSON domain escape).
 - **D7 → TUTTO NEL CONTRACT SERVER** (scelta utente, ≠ raccomandazione). Implica: estendere
-  `meshble-schema` per emettere **list-view, menu (`ir.ui.menu`-like) e azioni (`ir.actions`-like)**
+  `kigumi-schema` per emettere **list-view, menu (`ir.ui.menu`-like) e azioni (`ir.actions`-like)**
   dai modelli/moduli Rust → fonte di verità unica. Lavoro aggiunto al layer schema (i moduli
   dichiarano menu/azioni/colonne), consumato in **M9**; il renderer FE non ha mappe per-modello.
 - **D6, D8, D9, D10** → si confermano alla rispettiva milestone (raccomandazione in memoria

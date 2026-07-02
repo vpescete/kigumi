@@ -1,5 +1,5 @@
 //! Account cross-record services — the invoicing / billing / payment / posting engine, relocated from
-//! meshble-db onto the framework's `register_service!` seam so the ERP becomes an optional layer (the core
+//! kigumi-db onto the framework's `register_service!` seam so the ERP becomes an optional layer (the core
 //! no longer names account.move / sale.order). The account module owns invoicing because it owns the GL;
 //! it registers services on the ORDER models (sale.order / purchase.order) resolved at runtime, so no
 //! cross-module crate dep.
@@ -15,7 +15,7 @@
 //! buckets over order lines) stay on the pool ServiceCtx hands out; only state the service itself writes
 //! in-tx (the move and its lines) must be read back through `cx.tx()`.
 
-use meshble::prelude::*; // ServiceCtx, ServiceInput, ServiceOutput, DbError, Domain, Ctx
+use kigumi::prelude::*; // ServiceCtx, ServiceInput, ServiceOutput, DbError, Domain, Ctx
 use rust_decimal::Decimal;
 use serde_json::json;
 use sqlx::Row;

@@ -110,7 +110,7 @@ export function Dashboard() {
       <div className="mb-5 flex items-center justify-between border-b border-border pb-3">
         <div className="flex items-center gap-2">
           <span className="msh-pulse h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />
-          <span className="t-mono text-[11px] text-muted">meshble · live · contract-driven</span>
+          <span className="t-mono text-[11px] text-muted">kigumi · live · contract-driven</span>
         </div>
         <div className="flex items-center gap-3">
           {syncedAt && <span className="t-mono text-[11px] text-muted">synced {syncedAt.toLocaleTimeString()}</span>}

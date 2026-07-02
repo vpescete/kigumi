@@ -2,16 +2,16 @@
 //! the partner's property_payment_term_id, and an order with NO fiscal position remaps taxes through the
 //! partner's property_account_position_id. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
     let _ = (
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
-        &meshble_mod_account::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
+        &kigumi_mod_account::MANIFEST,
     );
 }
 
@@ -72,7 +72,7 @@ async fn partner_accounting_defaults_flow_to_orders() {
     }).as_object().unwrap()).await.unwrap();
 
     let seller = Ctx::new(1, vec!["sales.user".to_string()]);
-    let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
+    let (acls, rules) = (kigumi_mod_sales::ACLS, kigumi_mod_sales::RECORD_RULES);
 
     // Order with NO explicit term and NO explicit fiscal position: both come from the partner.
     let oid = db.insert_secured(&order, &su, &[], &[], json!({ "name": "New", "partner_id": cust, "currency_id": cur }).as_object().unwrap()).await.unwrap();

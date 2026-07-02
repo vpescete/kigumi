@@ -2,7 +2,7 @@
 //! returns the untaxed subtotal plus one result per tax (base + amount). It is the SINGLE place tax math
 //! lives; the module's `apply_taxes` service resolves account.tax rows into specs, runs this, and
 //! materializes the results as `sale.order.line.tax` rows + a blended back-compat `tax_rate`. No DB, no
-//! I/O — unit-tested in isolation. (Relocated from meshble-db: tax math is ERP, owned by the sales module.)
+//! I/O — unit-tested in isolation. (Relocated from kigumi-db: tax math is ERP, owned by the sales module.)
 //!
 //! Rounding discipline: every per-tax amount is rounded to the order currency's decimal places HERE, so
 //! the line's stored computes (which sum the breakdown), the order totals, and the invoice GL all derive

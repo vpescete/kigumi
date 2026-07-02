@@ -3,13 +3,13 @@
 //! discount onto every line of the target order and the line/order compute cascade re-rolls the
 //! amounts — plus the boundary check that a percent outside [0, 100] is rejected. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 /// Link the module crates so their inventory registrations are present.
 fn link() {
-    let _ = (&meshble_mod_sales::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_sales::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 fn money(v: &serde_json::Value, field: &str) -> f64 {

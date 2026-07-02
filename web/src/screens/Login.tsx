@@ -32,7 +32,7 @@ export function Login() {
             M
           </div>
           <div className="leading-tight">
-            <div className="t-h2 text-text">Meshble</div>
+            <div className="t-h2 text-text">Kigumi</div>
             <div className="text-[11px] text-muted">Sign in to continue</div>
           </div>
         </div>
@@ -68,7 +68,7 @@ export function Login() {
             </Button>
           </form>
         </Card>
-        <p className="t-caption text-muted text-center mt-4">Meshble · contract-driven UI</p>
+        <p className="t-caption text-muted text-center mt-4">Kigumi · contract-driven UI</p>
       </div>
     </div>
   )

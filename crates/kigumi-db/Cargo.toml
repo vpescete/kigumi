@@ -1,0 +1,20 @@
+[package]
+name = "kigumi-db"
+description = "Postgres persistence: run generated DDL and execute domain-compiled parameterized queries"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kigumi-core = { workspace = true }
+kigumi-schema = { workspace = true }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "rust_decimal"] }
+serde_json = "1"
+semver = { workspace = true }
+rust_decimal = "1"
+# Battle-tested allowlist HTML sanitizer (strips scripts / handlers / javascript: URLs) for Html fields.
+ammonia = "4"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

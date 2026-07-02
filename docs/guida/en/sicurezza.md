@@ -1,10 +1,10 @@
 # Security model
 
-Meshble is headless and schema-driven: every data access passes through a single boundary — the `*_secured` methods of the [`meshble-db`](architettura.md) crate — where authentication produces a trusted identity (`Ctx`) and authorization is enforced in a single place, on every read and write. This page describes authentication (HS256 JWT tokens, revocation, secret rotation), the authorization layers (ACLs, record rules, multi-company scope, field-level groups, sudo / elevated effects), the domain AST, and input validation at the write boundary, with practical guidance for anyone writing a module. For the overview see [README.md](README.md), for the architecture [architettura.md](architettura.md), for the REST routes [api.md](api.md), for the configuration [configurazione.md](configurazione.md).
+Kigumi is headless and schema-driven: every data access passes through a single boundary — the `*_secured` methods of the [`kigumi-db`](architettura.md) crate — where authentication produces a trusted identity (`Ctx`) and authorization is enforced in a single place, on every read and write. This page describes authentication (HS256 JWT tokens, revocation, secret rotation), the authorization layers (ACLs, record rules, multi-company scope, field-level groups, sudo / elevated effects), the domain AST, and input validation at the write boundary, with practical guidance for anyone writing a module. For the overview see [README.md](README.md), for the architecture [architettura.md](architettura.md), for the REST routes [api.md](api.md), for the configuration [configurazione.md](configurazione.md).
 
 ## Authentication
 
-Authentication lives in the `meshble-auth` crate (`crates/meshble-auth/src/lib.rs`). Tokens are **HS256-signed JWTs** with a shared secret; cryptography is delegated to the `jsonwebtoken` crate, and passwords use `argon2`.
+Authentication lives in the `kigumi-auth` crate (`crates/kigumi-auth/src/lib.rs`). Tokens are **HS256-signed JWTs** with a shared secret; cryptography is delegated to the `jsonwebtoken` crate, and passwords use `argon2`.
 
 ### Typed tokens: access and refresh
 
@@ -15,14 +15,14 @@ There are two token types, distinguished by the `kind` claim:
 | **access** | `"access"` | `ACCESS_TTL` = `900` s (15 min) | `sub` (uid), `kind`, `groups`, `company`, `companies`, `exp` | Bearer for every data request: verified into a trusted `Ctx` |
 | **refresh** | `"refresh"` | `REFRESH_TTL` = `2_592_000` s (30 days) | `sub` (uid), `kind`, `jti`, `exp` | Proves identity to issue a new access token; never used as a bearer |
 
-The effective TTLs are server constants (`crates/meshble-server/src/lib.rs`):
+The effective TTLs are server constants (`crates/kigumi-server/src/lib.rs`):
 
 ```rust
 const ACCESS_TTL: u64 = 900; // 15 minutes
 const REFRESH_TTL: u64 = 2_592_000; // 30 days
 ```
 
-The `meshble.toml` file exposes an `[auth]` section with the same default values (`access_ttl = 900`, `refresh_ttl = 2592000`), and `meshble-config` defines the same defaults; in v1 token issuance uses the server constants directly (`issue_token_pair`), so these are the effective values at runtime.
+The `kigumi.toml` file exposes an `[auth]` section with the same default values (`access_ttl = 900`, `refresh_ttl = 2592000`), and `kigumi-config` defines the same defaults; in v1 token issuance uses the server constants directly (`issue_token_pair`), so these are the effective values at runtime.
 
 The separation between the two types is an explicit guarantee: the `kind` claim is verified on every decode (`decode_kind`), so **a refresh token can never be used as a bearer to access data**, and vice versa. This prevents a long-lived refresh token from acting as an all-powerful bearer.
 
@@ -48,7 +48,7 @@ The algorithm is pinned to `HS256` at verification time: this rejects tokens wit
 
 ### The trusted `Ctx` derived from the Bearer
 
-A data request presents an `Authorization: Bearer <token>` header. The server verifies it into a `Ctx` — the trusted identity that flows through the entire security engine (`authenticate` in `crates/meshble-server/src/lib.rs`):
+A data request presents an `Authorization: Bearer <token>` header. The server verifies it into a `Ctx` — the trusted identity that flows through the entire security engine (`authenticate` in `crates/kigumi-server/src/lib.rs`):
 
 ```rust
 /// Verifies the request's bearer token into a trusted `Ctx`, or a 401 response. This is real
@@ -64,7 +64,7 @@ fn authenticate(backend: &DataBackend, headers: &HeaderMap) -> Result<Ctx, Respo
 
 `verify_bearer` extracts the `Bearer ` prefix, verifies the token as **access** (`verify_access`), and builds the `Ctx`. Because the `groups` and the company scope travel signed inside the token, **a client cannot claim a group without a token signed by the server secret**: there's no extra round-trip to the database on every request.
 
-The `Ctx` (defined in `crates/meshble-core/src/security.rs`) carries:
+The `Ctx` (defined in `crates/kigumi-core/src/security.rs`) carries:
 
 ```rust
 pub struct Ctx {
@@ -93,7 +93,7 @@ Login **always** runs argon2 — against a dummy hash (`dummy_hash`) if the user
 
 ### Token revocation (jti)
 
-Refresh tokens are **stateful**: each is recorded by `jti` in the `meshble_refresh` table (`crates/meshble-db/src/auth_store.rs`), so it can be revoked (logout) and rotated (each refresh invalidates the previous one). A stolen but revoked refresh token is rejected.
+Refresh tokens are **stateful**: each is recorded by `jti` in the `kigumi_refresh` table (`crates/kigumi-db/src/auth_store.rs`), so it can be revoked (logout) and rotated (each refresh invalidates the previous one). A stolen but revoked refresh token is rejected.
 
 Rotation on refresh is atomic and replay-proof: `claim_refresh` checks and revokes in **a single** SQL statement, so two concurrent claims of the same token cannot both succeed (the loser updates zero rows → rejected), preventing double-spend.
 
@@ -103,7 +103,7 @@ Rotation on refresh is atomic and replay-proof: `claim_refresh` checks and revok
 /// succeed: the loser's UPDATE affects zero rows → `None`. This prevents refresh double-spend.
 pub async fn claim_refresh(&self, jti: &str) -> Result<Option<i64>, DbError> {
     let row = sqlx::query(
-        "UPDATE meshble_refresh SET revoked = true \
+        "UPDATE kigumi_refresh SET revoked = true \
          WHERE jti = $1 AND NOT revoked AND expires_at > now() RETURNING user_id",
     )
     .bind(jti)
@@ -115,31 +115,31 @@ pub async fn claim_refresh(&self, jti: &str) -> Result<Option<i64>, DbError> {
 
 Access tokens, by contrast, are **stateless and short-lived**: they are not tracked. Immediate revocation applies to the refresh; an access token stays valid until it expires (15 minutes). It's precisely this short-access / long-revocable-refresh pairing that makes the separation worthwhile.
 
-### Secret rotation: `MESHBLE_JWT_SECRET` and `MESHBLE_JWT_SECRET_OLD`
+### Secret rotation: `KIGUMI_JWT_SECRET` and `KIGUMI_JWT_SECRET_OLD`
 
-Secrets are read **only from the environment**, never from `meshble.toml`, and the presence of the mandatory ones is checked at boot (fail-fast). Excerpt from `.env.example`:
+Secrets are read **only from the environment**, never from `kigumi.toml`, and the presence of the mandatory ones is checked at boot (fail-fast). Excerpt from `.env.example`:
 
 ```bash
 # REQUIRED — HS256 signing secret for access/refresh tokens.
-MESHBLE_JWT_SECRET=CHANGE_ME_long_random_value
+KIGUMI_JWT_SECRET=CHANGE_ME_long_random_value
 # OPTIONAL — previous JWT secret, still accepted on verify during a rotation window.
-# MESHBLE_JWT_SECRET_OLD=
+# KIGUMI_JWT_SECRET_OLD=
 ```
 
-`Secrets::from_env` (`crates/meshble-config/src/secrets.rs`) loads `MESHBLE_JWT_SECRET` as mandatory and `MESHBLE_JWT_SECRET_OLD` as optional:
+`Secrets::from_env` (`crates/kigumi-config/src/secrets.rs`) loads `KIGUMI_JWT_SECRET` as mandatory and `KIGUMI_JWT_SECRET_OLD` as optional:
 
 ```rust
-jwt_secret: req("MESHBLE_JWT_SECRET")?,
-jwt_secret_old: opt("MESHBLE_JWT_SECRET_OLD"),
+jwt_secret: req("KIGUMI_JWT_SECRET")?,
+jwt_secret_old: opt("KIGUMI_JWT_SECRET_OLD"),
 ```
 
-The intended rotation model is: set `MESHBLE_JWT_SECRET_OLD` to the previous secret when you introduce a new `MESHBLE_JWT_SECRET`; during the rotation window, tokens signed with the old secret remain accepted at verification, while new tokens are signed with the new one. Both secrets appear (masked) in the server's configuration summary.
+The intended rotation model is: set `KIGUMI_JWT_SECRET_OLD` to the previous secret when you introduce a new `KIGUMI_JWT_SECRET`; during the rotation window, tokens signed with the old secret remain accepted at verification, while new tokens are signed with the new one. Both secrets appear (masked) in the server's configuration summary.
 
-> **Implementation note (v1)**: `MESHBLE_JWT_SECRET_OLD` is already read and propagated into `Secrets.jwt_secret_old` (and shown masked in the configuration summary), but `Authenticator::new(...)` accepts **a single secret** (`pub struct Authenticator { secret: String }`), and the `meshble serve` command wires only `s.secrets.jwt_secret`. Verification with the old secret is therefore not yet active in the runtime path: wiring the second secret into `Authenticator` is the step that completes rotation without invalidating in-flight tokens. See [Uncertainties](#incertezze-e-note) and the `Authenticator` in `crates/meshble-auth/src/lib.rs`.
+> **Implementation note (v1)**: `KIGUMI_JWT_SECRET_OLD` is already read and propagated into `Secrets.jwt_secret_old` (and shown masked in the configuration summary), but `Authenticator::new(...)` accepts **a single secret** (`pub struct Authenticator { secret: String }`), and the `kigumi serve` command wires only `s.secrets.jwt_secret`. Verification with the old secret is therefore not yet active in the runtime path: wiring the second secret into `Authenticator` is the step that completes rotation without invalidating in-flight tokens. See [Uncertainties](#incertezze-e-note) and the `Authenticator` in `crates/kigumi-auth/src/lib.rs`.
 
 ## Authorization: a single enforcement point
 
-Authorization is not scattered across controllers: it lives in the `*_secured` methods of `meshble-db` (`crates/meshble-db/src/lib.rs`), traversed by **every** protected read and write. The checks that come into play are, in all cases:
+Authorization is not scattered across controllers: it lives in the `*_secured` methods of `kigumi-db` (`crates/kigumi-db/src/lib.rs`), traversed by **every** protected read and write. The checks that come into play are, in all cases:
 
 - the model's **ACL** for the operation (`check_access`) — default-deny;
 - **field-level groups** on the touched fields (`field_accessible`, via `strip_unreadable` / `check_writable_fields` / constraints on filter and order-by);
@@ -156,7 +156,7 @@ The superuser (`Ctx::sudo()`) bypasses ACLs, record rules, and company scope; it
 
 ### ACL: model + group grant
 
-An `Acl` grants a **group** the four permissions on a **model** (`crates/meshble-core/src/security.rs`):
+An `Acl` grants a **group** the four permissions on a **model** (`crates/kigumi-core/src/security.rs`):
 
 ```rust
 pub struct Acl {
@@ -181,7 +181,7 @@ pub fn check_access(op: Operation, model: &str, ctx: &Ctx, acls: &[Acl]) -> bool
 }
 ```
 
-The `Operation`s are `Read`, `Write`, `Create`, `Delete`. A module declares its ACLs as a static slice and registers them; the server collects the union of all ACLs registered across the linked modules via `registered_acls()` (`crates/meshble-core/src/registry.rs`). The distinct groups referenced by ACLs and record rules can be derived with `registered_group_names()` (the source for seeding the read-only `res.groups` list).
+The `Operation`s are `Read`, `Write`, `Create`, `Delete`. A module declares its ACLs as a static slice and registers them; the server collects the union of all ACLs registered across the linked modules via `registered_acls()` (`crates/kigumi-core/src/registry.rs`). The distinct groups referenced by ACLs and record rules can be derived with `registered_group_names()` (the source for seeding the read-only `res.groups` list).
 
 A real example (module `account`): `account.user` manages entries (`account.move`) but does not delete them; configuration (creating accounts, maintaining journals, deleting entries) is reserved for `account.manager`:
 
@@ -195,12 +195,12 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "account.move", group: "account.manager", read: true, write: true, create: true, delete: true },
     // ...
 ];
-meshble::register_acls!(ACLS);
+kigumi::register_acls!(ACLS);
 ```
 
 ### Record rules: per-row domain filters
 
-A `RecordRule` restricts at the **row** level: it applies a typed `Domain` to the indicated operations, for the indicated groups (`crates/meshble-core/src/security.rs`):
+A `RecordRule` restricts at the **row** level: it applies a typed `Domain` to the indicated operations, for the indicated groups (`crates/kigumi-core/src/security.rs`):
 
 ```rust
 pub struct RecordRule {
@@ -236,7 +236,7 @@ pub static RECORD_RULES: &[RecordRule] = &[
     RecordRule { model: "account.move.line", groups: &[], ops: &[Operation::Create], domain: RuleDomain::Static(line_move_not_posted) },
     RecordRule { model: "account.move.line", groups: &[], ops: &[Operation::Delete], domain: RuleDomain::Static(line_move_not_posted) },
 ];
-meshble::register_rules!(RECORD_RULES);
+kigumi::register_rules!(RECORD_RULES);
 ```
 
 The stock analog (module `stock`) is the **freeze of a validated transfer**: the lines of a `done` transfer are frozen (only sudo or a cancellation can touch them), via `picking_id.state`:
@@ -251,7 +251,7 @@ pub static RECORD_RULES: &[RecordRule] = &[
     RecordRule { model: "stock.move", groups: &[], ops: &[Operation::Create], domain: RuleDomain::Static(move_picking_not_done) },
     RecordRule { model: "stock.move", groups: &[], ops: &[Operation::Delete], domain: RuleDomain::Static(move_picking_not_done) },
 ];
-meshble::register_rules!(RECORD_RULES);
+kigumi::register_rules!(RECORD_RULES);
 ```
 
 The rule reaches `move_id.state` / `picking_id.state` through a dotted domain: this covers both the row's direct path and the nested `line_ids` path (writes on the children re-check the child's record rules).
@@ -260,7 +260,7 @@ The rule reaches `move_id.state` / `picking_id.state` through a dotted domain: t
 
 A model is **company-scoped** when it declares a `Many2one` named `company_id`. The scope derives from the `Ctx`: `company_id` is the active company, `allowed_company_ids` the accessible set.
 
-On **read**, `company_filter` produces the constraint (`crates/meshble-db/src/lib.rs`), with **default-deny on shared rows**:
+On **read**, `company_filter` produces the constraint (`crates/kigumi-db/src/lib.rs`), with **default-deny on shared rows**:
 
 ```rust
 fn company_filter(model: &ResolvedModel, ctx: &Ctx) -> Option<Domain> {
@@ -299,7 +299,7 @@ So `company_filter` returns `None` (no read constraint) and `apply_company_scope
 
 ### Field-level groups (`groups=`)
 
-The `groups=` attribute on a field **hides the field** from users who don't belong to at least one of the indicated groups. It's an out-of-band restriction: it adds no columns to the metamodel, it's emitted by `#[field(groups = "...")]` as a `FieldGroupRegistration` (`crates/meshble-core/src/security.rs`). Read **and** write are gated by the same set, at the database boundary.
+The `groups=` attribute on a field **hides the field** from users who don't belong to at least one of the indicated groups. It's an out-of-band restriction: it adds no columns to the metamodel, it's emitted by `#[field(groups = "...")]` as a `FieldGroupRegistration` (`crates/kigumi-core/src/security.rs`). Read **and** write are gated by the same set, at the database boundary.
 
 ```rust
 pub fn field_accessible(model: &str, field: &str, ctx: &Ctx) -> bool {
@@ -356,7 +356,7 @@ qty_available: Decimal,
 product_template_attribute_value_ids: Many2many,
 ```
 
-You can also declare it by hand with `meshble::register_field_groups!("res.users", "login", &["admin"]);`.
+You can also declare it by hand with `kigumi::register_field_groups!("res.users", "login", &["admin"]);`.
 
 ### sudo / elevated effects
 
@@ -371,7 +371,7 @@ pub fn sudo(&self) -> Ctx {
 
 The operational pattern is: **a system effect authorized by a higher-level gate**. The caller must be authorized on the high-level operation; once that gate is passed, the engine's side effects run elevated, so the user doesn't also need to hold the low-level permissions.
 
-Two real examples in `crates/meshble-db/src/lib.rs`:
+Two real examples in `crates/kigumi-db/src/lib.rs`:
 
 - **Invoicing** (`create_sale_invoice`): generates a posted customer invoice (`account.move`) from a confirmed order. It's gated on the caller's `Write` of the order (`check_access(Operation::Write, "sale.order", ...)`), and the order is **claimed** first (the `invoice_status` flip from `to_invoice` to `invoiced` under the caller, which enforces ACL **and** record rule + the order's company, requiring exactly one row). Only afterward does the accounting posting (GL) run elevated (`ctx.sudo()`), so a salesperson doesn't also need to hold the `account` groups. The elevated effect never starts if the caller isn't truly authorized to write the order.
 - **Validating a transfer** (`validate_picking`): brings a `stock.picking` from `draft` to `done` in a transaction, moving quantities between quants. It's gated on the transfer's `Write`; the quant mutations are a system effect executed within the transaction (with `FOR UPDATE` on the picking for a true compare-and-set).
@@ -380,7 +380,7 @@ Similarly, state-transition actions have their own group gate beyond `Write`: in
 
 ## The domain AST and its operators
 
-A `Domain` is a **typed** filter AST, validated against the model and compiled into **parameterized SQL** (`crates/meshble-core/src/domain.rs`). Values are never interpolated into the SQL text — they are bound as parameters (`$1, $2, …`) — which closes off the SQL injection surface and makes malformed filters fail at validation, not in production.
+A `Domain` is a **typed** filter AST, validated against the model and compiled into **parameterized SQL** (`crates/kigumi-core/src/domain.rs`). Values are never interpolated into the SQL text — they are bound as parameters (`$1, $2, …`) — which closes off the SQL injection surface and makes malformed filters fail at validation, not in production.
 
 ```rust
 pub enum Domain {
@@ -417,7 +417,7 @@ The domain has a portable JSON AST (`to_json` / `from_json`): the same AST the s
 
 ## Input validation at the write boundary
 
-Every protected create/update validates the payload in `validate_write_values` (`crates/meshble-db/src/lib.rs`):
+Every protected create/update validates the payload in `validate_write_values` (`crates/kigumi-db/src/lib.rs`):
 
 ```rust
 if !field.has_column() {
@@ -439,7 +439,7 @@ The write-boundary guarantees are therefore:
 - **computed fields are not writable**: a computed field is recomputed by the engine, and attempting to write it is rejected explicitly (`'<field>' is computed and not writable`);
 - **stored columns only**: writing a field that is not a stored column (relations handled separately, related) is rejected (`'<field>' is not a stored column`).
 
-These errors are mapped to HTTP `400 Bad Request`; an `AccessDenied` becomes `403`, a conflict `409`, and internal errors an opaque `500` that exposes neither schema nor SQL (`write_error` / `internal_error` in `crates/meshble-server/src/lib.rs`).
+These errors are mapped to HTTP `400 Bad Request`; an `AccessDenied` becomes `403`, a conflict `409`, and internal errors an opaque `500` that exposes neither schema nor SQL (`write_error` / `internal_error` in `crates/kigumi-server/src/lib.rs`).
 
 ## Guidelines for anyone writing a module
 
@@ -452,7 +452,7 @@ Declaring a module's security is static data, collected at compile time via the 
        Acl { model: "sale.order", group: "sales.user", read: true, write: true, create: true, delete: false },
        Acl { model: "sale.order.line", group: "sales.user", read: true, write: true, create: true, delete: true },
    ];
-   meshble::register_acls!(ACLS);
+   kigumi::register_acls!(ACLS);
    ```
 
 2. **Record rules** — to restrict at the row level, declare a `&'static [RecordRule]` with `RuleDomain::Static(thunk)` and register it. Use `groups: &[]` for a **global** rule (applies to everyone, in AND), or list the groups for an alternative rule (in OR). Indicate with `ops` the operations it applies to. Leverage dotted paths (`move_id.state`) to cover both the direct path and the nested one.
@@ -462,7 +462,7 @@ Declaring a module's security is static data, collected at compile time via the 
    pub static RECORD_RULES: &[RecordRule] = &[
        RecordRule { model: "account.move.line", groups: &[], ops: &[Operation::Write], domain: RuleDomain::Static(line_move_not_posted) },
    ];
-   meshble::register_rules!(RECORD_RULES);
+   kigumi::register_rules!(RECORD_RULES);
    ```
 
 3. **Field-level groups** — to hide a field from those not in the group, add `groups = "…"` to the `#[field(...)]` attribute. To lock a field down from every user (writable only by the engine via `sudo`), use a group that no one holds, such as `base.system`.
@@ -475,6 +475,6 @@ The groups referenced by the registered ACLs and record rules are collected by `
 
 ## Uncertainties and notes
 
-- **JWT secret rotation (verify with the old secret)**: `MESHBLE_JWT_SECRET_OLD` is read by `Secrets::from_env` and propagated into `Secrets.jwt_secret_old` (and shown masked in the configuration summary), but `Authenticator::new` accepts a single secret and the `meshble serve` command wires only `s.secrets.jwt_secret`. In the current code, verification with the previous secret is not yet active in the runtime path; the code comment and the example files describe the intended behavior ("still accepted on verify during a rotation window"). Verify the runtime version before relying on rotation without invalidating in-flight tokens.
-- **Token TTLs vs `meshble.toml`**: the effective values are the `ACCESS_TTL` / `REFRESH_TTL` constants of `meshble-server`; the `[auth]` section of `meshble.toml` (`access_ttl` / `refresh_ttl`) carries the same defaults but in v1 is not wired into token issuance. Verify the version before relying on the configuration file to change the TTLs.
-- **`jti` on access tokens**: revocation by `jti` concerns only refresh tokens (`meshble_refresh` table); access tokens are stateless and not revocable before expiration (15 min). The `jti` claim is populated only on refresh tokens.
+- **JWT secret rotation (verify with the old secret)**: `KIGUMI_JWT_SECRET_OLD` is read by `Secrets::from_env` and propagated into `Secrets.jwt_secret_old` (and shown masked in the configuration summary), but `Authenticator::new` accepts a single secret and the `kigumi serve` command wires only `s.secrets.jwt_secret`. In the current code, verification with the previous secret is not yet active in the runtime path; the code comment and the example files describe the intended behavior ("still accepted on verify during a rotation window"). Verify the runtime version before relying on rotation without invalidating in-flight tokens.
+- **Token TTLs vs `kigumi.toml`**: the effective values are the `ACCESS_TTL` / `REFRESH_TTL` constants of `kigumi-server`; the `[auth]` section of `kigumi.toml` (`access_ttl` / `refresh_ttl`) carries the same defaults but in v1 is not wired into token issuance. Verify the version before relying on the configuration file to change the TTLs.
+- **`jti` on access tokens**: revocation by `jti` concerns only refresh tokens (`kigumi_refresh` table); access tokens are stateless and not revocable before expiration (15 min). The `jti` claim is populated only on refresh tokens.

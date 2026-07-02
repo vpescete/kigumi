@@ -1,6 +1,6 @@
 # Architettura
 
-Meshble è un framework ERP headless e schema-driven scritto in Rust: un modello è
+Kigumi è un framework ERP headless e schema-driven scritto in Rust: un modello è
 definito una sola volta come **dato statico ispezionabile** e da quell'unica fonte di
 verità il framework deriva lo schema Postgres, il contratto-UI consumabile da qualsiasi
 frontend e lo schema OpenAPI per gli integratori. Questa pagina descrive il layout dei
@@ -23,7 +23,7 @@ members = ["crates/*", "modules/*", "apps/*"]
   sicurezza, server. Condividono tutti la stessa versione SemVer del workspace.
 - `modules/*` — i **moduli** applicativi (`base`, `mail`, `sales`, `account`, `stock`).
   Ognuno ha la propria versione, indipendente dal framework.
-- `apps/*` — le **applicazioni** eseguibili che linkano framework e moduli (`meshble-cli`,
+- `apps/*` — le **applicazioni** eseguibili che linkano framework e moduli (`kigumi-cli`,
   `renderer-demo`).
 
 Tutti i crate del framework condividono la versione dichiarata in `[workspace.package]`:
@@ -40,28 +40,28 @@ repository = "https://github.com/vpescete/msh_framework"
 
 | Crate | Responsabilità |
 |---|---|
-| `meshble-core` | Il metamodello ispezionabile (`FieldKind`, `FieldDef`, `ModelDescriptor`, `ResolvedModel`), i registri a compile time via `inventory`, il motore di sicurezza (ACL + record rule + `Ctx`), il domain AST tipizzato, il modello di versionamento dei moduli. Nessuna dipendenza da database o HTTP. |
-| `meshble-macros` | I proc-macro `#[model]` e `#[extend]`: generano lo `ModelDescriptor` statico + `impl Model` da una struct annotata, ed emettono le registrazioni `inventory` per security a livello di campo (`#[field(groups = "...")]`), related field (`#[field(related = "...")]`), tracked field (`#[field(tracked)]`) e delegazione `inherits` (`#[model(inherits = "...", via = "...")]`). |
-| `meshble-schema` | Le proiezioni da `ResolvedModel`: `to_ddl` (DDL Postgres), `to_ui_contract` (contratto-UI JSON) e `openapi` (schema OpenAPI 3.1). Stessa fonte di verità, output multipli. |
-| `meshble-db` | Lo strato di persistenza Postgres (`sqlx`). Espone i metodi `*_secured` che applicano il motore di sicurezza al confine del database, il motore di migrazioni versionato, gli store di supporto (auth, ACL/record rule a runtime, moduli installati, sequenze, impostazioni, cron). |
-| `meshble-auth` | Autenticazione: hashing password (argon2) e token JWT firmati HS256 (access/refresh tipizzati). Verifica un bearer access token in un `Ctx` fidato. |
-| `meshble-server` | Il router HTTP (`axum`): espone i metadati (OpenAPI, lista modelli, contratti-UI) e gli endpoint CRUD sicuri. Per ogni richiesta dati verifica il token in un `Ctx` e delega la persistenza a `meshble-db`. |
-| `meshble-config` | Configurazione di istanza tipizzata: impostazioni non-segrete da `defaults < meshble.toml < env` (validazione fail-fast) e i segreti, letti solo dall'ambiente e verificati all'avvio. |
-| `meshble-storage` | Storage di blob content-addressed: gli allegati binari vivono dietro il trait `BlobStore`, indicizzati dallo sha256 del contenuto (bytes identici deduplicano in un unico oggetto). v1 fornisce `FsBlobStore`. |
-| `meshble` (facade) | La facciata. I moduli applicativi dipendono **solo** da questo crate: `use meshble::prelude::*;` espone il metamodello, le macro, le proiezioni di schema e tutte le macro `register_*!`. |
+| `kigumi-core` | Il metamodello ispezionabile (`FieldKind`, `FieldDef`, `ModelDescriptor`, `ResolvedModel`), i registri a compile time via `inventory`, il motore di sicurezza (ACL + record rule + `Ctx`), il domain AST tipizzato, il modello di versionamento dei moduli. Nessuna dipendenza da database o HTTP. |
+| `kigumi-macros` | I proc-macro `#[model]` e `#[extend]`: generano lo `ModelDescriptor` statico + `impl Model` da una struct annotata, ed emettono le registrazioni `inventory` per security a livello di campo (`#[field(groups = "...")]`), related field (`#[field(related = "...")]`), tracked field (`#[field(tracked)]`) e delegazione `inherits` (`#[model(inherits = "...", via = "...")]`). |
+| `kigumi-schema` | Le proiezioni da `ResolvedModel`: `to_ddl` (DDL Postgres), `to_ui_contract` (contratto-UI JSON) e `openapi` (schema OpenAPI 3.1). Stessa fonte di verità, output multipli. |
+| `kigumi-db` | Lo strato di persistenza Postgres (`sqlx`). Espone i metodi `*_secured` che applicano il motore di sicurezza al confine del database, il motore di migrazioni versionato, gli store di supporto (auth, ACL/record rule a runtime, moduli installati, sequenze, impostazioni, cron). |
+| `kigumi-auth` | Autenticazione: hashing password (argon2) e token JWT firmati HS256 (access/refresh tipizzati). Verifica un bearer access token in un `Ctx` fidato. |
+| `kigumi-server` | Il router HTTP (`axum`): espone i metadati (OpenAPI, lista modelli, contratti-UI) e gli endpoint CRUD sicuri. Per ogni richiesta dati verifica il token in un `Ctx` e delega la persistenza a `kigumi-db`. |
+| `kigumi-config` | Configurazione di istanza tipizzata: impostazioni non-segrete da `defaults < kigumi.toml < env` (validazione fail-fast) e i segreti, letti solo dall'ambiente e verificati all'avvio. |
+| `kigumi-storage` | Storage di blob content-addressed: gli allegati binari vivono dietro il trait `BlobStore`, indicizzati dallo sha256 del contenuto (bytes identici deduplicano in un unico oggetto). v1 fornisce `FsBlobStore`. |
+| `kigumi` (facade) | La facciata. I moduli applicativi dipendono **solo** da questo crate: `use kigumi::prelude::*;` espone il metamodello, le macro, le proiezioni di schema e tutte le macro `register_*!`. |
 
 La facciata re-esporta anche `inventory`, così le macro possono emettere percorsi
-assoluti `::meshble::inventory::submit!` senza che ogni modulo debba aggiungere la
+assoluti `::kigumi::inventory::submit!` senza che ogni modulo debba aggiungere la
 dipendenza:
 
 ```rust
-// crates/meshble/src/lib.rs
-pub use meshble_core::inventory;
+// crates/kigumi/src/lib.rs
+pub use kigumi_core::inventory;
 ```
 
 ## Il metamodello
 
-Il cuore del framework è il metamodello in `crates/meshble-core/src/metamodel.rs`. Un
+Il cuore del framework è il metamodello in `crates/kigumi-core/src/metamodel.rs`. Un
 modello non è una classe sintetizzata a runtime, ma **dato statico ispezionabile**.
 
 ### `FieldKind`
@@ -152,7 +152,7 @@ Poiché ogni modello è dato statico, il catalogo è interrogabile a runtime sen
 introspezione di classi: `resolve_registered(model)` restituisce il `ResolvedModel`,
 `resolve_all_registered()` l'intero set, `registered_model_names()` i nomi (ordinati e
 deterministici). Su questi descrittori operano direttamente le proiezioni di
-`meshble-schema`. Per il design completo del metamodello vedi
+`kigumi-schema`. Per il design completo del metamodello vedi
 [`METAMODEL_DESIGN.md`](../../METAMODEL_DESIGN.md).
 
 ## I registri a compile time (`inventory`)
@@ -160,12 +160,12 @@ deterministici). Su questi descrittori operano direttamente le proiezioni di
 I modelli e le estensioni si **auto-registrano** tramite il crate `inventory`: il
 resolver li unisce senza wiring manuale. Ogni macro `register_*!` (o l'annotazione
 `#[model]`/`#[field]`) emette una `inventory::submit!` di un tipo registrato in
-`meshble-core` (definito in `registry.rs` e nei moduli affini `action.rs`, `report.rs`,
+`kigumi-core` (definito in `registry.rs` e nei moduli affini `action.rs`, `report.rs`,
 `wizard.rs`, `view.rs`, `security.rs`, e re-esportato dalla facciata). Le macro
-`register_*!` vivono nella facciata, in `crates/meshble/src/lib.rs`. Esempio:
+`register_*!` vivono nella facciata, in `crates/kigumi/src/lib.rs`. Esempio:
 
 ```rust
-// crates/meshble/src/lib.rs
+// crates/kigumi/src/lib.rs
 macro_rules! register_module {
     ($manifest:expr) => {
         $crate::inventory::submit! {
@@ -198,7 +198,7 @@ raccolta che iterano tutte le submission linkate nel binario.
 | Security a livello di campo | `FieldGroupRegistration` | `#[field(groups = "...")]` / `register_field_groups!` | `field_required_groups` |
 | Compute | `ComputeRegistration` | `register_compute!` | `compute_fn`, `computed_fields` |
 | Constraint cross-record | `ConstraintRegistration` | `register_constraint!` | `check_constraints` |
-| Cron | `CronRegistration` (in `meshble-db`) | `inventory::submit!` a mano | `registered_crons` |
+| Cron | `CronRegistration` (in `kigumi-db`) | `inventory::submit!` a mano | `registered_crons` |
 
 `registered_group_names()` deriva i gruppi noti del catalogo unendo quelli referenziati da
 qualsiasi ACL o record rule registrata (ordinati, deterministici): è la sorgente per il
@@ -217,14 +217,14 @@ dalla migrazione: il metamodello non crea né altera la loro tabella.
 
 ## La pipeline di generazione
 
-Le proiezioni vivono in `crates/meshble-schema/src/lib.rs` e
-`crates/meshble-schema/src/openapi.rs`. Da **un** `ResolvedModel` si producono tre output.
+Le proiezioni vivono in `crates/kigumi-schema/src/lib.rs` e
+`crates/kigumi-schema/src/openapi.rs`. Da **un** `ResolvedModel` si producono tre output.
 
 ### 1. DDL Postgres — `to_ddl`
 
 `to_ddl(m)` genera il `CREATE TABLE`. La PK `id bigserial` è sempre presente; solo i campi
 con colonna (`has_column()`) producono una riga; un `Many2one` aggiunge
-`REFERENCES <target>(id)`, un `Image` `REFERENCES meshble_attachment(id)`; `required`,
+`REFERENCES <target>(id)`, un `Image` `REFERENCES kigumi_attachment(id)`; `required`,
 `unique` e `check` aggiungono i rispettivi vincoli. La tabella di un nome puntato deriva
 sostituendo `.` con `_`.
 
@@ -277,7 +277,7 @@ del modello figlio; un `Many2many` un array di id `int64`.
 
 Una richiesta dati attraversa una catena precisa, con un **unico punto** in cui ACL,
 record rule e multi-azienda sono applicati. Il router è in
-`crates/meshble-server/src/lib.rs`.
+`crates/kigumi-server/src/lib.rs`.
 
 ### Il router
 
@@ -324,22 +324,22 @@ fn authenticate(backend: &DataBackend, headers: &HeaderMap) -> Result<Ctx, Respo
 }
 ```
 
-`verify_bearer` (in `meshble-auth`) estrae `Bearer <token>`, lo verifica come **access**
+`verify_bearer` (in `kigumi-auth`) estrae `Bearer <token>`, lo verifica come **access**
 token HS256 (rifiutando i refresh token, con `alg=HS256` pinnato contro alg-confusion) e
 lo trasforma in un `Ctx`. I claim trasportano `groups` e lo scope multi-azienda
 (`company`/`companies`): un set non vuoto produce un `Ctx` company-scoped tramite
 `Ctx::in_companies(active, allowed)`. Questa è autenticazione reale: un client non può
 rivendicare un gruppo senza un token firmato dal segreto del server.
 
-Il `Ctx` (in `crates/meshble-core/src/security.rs`) porta `uid`, `groups`, l'azienda
+Il `Ctx` (in `crates/kigumi-core/src/security.rs`) porta `uid`, `groups`, l'azienda
 attiva (`company_id`) e l'insieme di aziende consentite (`allowed_company_ids`), e un flag
 superuser **privato** (`su`): codice esterno non può forgiare un contesto elevato con un
 literal di struct, perché l'unica via di escalation è il metodo greppabile `Ctx::sudo()`.
 
-### Passo 2 — CRUD sicuro in `meshble-db`
+### Passo 2 — CRUD sicuro in `kigumi-db`
 
 L'handler delega a uno dei metodi `*_secured` di `Db`
-(`crates/meshble-db/src/lib.rs`), che applicano il motore di sicurezza al **confine del
+(`crates/kigumi-db/src/lib.rs`), che applicano il motore di sicurezza al **confine del
 database**:
 
 | Operazione | Entry point |
@@ -396,7 +396,7 @@ opaco che non fa trapelare schema o SQL.
 Tre piani distinti, con confini netti:
 
 - **moduli** (`modules/*`) — crate Rust che definiscono modelli, estensioni, ACL, record
-  rule, action, report, wizard e view. Dipendono **solo** dalla facciata `meshble` e si
+  rule, action, report, wizard e view. Dipendono **solo** dalla facciata `kigumi` e si
   auto-registrano nei registri `inventory`. Un modulo dichiara il proprio `ModuleManifest`
   e lo registra:
 
@@ -409,38 +409,38 @@ Tre piani distinti, con confini netti:
       depends: &[],
       summary: "Foundational models: currency, partner, company",
   };
-  meshble::register_module!(MANIFEST);
+  kigumi::register_module!(MANIFEST);
   ```
 
   Per scrivere un modulo proprio vedi [moduli-custom.md](./moduli-custom.md); per i moduli
   inclusi vedi [moduli.md](./moduli.md).
 
-- **app** (`apps/*`) — gli eseguibili. `meshble-cli` (binario `meshble`) linka il framework
+- **app** (`apps/*`) — gli eseguibili. `kigumi-cli` (binario `kigumi`) linka il framework
   e i moduli desiderati: linkare un modulo è ciò che fa entrare le sue registrazioni
-  `inventory` nel binario. La CLI espone `meshble serve` (migra catalogo + auth, fa
-  bootstrap dell'admin da env, poi serve l'API sicura), `meshble migrate` (migra tutti i
-  moduli linkati + lo schema auth, poi esce) e i sottocomandi `meshble config`,
-  `meshble user`, `meshble acl`, `meshble rule`, `meshble module`, `meshble version`. I
+  `inventory` nel binario. La CLI espone `kigumi serve` (migra catalogo + auth, fa
+  bootstrap dell'admin da env, poi serve l'API sicura), `kigumi migrate` (migra tutti i
+  moduli linkati + lo schema auth, poi esce) e i sottocomandi `kigumi config`,
+  `kigumi user`, `kigumi acl`, `kigumi rule`, `kigumi module`, `kigumi version`. I
   moduli resi disponibili sono solo quelli il cui crate è linkato nel binario.
 
   ```toml
-  # apps/meshble-cli/Cargo.toml — i moduli linkati si auto-registrano nel catalogo
-  meshble-mod-base = { path = "../../modules/base" }
-  meshble-mod-mail = { path = "../../modules/mail" }
-  meshble-mod-sales = { path = "../../modules/sales" }
-  meshble-mod-account = { path = "../../modules/account" }
-  meshble-mod-stock = { path = "../../modules/stock" }
+  # apps/kigumi-cli/Cargo.toml — i moduli linkati si auto-registrano nel catalogo
+  kigumi-mod-base = { path = "../../modules/base" }
+  kigumi-mod-mail = { path = "../../modules/mail" }
+  kigumi-mod-sales = { path = "../../modules/sales" }
+  kigumi-mod-account = { path = "../../modules/account" }
+  kigumi-mod-stock = { path = "../../modules/stock" }
   ```
 
 - **web** (`web/`) — il frontend (Vite/TypeScript), separato dal workspace Rust. È un
   consumatore del contratto-UI e dello schema OpenAPI generati dal server: non conosce lo
-  schema a priori, lo legge come dato. Essendo Meshble headless, il web è uno dei tanti
+  schema a priori, lo legge come dato. Essendo Kigumi headless, il web è uno dei tanti
   client possibili (al pari di un SDK generato).
 
 La separazione catalogo (compile time) vs set installato (runtime, per database) è
 deliberata: tutti i moduli disponibili sono crate linkati, risolti e type-checked insieme;
 quali moduli siano *attivi* per un'istanza è un dato a runtime (gestito da
-`meshble module install` / `meshble module uninstall`), non una ricompilazione.
+`kigumi module install` / `kigumi module uninstall`), non una ricompilazione.
 
 ## Il modello di versionamento
 
@@ -448,12 +448,12 @@ Il framework usa **SemVer puro** (Cargo-native). `FRAMEWORK_VERSION` è la versi
 workspace, esposta dal core:
 
 ```rust
-// crates/meshble-core/src/lib.rs
+// crates/kigumi-core/src/lib.rs
 pub const FRAMEWORK_VERSION: &str = env!("CARGO_PKG_VERSION");
 ```
 
 Ogni modulo ha la **propria** versione SemVer, indipendente dal framework, e dichiara nel
-manifest (`crates/meshble-core/src/manifest.rs`):
+manifest (`crates/kigumi-core/src/manifest.rs`):
 
 ```rust
 pub struct ModuleManifest {
@@ -499,8 +499,8 @@ fuori da `<0.2`.
 
 ### Migrazioni versionate
 
-Il motore di migrazioni (`crates/meshble-db/src/migration.rs`) è dichiarativo e
-versionato: lo stato vive in `meshble_module` (versione corrente) e `meshble_migration`
+Il motore di migrazioni (`crates/kigumi-db/src/migration.rs`) è dichiarativo e
+versionato: lo stato vive in `kigumi_module` (versione corrente) e `kigumi_migration`
 (una riga per versione applicata). Ogni install/upgrade è **atomico** (singola
 transazione), **serializzato** (`pg_advisory_xact_lock` per modulo) e **idempotente**
 (ri-eseguire alla stessa versione è un no-op). Lo schema è generato dal `ResolvedModel`
@@ -510,6 +510,6 @@ transazione), **serializzato** (`pg_advisory_xact_lock` per modulo) e **idempote
 ---
 
 Vedi anche: [installazione.md](./installazione.md) per il setup,
-[configurazione.md](./configurazione.md) per `meshble.toml` e le variabili d'ambiente,
+[configurazione.md](./configurazione.md) per `kigumi.toml` e le variabili d'ambiente,
 [api.md](./api.md) per gli endpoint REST e [sicurezza.md](./sicurezza.md) per ACL, record
 rule e multi-azienda in dettaglio.

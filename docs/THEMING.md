@@ -1,6 +1,6 @@
 # Theming — temi della community
 
-Meshble è **theme-able come Odoo, ma più leggero**: un tema NON è un modulo con override SCSS +
+Kigumi è **theme-able come Odoo, ma più leggero**: un tema NON è un modulo con override SCSS +
 template + asset bundle da ricompilare. Un tema è **dato dichiarativo** che il framework trasforma in
 variabili CSS a runtime. I componenti UI leggono solo variabili semantiche (`--color-*`) e ruoli
 tipografici (`.t-*`) — non sanno quale tema sia attivo, quindi aggiungere un tema non tocca una riga

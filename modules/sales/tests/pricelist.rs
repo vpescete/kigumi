@@ -4,14 +4,14 @@
 //! base (the variant's lst_price = list_price + price_extra). Exercised against the REAL sales product
 //! models, through the pool the way the apply_pricelist service calls it. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use rust_decimal::Decimal;
 use serde_json::json;
 use std::str::FromStr;
 
 fn link() {
-    let _ = (&meshble_mod_sales::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_sales::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 fn d(s: &str) -> Decimal {
@@ -66,7 +66,7 @@ async fn resolve_price_picks_the_most_specific_rule() {
     let today = db.today().await.unwrap();
     let price = |plid: i64, qty: Decimal, today: String| {
         let pool = &pool;
-        async move { meshble_mod_sales::services::resolve_price(pool, plid, v, qty, &today).await.unwrap() }
+        async move { kigumi_mod_sales::services::resolve_price(pool, plid, v, qty, &today).await.unwrap() }
     };
 
     // Most specific = variant rule → 700.

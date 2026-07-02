@@ -4,7 +4,7 @@ import type { Theme } from '../contract'
 export const graphite: Theme = {
   id: 'graphite',
   name: 'Graphite',
-  author: 'Meshble',
+  author: 'Kigumi',
   version: '1.0.0',
   compat: '^0.1',
   defaultMode: 'dark',

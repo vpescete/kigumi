@@ -1,4 +1,4 @@
-// Client-side domain evaluator — mirrors the server's portable AST (crates/meshble-core/src/domain.rs
+// Client-side domain evaluator — mirrors the server's portable AST (crates/kigumi-core/src/domain.rs
 // `to_json`) for the subset evaluable against a flat record: a field condition, and/or/not, and a const.
 // Used to apply a field's invisible_when / readonly_when live as the user edits. Decimal/monetary values
 // arrive as JSON strings, so numeric comparisons coerce with Number().

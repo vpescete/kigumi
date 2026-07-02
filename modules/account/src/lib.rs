@@ -1,10 +1,10 @@
 //! Application module `account`: a headless double-entry general ledger.
 //! Slice 1 (M16.1): the chart of accounts (`account.account`) + journals (`account.journal`).
 
-use meshble::prelude::*;
+use kigumi::prelude::*;
 use rust_decimal::Decimal;
 
-// Cross-record invoicing / billing / payment / posting engine (relocated from meshble-db onto the seam).
+// Cross-record invoicing / billing / payment / posting engine (relocated from kigumi-db onto the seam).
 pub mod services;
 
 /// Module manifest: own version + framework compatibility range + module dependencies.
@@ -15,7 +15,7 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     depends: &[ModuleDep { name: "base", req: "^1.0" }, ModuleDep { name: "mail", req: "^1.0" }],
     summary: "Double-entry general ledger",
 };
-meshble::register_module!(MANIFEST);
+kigumi::register_module!(MANIFEST);
 
 /// A general-ledger account (Odoo's `account.account`): one line of the chart of accounts. Its
 /// `account_type` drives downstream behavior (receivable/payable ledgers, income/expense, tax).
@@ -70,7 +70,7 @@ pub struct AccountJournal {
 
 // account.move opts into the mail subsystem: a journal entry carries a chatter audit trail, and its
 // state transitions are tracked.
-meshble::register_mailed!("account.move");
+kigumi::register_mailed!("account.move");
 
 /// A journal entry / invoice (Odoo's `account.move`): the document that groups the debit/credit lines.
 /// Mailed (audit trail); numbered "/" until posted. The balanced-entry invariant lives in `check_balanced`.
@@ -177,13 +177,13 @@ pub struct AccountMoveLine {
 fn compute_line_balance(l: &ComputeInput) -> Value {
     Value::Decimal(l.decimal("debit") - l.decimal("credit"))
 }
-meshble::register_compute!("compute_line_balance", compute_line_balance);
+kigumi::register_compute!("compute_line_balance", compute_line_balance);
 
 /// A move's total = Σ of its lines' debit (equals Σ credit when balanced).
 fn compute_move_total(m: &ComputeInput) -> Value {
     Value::Decimal(m.sum_decimal("line_ids", "debit"))
 }
-meshble::register_compute!("compute_move_total", compute_move_total);
+kigumi::register_compute!("compute_move_total", compute_move_total);
 
 /// The balanced-entry invariant (Odoo's `@api.constrains`): a move's total debit must equal its total
 /// credit. Runs in-tx after the move + its lines are written; an empty move (Σ = 0) is balanced. This
@@ -198,7 +198,7 @@ fn check_balanced(m: &ComputeInput) -> Result<(), String> {
     }
     Ok(())
 }
-meshble::register_constraint!("account.move", &["line_ids"], check_balanced);
+kigumi::register_constraint!("account.move", &["line_ids"], check_balanced);
 
 /// Multi-company coherence (Odoo's `_check_company`): a move must not mix companies. When both the
 /// move and one of its lines carry an explicit company, they must match — so a multi-company user
@@ -221,7 +221,7 @@ fn check_line_companies(m: &ComputeInput) -> Result<(), String> {
     }
     Ok(())
 }
-meshble::register_constraint!("account.move", &["line_ids"], check_line_companies);
+kigumi::register_constraint!("account.move", &["line_ids"], check_line_companies);
 
 /// Access control. `account.user` (accountant) reads accounts + journals and edits accounts, and runs
 /// moves + their lines; configuration — creating accounts, all journal maintenance, deleting moves —
@@ -246,7 +246,7 @@ fn reset_to_draft(i: &ActionInput) -> Result<ActionOutcome, String> {
         s => Err(format!("only a posted or cancelled entry can be reset to draft (state is '{s}')")),
     }
 }
-meshble::register_action!("account.move", "button_draft", reset_to_draft, &["account.user"]);
+kigumi::register_action!("account.move", "button_draft", reset_to_draft, &["account.user"]);
 
 /// `button_cancel`: cancel a draft or posted entry.
 fn cancel_move(i: &ActionInput) -> Result<ActionOutcome, String> {
@@ -255,7 +255,7 @@ fn cancel_move(i: &ActionInput) -> Result<ActionOutcome, String> {
         s => Err(format!("cannot cancel an entry in state '{s}'")),
     }
 }
-meshble::register_action!("account.move", "button_cancel", cancel_move, &["account.user"]);
+kigumi::register_action!("account.move", "button_cancel", cancel_move, &["account.user"]);
 
 /// Posted-entry immutability: a posted move's journal items are frozen — no write, create or delete
 /// (only sudo, or un-posting first, can touch them). This is what guarantees the GL invariant
@@ -272,25 +272,25 @@ pub static RECORD_RULES: &[RecordRule] = &[
     RecordRule { model: "account.move.line", groups: &[], ops: &[Operation::Delete], domain: RuleDomain::Static(line_move_not_posted) },
 ];
 
-meshble::register_acls!(ACLS);
-meshble::register_rules!(RECORD_RULES);
+kigumi::register_acls!(ACLS);
+kigumi::register_rules!(RECORD_RULES);
 
 // Cross-record SERVICES (formerly hardcoded Db methods). The account module owns invoicing (it owns the
 // GL) and registers on the order models, resolved at runtime — no cross-module crate dep. No group gate:
 // the originals gated purely on the order/move Write ACL.
-meshble::register_service!("account.move", "post", services::post, true, &[]);
-meshble::register_service!("sale.order", "create_invoice", services::create_invoice, true, &[]);
-meshble::register_service!("purchase.order", "create_vendor_bill", services::create_vendor_bill, true, &[]);
-meshble::register_service!("account.move", "register_payment", services::register_payment, true, &[]);
+kigumi::register_service!("account.move", "post", services::post, true, &[]);
+kigumi::register_service!("sale.order", "create_invoice", services::create_invoice, true, &[]);
+kigumi::register_service!("purchase.order", "create_vendor_bill", services::create_vendor_bill, true, &[]);
+kigumi::register_service!("account.move", "register_payment", services::register_payment, true, &[]);
 
 // Read-only GL reports (record-less) dispatched by GET /api/reports/<name>, gated on Read of the named
-// model. The ERP query logic lives here; meshble-db just gates + dispatches.
-meshble::register_ledger_report!("trial_balance", "account.account", services::trial_balance, &[]);
-meshble::register_ledger_report!("aged_balance", "account.move", services::aged_balance, &[]);
-meshble::register_ledger_report!("general_ledger", "account.account", services::general_ledger, &[]);
+// model. The ERP query logic lives here; kigumi-db just gates + dispatches.
+kigumi::register_ledger_report!("trial_balance", "account.account", services::trial_balance, &[]);
+kigumi::register_ledger_report!("aged_balance", "account.move", services::aged_balance, &[]);
+kigumi::register_ledger_report!("general_ledger", "account.account", services::general_ledger, &[]);
 
 // Form layout: the journal entry header in one group, its lines in a notebook page.
-meshble::register_view!(
+kigumi::register_view!(
     "account.move",
     &[FieldGroup {
         title: None,

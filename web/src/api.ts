@@ -1,11 +1,11 @@
-// Live API client for the Meshble server. The frontend is data-driven: it reads each model's
+// Live API client for the Kigumi server. The frontend is data-driven: it reads each model's
 // contract from /api/:name/view (fields + list columns + actions, per decision D7) and performs
-// CRUD/actions against /api/:name. In dev, Vite proxies /api and /auth to `meshble serve` (:8099),
+// CRUD/actions against /api/:name. In dev, Vite proxies /api and /auth to `kigumi serve` (:8099),
 // so paths stay same-origin. Tokens live in localStorage; a 401 triggers one transparent refresh.
 
 import type { DomainNode } from './domain'
 
-const TOKENS_KEY = 'meshble.tokens'
+const TOKENS_KEY = 'kigumi.tokens'
 
 type Tokens = { access: string; refresh: string }
 

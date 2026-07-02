@@ -1,4 +1,4 @@
-# Meshble
+# Kigumi
 
 Un framework applicativo **headless, schema-driven** in Rust — la base di Odoo
 (metamodello dichiarativo + estendibilità per composizione) ricostruita partendo dai suoi
@@ -18,13 +18,13 @@ time**, non mutata a runtime.
 
 ```
 crates/
-  meshble-core     metamodello ispezionabile, domini AST, security (ACL+rule+sudo), versioning
-  meshble-macros   proc-macro #[model] / #[extend]
-  meshble-schema   proiezioni: DDL Postgres, contratto-UI JSON, OpenAPI 3.1
-  meshble-db       persistenza Postgres (sqlx): CRUD security-enforced + migrazioni versionate
-  meshble-auth     auth JWT HS256 (Bearer → Ctx fidato)
-  meshble-server   server axum headless: metadata + CRUD dal catalogo
-  meshble          facade (prelude)
+  kigumi-core     metamodello ispezionabile, domini AST, security (ACL+rule+sudo), versioning
+  kigumi-macros   proc-macro #[model] / #[extend]
+  kigumi-schema   proiezioni: DDL Postgres, contratto-UI JSON, OpenAPI 3.1
+  kigumi-db       persistenza Postgres (sqlx): CRUD security-enforced + migrazioni versionate
+  kigumi-auth     auth JWT HS256 (Bearer → Ctx fidato)
+  kigumi-server   server axum headless: metadata + CRUD dal catalogo
+  kigumi          facade (prelude)
 modules/
   base             res.partner, res.currency
   sales            sale.order + estensione sale_margin
@@ -41,9 +41,9 @@ docs/               ANALISI_ODOO19 · METAMODEL_DESIGN · VERSIONING
 cargo test                                   # unit; gli integration-test DB si auto-skippano
 
 # stack completo end-to-end (richiede un Postgres):
-export DATABASE_URL=postgres://USER@127.0.0.1/meshble_test
+export DATABASE_URL=postgres://USER@127.0.0.1/kigumi_test
 cargo test                                   # ora include gli integration-test live
-cargo run -p meshble-renderer-demo           # poi apri l'URL stampato (con token JWT)
+cargo run -p kigumi-renderer-demo           # poi apri l'URL stampato (con token JWT)
 ```
 
 Il demo migra un modello `task`, lo seeda, e serve su `:8099` sia l'**API headless**

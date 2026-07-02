@@ -1,8 +1,8 @@
-# Mini-design: `_inherits` (ereditarietà per delega) per Meshble
+# Mini-design: `_inherits` (ereditarietà per delega) per Kigumi
 
 > Obiettivo: il meccanismo che serve a `product.product` (variante) per esporre trasparentemente i
 > campi di `product.template` (prodotto), come Odoo `_inherits`. Tenere i punti di forza, evitare le
-> debolezze, sfruttando il metamodello tipizzato + l'unico path read/write controllato di Meshble.
+> debolezze, sfruttando il metamodello tipizzato + l'unico path read/write controllato di Kigumi.
 > Codice in inglese; prosa in italiano. Prerequisito per "product completo" (vedi PORTING_ROADMAP).
 
 ## 1. Come fa Odoo (`_inherits`, delegation inheritance)
@@ -11,7 +11,7 @@ Un modello figlio dichiara `_inherits = {'product.template': 'product_tmpl_id'}`
 `product.name` legge `product.product_tmpl_id.name`; scrivere `product.name` scrive sul `product.template`
 puntato. In `create`, se il FK non è fornito, Odoo **auto-crea** il record padre. È *composizione con
 accesso-campo trasparente* — diverso da `_inherit` (estensione dello stesso modello/tabella, già coperto
-da Meshble con `#[extend]`) e dall'ereditarietà classica. `product.template` tiene i campi condivisi
+da Kigumi con `#[extend]`) e dall'ereditarietà classica. `product.template` tiene i campi condivisi
 (name, list_price, categ_id, uom, type…), `product.product` la variante (default_code, barcode, gli
 `attribute_value_ids`); più varianti condividono un template.
 
@@ -37,7 +37,7 @@ da Meshble con `#[extend]`) e dall'ereditarietà classica. `product.template` ti
 - **Vincoli/ACL/regole sui campi delegati**: un `required`/`unique` su un campo del padre vive sulla
   tabella del padre, non del figlio; le regole record del figlio non vedono di default i campi del padre.
 
-## 4. Design Meshble (più esplicito e verificabile)
+## 4. Design Kigumi (più esplicito e verificabile)
 
 ### (a) Dichiarazione tipizzata, compile-time
 `#[model(name = "product.product", table = "product_product", inherits = "product.template" via "product_tmpl_id")]`.
@@ -67,7 +67,7 @@ esistente = poco codice nuovo nel read path.
 `UPDATE <parent_table> SET … WHERE id = <child>.<via>` nello STESSO TX. **Create**: se `via` non è
 fornito, si crea prima il padre con i campi delegati (un `insert` sul padre), si ottiene il suo id, lo si
 mette in `via`, poi si crea il figlio — tutto in un TX (niente padre orfano se il figlio fallisce). Path
-unico e ispezionabile (forza Meshble vs Odoo).
+unico e ispezionabile (forza Kigumi vs Odoo).
 
 ### (e) Delete, vincoli, ACL/regole, contratto, domini
 - **Delete**: `via` FK con `ON DELETE RESTRICT` di default (cancellare un template ancora referenziato da

@@ -1,18 +1,18 @@
 # Configurazione (riferimento)
 
-Questa pagina documenta **ogni** chiave di configurazione di Meshble, il suo valore di default e il suo significato. La configurazione di Meshble è divisa in due piani nettamente separati: la **configurazione di boot** (non segreta, tipizzata, caricata da `meshble.toml` e dalle variabili d'ambiente con prefisso `MESHBLE_CONF_`) e i **segreti** (letti esclusivamente dall'ambiente, mai dal file). A questi si aggiungono le **runtime settings** memorizzate nel database, che sono mutabili senza riavvio e per le quali il DB è l'unica autorità. La pagina include inoltre il riferimento completo dei comandi della CLI `meshble`. Per l'installazione vedi [installazione.md](installazione.md); per il contesto architetturale vedi [architettura.md](architettura.md); per i temi di sicurezza (rotazione JWT, gruppi, ACL e record rule) vedi [sicurezza.md](sicurezza.md).
+Questa pagina documenta **ogni** chiave di configurazione di Kigumi, il suo valore di default e il suo significato. La configurazione di Kigumi è divisa in due piani nettamente separati: la **configurazione di boot** (non segreta, tipizzata, caricata da `kigumi.toml` e dalle variabili d'ambiente con prefisso `KIGUMI_CONF_`) e i **segreti** (letti esclusivamente dall'ambiente, mai dal file). A questi si aggiungono le **runtime settings** memorizzate nel database, che sono mutabili senza riavvio e per le quali il DB è l'unica autorità. La pagina include inoltre il riferimento completo dei comandi della CLI `kigumi`. Per l'installazione vedi [installazione.md](installazione.md); per il contesto architetturale vedi [architettura.md](architettura.md); per i temi di sicurezza (rotazione JWT, gruppi, ACL e record rule) vedi [sicurezza.md](sicurezza.md).
 
 ## I due piani: boot-time e segreti
 
-La configurazione di boot è l'insieme di tutto ciò che è serializzabile in `meshble.toml` e che **non** è un segreto. Viene caricata con la stratificazione `defaults < meshble.toml < env MESHBLE_CONF_*`, parsificata nella struttura tipizzata `Config` e validata **fail-fast**: un refuso in una sezione core impedisce l'avvio, invece di essere silenziosamente ignorato.
+La configurazione di boot è l'insieme di tutto ciò che è serializzabile in `kigumi.toml` e che **non** è un segreto. Viene caricata con la stratificazione `defaults < kigumi.toml < env KIGUMI_CONF_*`, parsificata nella struttura tipizzata `Config` e validata **fail-fast**: un refuso in una sezione core impedisce l'avvio, invece di essere silenziosamente ignorato.
 
 I segreti non stanno mai nel file: sono letti solo dall'ambiente tramite `Secrets::from_env`, e la presenza di quelli obbligatori è verificata all'avvio. L'identità della connessione al database è il singolo `DATABASE_URL` (un DSN completo); la sezione `[database]` porta solo il *tuning* non legato all'URL, così non c'è sovrapposizione ambigua.
 
-`Settings::load` combina i due piani in una struttura `Settings { config, secrets }` e ne verifica anche l'interazione (per esempio: se `[mail].smtp_host` è impostato ma `MESHBLE_SMTP_PASSWORD` non lo è, l'avvio fallisce).
+`Settings::load` combina i due piani in una struttura `Settings { config, secrets }` e ne verifica anche l'interazione (per esempio: se `[mail].smtp_host` è impostato ma `KIGUMI_SMTP_PASSWORD` non lo è, l'avvio fallisce).
 
-## File `meshble.toml`
+## File `kigumi.toml`
 
-Esempio completo (copia di `meshble.toml.example`):
+Esempio completo (copia di `kigumi.toml.example`):
 
 ```toml
 [instance]
@@ -29,16 +29,16 @@ connect_timeout = "5s"
 
 [storage]
 backend = "fs"                 # fs | s3
-path = "/var/lib/meshble/blobs"
-# bucket = "meshble-blobs"     # for backend = s3 (keys via env)
+path = "/var/lib/kigumi/blobs"
+# bucket = "kigumi-blobs"     # for backend = s3 (keys via env)
 # region = "eu-west-1"
 
 [auth]
-access_ttl = 900               # 15 min  (jwt secret via env MESHBLE_JWT_SECRET)
+access_ttl = 900               # 15 min  (jwt secret via env KIGUMI_JWT_SECRET)
 refresh_ttl = 2592000          # 30 days
 
 [mail]
-smtp_host = "smtp.acme.com"    # smtp password via env MESHBLE_SMTP_PASSWORD
+smtp_host = "smtp.acme.com"    # smtp password via env KIGUMI_SMTP_PASSWORD
 smtp_port = 587
 from = "erp@acme.com"
 
@@ -63,7 +63,7 @@ Nota sui default: la `Config` di default è completa ma **non** automaticamente 
 
 | Chiave | Tipo | Default | Significato |
 |--------|------|---------|-------------|
-| `name` | `String` | `"meshble"` | Nome logico dell'istanza. |
+| `name` | `String` | `"kigumi"` | Nome logico dell'istanza. |
 
 > Nota: i valori runtime dell'istanza (`base_url`, `mode`, `neutralized`, `banner`) **non** stanno qui: vivono nel database e lì sono autoritativi. Vedi [Runtime settings nel database](#runtime-settings-nel-database).
 
@@ -102,7 +102,7 @@ Per il backend `s3` le credenziali di accesso passano dall'ambiente (non da ques
 | `access_ttl` | `u64` | `900` | Durata in secondi dell'access token (15 minuti). |
 | `refresh_ttl` | `u64` | `2592000` | Durata in secondi del refresh token (30 giorni). |
 
-Il segreto di firma HS256 non sta qui: arriva da `MESHBLE_JWT_SECRET` (vedi [Segreti](#segreti-variabili-dambiente)).
+Il segreto di firma HS256 non sta qui: arriva da `KIGUMI_JWT_SECRET` (vedi [Segreti](#segreti-variabili-dambiente)).
 
 ### `[mail]`
 
@@ -110,7 +110,7 @@ Tutti i campi sono opzionali.
 
 | Chiave | Tipo | Default | Significato |
 |--------|------|---------|-------------|
-| `smtp_host` | `Option<String>` | assente | Host SMTP. Se impostato, richiede `MESHBLE_SMTP_PASSWORD` nell'ambiente, altrimenti l'avvio fallisce. |
+| `smtp_host` | `Option<String>` | assente | Host SMTP. Se impostato, richiede `KIGUMI_SMTP_PASSWORD` nell'ambiente, altrimenti l'avvio fallisce. |
 | `smtp_port` | `Option<u16>` | assente | Porta SMTP (per esempio `587`). |
 | `from` | `Option<String>` | assente | Indirizzo mittente di default. |
 
@@ -118,7 +118,7 @@ Tutti i campi sono opzionali.
 
 | Chiave | Tipo | Default | Significato |
 |--------|------|---------|-------------|
-| `load` | `Vec<String>` | `[]` | **Inerte in v1**: la chiave viene letta ma non seleziona i moduli installati. L'installazione è governata dal registro nel DB tramite `meshble module install` (vedi [moduli.md](moduli.md)). |
+| `load` | `Vec<String>` | `[]` | **Inerte in v1**: la chiave viene letta ma non seleziona i moduli installati. L'installazione è governata dal registro nel DB tramite `kigumi module install` (vedi [moduli.md](moduli.md)). |
 | `[modules.<name>]` | sottoalbero aperto | `{}` | Configurazione per-modulo. |
 
 Le chiavi core di `[modules]` sono strette, ma ogni `[modules.<name>]` è un **sottoalbero aperto**: viene catturato verbatim (campo `per_module`, una `BTreeMap<String, figment::value::Value>` con `#[serde(flatten)]`) e validato dal modulo proprietario al load, così un modulo può portare le proprie impostazioni senza che l'istanza si rifiuti di avviarsi. Nell'esempio, `[modules.sales]` con `default_tax = "0.22"` è validato dal modulo `sales`, non dallo schema core. Vedi [moduli.md](moduli.md) e [moduli-custom.md](moduli-custom.md).
@@ -138,53 +138,53 @@ Le chiavi core di `[modules]` sono strette, ma ogni `[modules.<name>]` è un **s
 - `storage.backend = s3` richiede `storage.bucket` (altrimenti errore `storage.backend = s3 requires storage.bucket`).
 - `server.bind` deve parsare come `host:port` (`SocketAddr`), altrimenti errore `server.bind is not a host:port (...)`.
 
-A livello di `Settings::load` c'è inoltre il controllo incrociato con i segreti: `mail.smtp_host` impostato senza `MESHBLE_SMTP_PASSWORD` produce l'errore `mail.smtp_host is set but MESHBLE_SMTP_PASSWORD is not`.
+A livello di `Settings::load` c'è inoltre il controllo incrociato con i segreti: `mail.smtp_host` impostato senza `KIGUMI_SMTP_PASSWORD` produce l'errore `mail.smtp_host is set but KIGUMI_SMTP_PASSWORD is not`.
 
-Per validare e ispezionare la configurazione effettiva senza avviare il server puoi usare il binario standalone `meshble-config`:
+Per validare e ispezionare la configurazione effettiva senza avviare il server puoi usare il binario standalone `kigumi-config`:
 
 ```bash
-meshble-config check    # valida la configurazione effettiva (config + segreti)
-meshble-config print    # stampa la config effettiva con i segreti redatti
+kigumi-config check    # valida la configurazione effettiva (config + segreti)
+kigumi-config print    # stampa la config effettiva con i segreti redatti
 ```
 
-Il path del file è preso da `$MESHBLE_CONFIG` o, in assenza, da `./meshble.toml`. I due comandi sono disponibili anche come sottocomandi `meshble config check` / `meshble config print` (quest'ultimo, a differenza del binario standalone, aggiunge anche le runtime settings dal DB).
+Il path del file è preso da `$KIGUMI_CONFIG` o, in assenza, da `./kigumi.toml`. I due comandi sono disponibili anche come sottocomandi `kigumi config check` / `kigumi config print` (quest'ultimo, a differenza del binario standalone, aggiunge anche le runtime settings dal DB).
 
-## Override da variabili d'ambiente: `MESHBLE_CONF_`
+## Override da variabili d'ambiente: `KIGUMI_CONF_`
 
-Ogni chiave di boot è sovrascrivibile dall'ambiente con il prefisso `MESHBLE_CONF_` e il **doppio underscore** (`__`) come separatore di annidamento. Il provider env è caricato come ultimo strato (`Env::prefixed("MESHBLE_CONF_").split("__")`), quindi vince su file e default.
+Ogni chiave di boot è sovrascrivibile dall'ambiente con il prefisso `KIGUMI_CONF_` e il **doppio underscore** (`__`) come separatore di annidamento. Il provider env è caricato come ultimo strato (`Env::prefixed("KIGUMI_CONF_").split("__")`), quindi vince su file e default.
 
 | Chiave TOML | Variabile d'ambiente |
 |-------------|----------------------|
-| `[server] bind` | `MESHBLE_CONF_SERVER__BIND` |
-| `[server] workers` | `MESHBLE_CONF_SERVER__WORKERS` |
-| `[server] proxy_mode` | `MESHBLE_CONF_SERVER__PROXY_MODE` |
-| `[storage] backend` | `MESHBLE_CONF_STORAGE__BACKEND` |
-| `[storage] path` | `MESHBLE_CONF_STORAGE__PATH` |
-| `[auth] access_ttl` | `MESHBLE_CONF_AUTH__ACCESS_TTL` |
-| `[log] level` | `MESHBLE_CONF_LOG__LEVEL` |
-| `[instance] name` | `MESHBLE_CONF_INSTANCE__NAME` |
+| `[server] bind` | `KIGUMI_CONF_SERVER__BIND` |
+| `[server] workers` | `KIGUMI_CONF_SERVER__WORKERS` |
+| `[server] proxy_mode` | `KIGUMI_CONF_SERVER__PROXY_MODE` |
+| `[storage] backend` | `KIGUMI_CONF_STORAGE__BACKEND` |
+| `[storage] path` | `KIGUMI_CONF_STORAGE__PATH` |
+| `[auth] access_ttl` | `KIGUMI_CONF_AUTH__ACCESS_TTL` |
+| `[log] level` | `KIGUMI_CONF_LOG__LEVEL` |
+| `[instance] name` | `KIGUMI_CONF_INSTANCE__NAME` |
 
 Esempio:
 
 ```bash
-export MESHBLE_CONF_SERVER__BIND=0.0.0.0:9000
-export MESHBLE_CONF_SERVER__WORKERS=8
-export MESHBLE_CONF_LOG__FORMAT=json
+export KIGUMI_CONF_SERVER__BIND=0.0.0.0:9000
+export KIGUMI_CONF_SERVER__WORKERS=8
+export KIGUMI_CONF_LOG__FORMAT=json
 ```
 
-Il prefisso `MESHBLE_CONF_` è deliberatamente distinto da quello dei segreti (`DATABASE_URL`, `MESHBLE_JWT_SECRET`, …), così i segreti non vengono mai catturati dal layer di configurazione.
+Il prefisso `KIGUMI_CONF_` è deliberatamente distinto da quello dei segreti (`DATABASE_URL`, `KIGUMI_JWT_SECRET`, …), così i segreti non vengono mai catturati dal layer di configurazione.
 
 ## Segreti (variabili d'ambiente)
 
-I segreti sono letti solo dall'ambiente (mai da `meshble.toml`) tramite `Secrets::from_env`. La presenza di quelli **obbligatori** è verificata all'avvio: l'istanza si rifiuta di partire se ne manca uno (fail-fast).
+I segreti sono letti solo dall'ambiente (mai da `kigumi.toml`) tramite `Secrets::from_env`. La presenza di quelli **obbligatori** è verificata all'avvio: l'istanza si rifiuta di partire se ne manca uno (fail-fast).
 
 | Variabile | Obbligatoria | Significato |
 |-----------|--------------|-------------|
 | `DATABASE_URL` | Sì | DSN Postgres completo: l'unica fonte dell'identità di connessione (host, porta, db, utente, password, sslmode). Deve essere un URL con schema `postgres` o `postgresql` parsabile, altrimenti errore `DATABASE_URL is not a valid postgres:// URL`. |
-| `MESHBLE_JWT_SECRET` | Sì | Segreto di firma HS256 per access e refresh token. |
-| `MESHBLE_JWT_SECRET_OLD` | No | Segreto JWT precedente, ancora **accettato in verifica** durante una finestra di rotazione (rotazione per `kid`). |
-| `MESHBLE_SMTP_PASSWORD` | No (*) | Password SMTP. (*) Diventa obbligatoria se `[mail].smtp_host` è configurato. |
-| `MESHBLE_ADMIN_TOKEN` | No | Bearer token destinato a proteggere operazioni distruttive sul database (dump/restore/gc). Opzionale al boot; quando presente viene solo caricato in `Secrets` e mostrato redatto da `print` (l'enforcement lato endpoint non è ancora cablato). |
+| `KIGUMI_JWT_SECRET` | Sì | Segreto di firma HS256 per access e refresh token. |
+| `KIGUMI_JWT_SECRET_OLD` | No | Segreto JWT precedente, ancora **accettato in verifica** durante una finestra di rotazione (rotazione per `kid`). |
+| `KIGUMI_SMTP_PASSWORD` | No (*) | Password SMTP. (*) Diventa obbligatoria se `[mail].smtp_host` è configurato. |
+| `KIGUMI_ADMIN_TOKEN` | No | Bearer token destinato a proteggere operazioni distruttive sul database (dump/restore/gc). Opzionale al boot; quando presente viene solo caricato in `Secrets` e mostrato redatto da `print` (l'enforcement lato endpoint non è ancora cablato). |
 
 Una variabile è considerata "non impostata" sia se assente sia se vuota (`req`/`opt` filtrano le stringhe vuote).
 
@@ -192,18 +192,18 @@ Esempio (vedi `.env.example`):
 
 ```bash
 # REQUIRED — single source of the database connection identity (full Postgres DSN)
-DATABASE_URL=postgres://meshble:CHANGE_ME@127.0.0.1:5432/meshble
+DATABASE_URL=postgres://kigumi:CHANGE_ME@127.0.0.1:5432/kigumi
 # REQUIRED — HS256 signing secret for access/refresh tokens
-MESHBLE_JWT_SECRET=CHANGE_ME_long_random_value
+KIGUMI_JWT_SECRET=CHANGE_ME_long_random_value
 # OPTIONAL — previous JWT secret, accepted on verify during a rotation window
-# MESHBLE_JWT_SECRET_OLD=
+# KIGUMI_JWT_SECRET_OLD=
 # OPTIONAL — required only if [mail].smtp_host is configured
-# MESHBLE_SMTP_PASSWORD=
+# KIGUMI_SMTP_PASSWORD=
 # OPTIONAL — bearer token gating destructive db ops (dump/restore/gc)
-# MESHBLE_ADMIN_TOKEN=
+# KIGUMI_ADMIN_TOKEN=
 ```
 
-Quando la configurazione effettiva viene stampata (`meshble config print` o `meshble-config print`), ogni segreto è redatto a livello di campo: la password del `DATABASE_URL` è mascherata (`redact_db_url`) mentre host/porta/db/utente restano visibili, e gli altri segreti compaiono come `set (****)` o `unset`.
+Quando la configurazione effettiva viene stampata (`kigumi config print` o `kigumi-config print`), ogni segreto è redatto a livello di campo: la password del `DATABASE_URL` è mascherata (`redact_db_url`) mentre host/porta/db/utente restano visibili, e gli altri segreti compaiono come `set (****)` o `unset`.
 
 ### Segreti operativi addizionali
 
@@ -211,13 +211,13 @@ Oltre ai segreti gestiti da `Secrets`, alcuni comandi della CLI leggono direttam
 
 | Variabile | Usata da | Significato |
 |-----------|----------|-------------|
-| `MESHBLE_ADMIN_PASSWORD` | `serve` (bootstrap admin) | Password con cui viene bootstrappato l'utente `admin` se non esiste ancora. Senza di essa, `serve` avvisa (`warning: no admin user; set MESHBLE_ADMIN_PASSWORD to bootstrap one`) e non crea l'admin (nessuna password è mai hardcoded). |
-| `MESHBLE_NEW_PASSWORD` | `user create`, `user set-password` | Password alternativa al flag `--password` per creare/reimpostare un utente. |
-| `MESHBLE_CONFIG` | tutti i comandi | Path del file `meshble.toml` se non passato con `--config`; in assenza si usa `./meshble.toml`. |
+| `KIGUMI_ADMIN_PASSWORD` | `serve` (bootstrap admin) | Password con cui viene bootstrappato l'utente `admin` se non esiste ancora. Senza di essa, `serve` avvisa (`warning: no admin user; set KIGUMI_ADMIN_PASSWORD to bootstrap one`) e non crea l'admin (nessuna password è mai hardcoded). |
+| `KIGUMI_NEW_PASSWORD` | `user create`, `user set-password` | Password alternativa al flag `--password` per creare/reimpostare un utente. |
+| `KIGUMI_CONFIG` | tutti i comandi | Path del file `kigumi.toml` se non passato con `--config`; in assenza si usa `./kigumi.toml`. |
 
 ## Runtime settings nel database
 
-Alcune impostazioni **non** stanno nella configurazione di boot: vivono nel database, sono mutabili senza riavvio e il DB è la loro autorità unica. Sono memorizzate nella tabella `meshble_setting` (colonne `key`, `value`, `vtype`), l'equivalente tipizzato di un parametro di configurazione runtime.
+Alcune impostazioni **non** stanno nella configurazione di boot: vivono nel database, sono mutabili senza riavvio e il DB è la loro autorità unica. Sono memorizzate nella tabella `kigumi_setting` (colonne `key`, `value`, `vtype`), l'equivalente tipizzato di un parametro di configurazione runtime.
 
 Due meccanismi distinti popolano questa tabella:
 
@@ -231,34 +231,34 @@ db.seed_setting("base_url", "", "string").await?;
 db.seed_setting("mode", "production", "string").await?;
 ```
 
-Altre chiavi runtime tipiche sono `neutralized` e `banner`. Il campo `vtype` (`string` \| `bool` \| `int` \| `json`) è un suggerimento per i lettori tipizzati (default `string`). Queste chiavi si gestiscono dalla CLI con `meshble config set|get` (vedi sotto).
+Altre chiavi runtime tipiche sono `neutralized` e `banner`. Il campo `vtype` (`string` \| `bool` \| `int` \| `json`) è un suggerimento per i lettori tipizzati (default `string`). Queste chiavi si gestiscono dalla CLI con `kigumi config set|get` (vedi sotto).
 
-## Riferimento della CLI `meshble`
+## Riferimento della CLI `kigumi`
 
-L'eseguibile `meshble` è il comando unico per operare un'istanza. Tutti i comandi accettano l'opzione globale `--config <path>` (in alternativa a `$MESHBLE_CONFIG`).
+L'eseguibile `kigumi` è il comando unico per operare un'istanza. Tutti i comandi accettano l'opzione globale `--config <path>` (in alternativa a `$KIGUMI_CONFIG`).
 
 | Comando | Cosa fa |
 |---------|---------|
-| `meshble serve` | Migra il catalogo + lo schema auth, bootstrappa un admin da `MESHBLE_ADMIN_PASSWORD`, quindi serve l'API protetta. Avvia anche lo scheduler dei cron in background (tick ogni 60 s, claim atomico `SKIP LOCKED`). |
-| `meshble migrate` | Migra i modelli dei moduli installati + gli schemi del framework, poi esce. Su un DB fresco installa `base` (e la sua chiusura di dipendenze); seeda i default runtime `base_url`/`mode`. |
-| `meshble module list` | Elenca i moduli disponibili (linkati) indicando per ciascuno lo stato `installed` o `available` e il suo summary. |
-| `meshble module install <name>` | Installa un modulo e la sua chiusura di dipendenze (deps prima), poi migra le loro tabelle (idempotente). |
-| `meshble module uninstall <name>` | Disinstalla un modulo: smette di essere migrato/servito, ma le sue tabelle e i suoi dati sono **mantenuti**. Rifiuta `base` e rifiuta se un modulo installato dipende ancora da quello. |
-| `meshble user create <login> [--password <p>] [--groups <csv>]` | Crea o sostituisce un utente (upsert). Password via `--password` o `$MESHBLE_NEW_PASSWORD`. `--groups` default `user`. |
-| `meshble user set-password <login> [--password <p>]` | Reimposta la password di un utente mantenendone i gruppi. |
-| `meshble user grant <login> <group>` | Aggiunge un gruppo a un utente. |
-| `meshble user company <login> [--active <id>] [--allowed <csv>]` | Assegna lo scope multi-azienda dell'utente: `--active` è la company di default, `--allowed` un CSV di id accessibili (la company attiva è sempre inclusa). Vuoto = senza restrizioni. |
-| `meshble acl grant <model> <group> [--read] [--write] [--create] [--delete]` | Concede (o aggiorna) un'ACL runtime per un gruppo su un modello. Almeno un flag operazione è obbligatorio. |
-| `meshble acl revoke <model> <group>` | Rimuove un override ACL runtime per un gruppo su un modello (la baseline statica resta invariata). |
-| `meshble acl list` | Elenca le ACL effettive: la baseline compilata + gli override runtime dal DB. |
-| `meshble rule add <model> [--groups <csv>] [--ops <csv>] --domain <json>` | Aggiunge una record rule runtime. `--groups` è un CSV (vuoto = globale), `--ops` un CSV di `r`/`w`/`c`/`d` (default `r`), `--domain` l'AST JSON portabile (es. `{"field":"state","op":"!=","value":"done"}`). |
-| `meshble rule remove <id>` | Rimuove una record rule runtime per id (la baseline statica non è toccata). |
-| `meshble rule list` | Elenca le record rule runtime presenti nel DB. |
-| `meshble config check` | Valida la configurazione effettiva. |
-| `meshble config print` | Stampa la configurazione effettiva (segreti redatti) **più** le runtime settings dal DB. |
-| `meshble config set <key> <value> [--vtype <t>]` | Imposta una runtime setting nel DB (autorità per le chiavi runtime). `--vtype` default `string`. |
-| `meshble config get <key>` | Legge il valore di una runtime setting. |
-| `meshble version` | Stampa la versione del framework e i moduli linkati con la loro versione. |
+| `kigumi serve` | Migra il catalogo + lo schema auth, bootstrappa un admin da `KIGUMI_ADMIN_PASSWORD`, quindi serve l'API protetta. Avvia anche lo scheduler dei cron in background (tick ogni 60 s, claim atomico `SKIP LOCKED`). |
+| `kigumi migrate` | Migra i modelli dei moduli installati + gli schemi del framework, poi esce. Su un DB fresco installa `base` (e la sua chiusura di dipendenze); seeda i default runtime `base_url`/`mode`. |
+| `kigumi module list` | Elenca i moduli disponibili (linkati) indicando per ciascuno lo stato `installed` o `available` e il suo summary. |
+| `kigumi module install <name>` | Installa un modulo e la sua chiusura di dipendenze (deps prima), poi migra le loro tabelle (idempotente). |
+| `kigumi module uninstall <name>` | Disinstalla un modulo: smette di essere migrato/servito, ma le sue tabelle e i suoi dati sono **mantenuti**. Rifiuta `base` e rifiuta se un modulo installato dipende ancora da quello. |
+| `kigumi user create <login> [--password <p>] [--groups <csv>]` | Crea o sostituisce un utente (upsert). Password via `--password` o `$KIGUMI_NEW_PASSWORD`. `--groups` default `user`. |
+| `kigumi user set-password <login> [--password <p>]` | Reimposta la password di un utente mantenendone i gruppi. |
+| `kigumi user grant <login> <group>` | Aggiunge un gruppo a un utente. |
+| `kigumi user company <login> [--active <id>] [--allowed <csv>]` | Assegna lo scope multi-azienda dell'utente: `--active` è la company di default, `--allowed` un CSV di id accessibili (la company attiva è sempre inclusa). Vuoto = senza restrizioni. |
+| `kigumi acl grant <model> <group> [--read] [--write] [--create] [--delete]` | Concede (o aggiorna) un'ACL runtime per un gruppo su un modello. Almeno un flag operazione è obbligatorio. |
+| `kigumi acl revoke <model> <group>` | Rimuove un override ACL runtime per un gruppo su un modello (la baseline statica resta invariata). |
+| `kigumi acl list` | Elenca le ACL effettive: la baseline compilata + gli override runtime dal DB. |
+| `kigumi rule add <model> [--groups <csv>] [--ops <csv>] --domain <json>` | Aggiunge una record rule runtime. `--groups` è un CSV (vuoto = globale), `--ops` un CSV di `r`/`w`/`c`/`d` (default `r`), `--domain` l'AST JSON portabile (es. `{"field":"state","op":"!=","value":"done"}`). |
+| `kigumi rule remove <id>` | Rimuove una record rule runtime per id (la baseline statica non è toccata). |
+| `kigumi rule list` | Elenca le record rule runtime presenti nel DB. |
+| `kigumi config check` | Valida la configurazione effettiva. |
+| `kigumi config print` | Stampa la configurazione effettiva (segreti redatti) **più** le runtime settings dal DB. |
+| `kigumi config set <key> <value> [--vtype <t>]` | Imposta una runtime setting nel DB (autorità per le chiavi runtime). `--vtype` default `string`. |
+| `kigumi config get <key>` | Legge il valore di una runtime setting. |
+| `kigumi version` | Stampa la versione del framework e i moduli linkati con la loro versione. |
 
 Le ACL e le record rule gestite dalla CLI sono **additive** sopra la baseline compilata: per le ACL gli override del DB possono solo ampliare l'accesso (unione), per le record rule aggiungono restrizioni/alternative attraverso lo stesso motore — in entrambi i casi la baseline statica resta in vigore. Per i dettagli su gruppi, ACL e record rule vedi [sicurezza.md](sicurezza.md).
 

@@ -1,16 +1,16 @@
 //! M17.1: locations + quants on a real database. The composite-unique index allows one quant per
 //! (product, location) and rejects a duplicate; locations and warehouses round-trip. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
     let _ = (
-        &meshble_mod_stock::MANIFEST,
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
+        &kigumi_mod_stock::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
     );
 }
 

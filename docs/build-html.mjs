@@ -103,7 +103,7 @@ function page(lang, slug, bodyHtml) {
   return `<!doctype html>
 <html lang="${lang}" class="scroll-smooth">
 <head>
-  <title>Meshble · ${title} · ${lang.toUpperCase()}</title>
+  <title>Kigumi · ${title} · ${lang.toUpperCase()}</title>
 ${HEAD}
 </head>
 <body class="font-body antialiased">
@@ -111,7 +111,7 @@ ${HEAD}
     <div class="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-6 px-5 sm:px-8">
       <a href="${ui.land}" class="flex items-center gap-2">
         <span class="pulse h-2 w-2 rounded-full bg-accent"></span>
-        <span class="font-display text-[17px] font-semibold text-text">meshble</span>
+        <span class="font-display text-[17px] font-semibold text-text">kigumi</span>
         <span class="font-mono text-[12px] text-muted">/ docs</span>
       </a>
       <div class="flex items-center gap-5 text-[14px] text-muted">
@@ -136,7 +136,7 @@ ${sidebar(lang, slug)}
 ${bodyHtml}
       </article>
       <footer class="mt-16 border-t border-border pt-6 text-[13px] text-muted">
-        <span class="font-mono">meshble · ${ui.docs.toLowerCase()}</span>
+        <span class="font-mono">kigumi · ${ui.docs.toLowerCase()}</span>
       </footer>
     </main>
   </div>
@@ -152,9 +152,9 @@ function redirectIndex() {
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="refresh" content="0; url=./en/README.html" />
-  <title>Meshble · Documentation</title>
+  <title>Kigumi · Documentation</title>
 </head>
-<body><a href="./en/README.html">Meshble documentation</a></body>
+<body><a href="./en/README.html">Kigumi documentation</a></body>
 </html>
 `
 }

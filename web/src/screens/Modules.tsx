@@ -77,7 +77,7 @@ export function Modules() {
         <p className="t-caption text-muted">
           Install and uninstall apply <span className="text-text">live</span> — the server stays up and the module's
           models become available (or unavailable) immediately, no restart. Uninstall keeps the data. Module reference
-          data (e.g. default accounts or stock locations) is seeded by <span className="t-mono">meshble migrate</span>.
+          data (e.g. default accounts or stock locations) is seeded by <span className="t-mono">kigumi migrate</span>.
         </p>
       </Card>
 

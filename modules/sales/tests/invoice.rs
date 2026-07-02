@@ -2,17 +2,17 @@
 //! by a sales.user with NO account groups — create_sale_invoice gates on the order write and posts the
 //! move elevated — proving the cross-module invoicing seam end to end. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 /// Link base + mail + sales + account so every referenced model is registered in this test binary.
 fn link() {
     let _ = (
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
-        &meshble_mod_account::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
+        &kigumi_mod_account::MANIFEST,
     );
 }
 
@@ -70,7 +70,7 @@ async fn confirmed_order_generates_a_posted_balanced_invoice() {
 
     // Invoice as a plain sales.user (no account groups): gate on order write, GL posting runs elevated.
     let seller = Ctx::new(1, vec!["sales.user".to_string()]);
-    let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
+    let (acls, rules) = (kigumi_mod_sales::ACLS, kigumi_mod_sales::RECORD_RULES);
     let move_id = db.run_service(&order, &seller, acls, rules, oid, "create_invoice", serde_json::Map::new()).await.unwrap()["invoice"].as_i64().unwrap();
 
     let inv = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();

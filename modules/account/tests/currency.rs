@@ -1,12 +1,12 @@
 //! Multi-currency conversion: convert_amount uses the latest res.currency.rate on or before the date;
 //! the base currency (no rate rows) is 1.0; an unknown historical rate errors. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
-    let _ = (&meshble_mod_account::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_account::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 #[tokio::test]
@@ -37,13 +37,13 @@ async fn convert_amount_uses_the_dated_rate() {
     let f = |d: rust_decimal::Decimal| d.to_string().parse::<f64>().unwrap();
 
     // 125 USD -> 100 EUR (divide by the USD rate; EUR base = 1.0).
-    assert_eq!(f(meshble_mod_account::services::convert_amount(&pool, "125".parse().unwrap(), usd, eur, "2099-01-01").await.unwrap()), 100.0);
+    assert_eq!(f(kigumi_mod_account::services::convert_amount(&pool, "125".parse().unwrap(), usd, eur, "2099-01-01").await.unwrap()), 100.0);
     // 100 EUR -> 125 USD (multiply by the USD rate).
-    assert_eq!(f(meshble_mod_account::services::convert_amount(&pool, "100".parse().unwrap(), eur, usd, "2099-01-01").await.unwrap()), 125.0);
+    assert_eq!(f(kigumi_mod_account::services::convert_amount(&pool, "100".parse().unwrap(), eur, usd, "2099-01-01").await.unwrap()), 125.0);
     // Same currency is identity.
-    assert_eq!(f(meshble_mod_account::services::convert_amount(&pool, "50".parse().unwrap(), eur, eur, "2099-01-01").await.unwrap()), 50.0);
+    assert_eq!(f(kigumi_mod_account::services::convert_amount(&pool, "50".parse().unwrap(), eur, eur, "2099-01-01").await.unwrap()), 50.0);
     // GBP has rates but none on or before 2020 → error (never silently 1.0).
-    assert!(meshble_mod_account::services::convert_amount(&pool, "100".parse().unwrap(), gbp, eur, "2020-06-01").await.is_err(), "unknown historical rate errors");
+    assert!(kigumi_mod_account::services::convert_amount(&pool, "100".parse().unwrap(), gbp, eur, "2020-06-01").await.is_err(), "unknown historical rate errors");
 
     for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

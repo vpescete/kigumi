@@ -1,13 +1,13 @@
 //! Mail module: a headless chatter subsystem. A model opts in with one line
-//! (`meshble::register_mailed!("sale.order")`) — no 5000-line mixin — and gains a thread of
+//! (`kigumi::register_mailed!("sale.order")`) — no 5000-line mixin — and gains a thread of
 //! `mail.message`s addressed by the polymorphic `(res_model, res_id)` link. The framework cleans
 //! that thread up on delete (the integrity guarantee Odoo leaves to hand-written `unlink` overrides),
-//! reliably, because Meshble has a single controlled delete path. See docs/MAIL_DESIGN.md.
+//! reliably, because Kigumi has a single controlled delete path. See docs/MAIL_DESIGN.md.
 //!
 //! Slice 1 (this file): the `mail.message` model + post/list API (server) + delete cleanup (db).
 //! Tracking, activities and followers land in later slices on the same `(res_model, res_id)` link.
 
-use meshble::prelude::*;
+use kigumi::prelude::*;
 
 /// Module manifest. `mail` depends on `base` (res.users as message author).
 pub static MANIFEST: ModuleManifest = ModuleManifest {
@@ -17,11 +17,11 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     depends: &[ModuleDep { name: "base", req: "^1.0" }],
     summary: "Headless chatter: messages, tracking, followers, activities",
 };
-meshble::register_module!(MANIFEST);
+kigumi::register_module!(MANIFEST);
 
 // Retrofit: res.partner (a base model the mail module depends on) gains a chatter thread. Declared
 // here, in the mail module, so base needs no dependency on mail (mail → base, never the reverse).
-meshble::register_mailed!("res.partner");
+kigumi::register_mailed!("res.partner");
 
 /// A thread message: a human comment or a system audit entry, attached to any record via the
 /// polymorphic `(res_model, res_id)` link. One shared table serves every mailed model — no
@@ -40,7 +40,7 @@ pub struct MailMessage {
     res_id: Integer,
 
     /// Author user id. A plain integer, not a Many2one: res.users is an external table (the auth
-    /// subsystem owns `meshble_user`), and the mail subsystem deliberately avoids hard FKs to
+    /// subsystem owns `kigumi_user`), and the mail subsystem deliberately avoids hard FKs to
     /// volatile actor tables — a deleted user's messages survive with a dangling author id (as in
     /// Odoo's `ondelete='set null'`). The UI resolves the name from res.users when displaying.
     #[field(label = "Author")]
@@ -161,7 +161,7 @@ pub static ACLS: &[Acl] = &[
     // even an admin-queued row can only be sent from an address the relay is authorized for.
     Acl { model: "mail.mail", group: "admin", read: true, write: true, create: true, delete: true },
 ];
-meshble::register_acls!(ACLS);
+kigumi::register_acls!(ACLS);
 
 #[cfg(test)]
 mod tests {

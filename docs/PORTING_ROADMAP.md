@@ -1,20 +1,20 @@
-# Roadmap: portare i moduli Odoo Community core su Meshble
+# Roadmap: portare i moduli Odoo Community core su Kigumi
 
 > Analisi grounded sul sorgente Odoo 19 (`odoo19/addons/{mail,product,uom,stock,sale,purchase,account,…}`)
-> + inventario delle primitive Meshble attuali. Obiettivo: portare la **catena business core**, non
+> + inventario delle primitive Kigumi attuali. Obiettivo: portare la **catena business core**, non
 > "tutto Community" (il grosso del numero di moduli — `l10n_*`, temi, integrazioni — è basso valore).
 
 ## Principio guida
 
 Il collo di bottiglia **non è scrivere i modelli, sono le PRIMITIVE di framework mancanti**. Quasi
-ogni modello Odoo usa cose che Meshble oggi non ha. Quindi: **prima le primitive moltiplicatrici, poi
+ogni modello Odoo usa cose che Kigumi oggi non ha. Quindi: **prima le primitive moltiplicatrici, poi
 i moduli in ordine di dipendenza, in profondità su una catena** (non largo-e-superficiale).
 
 ## 1. Gap-matrix delle primitive
 
 ### Tipi di campo
 
-| Primitiva | Meshble | Priorità | Note |
+| Primitiva | Kigumi | Priorità | Note |
 |---|---|---|---|
 | `Date` / `Datetime` | **MANCA** | 🔴 sblocca-tutto | nessun tipo temporale; quasi ogni modello ne ha |
 | `Float` (non-monetario) | **MANCA** | 🔴 alta | abbiamo solo `Decimal{currency_field}`; quantità/pesi/misure servono float con `digits` |
@@ -28,7 +28,7 @@ i moduli in ordine di dipendenza, in profondità su una catena** (non largo-e-su
 
 ### Meccanismi
 
-| Primitiva | Meshble | Priorità | Note |
+| Primitiva | Kigumi | Priorità | Note |
 |---|---|---|---|
 | compute non-stored (on-read) | **MANCA** | 🔴 alta | abbiamo solo compute stored; molti campi Odoo sono calcolati al volo |
 | `related` fields | **MANCA** | 🔴 alta | (vedi sopra) |
@@ -42,7 +42,7 @@ i moduli in ordine di dipendenza, in profondità su una catena** (non largo-e-su
 | tracking (audit dei campi) | **MANCA** | 🟢 bassa | parte di mail |
 | viste kanban/pivot/calendar/graph | **MANCA** (FE) | 🟢 bassa | per ora abbiamo list/form generici contract-driven |
 
-### Cosa Meshble HA GIÀ (e che spesso è migliore di Odoo)
+### Cosa Kigumi HA GIÀ (e che spesso è migliore di Odoo)
 
 Metamodello ispezionabile + DDL generato; compute stored same-record + **aggregati con cascata
 multi-livello**; x2many con **comandi tipizzati** `{op,id,values}` (≠ tuple posizionali Odoo); azioni
@@ -65,7 +65,7 @@ tipizzato → **SQL parametrizzato** (mai `safe_eval`); **multi-company** comple
   `Date`, `Image`, pricelist engine, category tree (`_parent_store`) — **L**
 - `stock`: il più pesante — quant reservation engine, state machine 7 stati su `stock.move`, scheduler
   (**cron**), pull/push routing, **wizard**, **report** — **XL**
-- `sale` (completare) + `purchase`: Meshble ha già `sale.order`/`line` (7 campi); Odoo è molto più ricco
+- `sale` (completare) + `purchase`: Kigumi ha già `sale.order`/`line` (7 campi); Odoo è molto più ricco
   (motore tasse delegato ad `account`, invoicing engine, `mail.thread`, report, doppia validazione PO,
   quotation template) — **M/L ciascuno**
 

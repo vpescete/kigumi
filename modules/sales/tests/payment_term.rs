@@ -2,16 +2,16 @@
 //! due date equals the invoice date. ISO dates are lexically chronological, so a string compare is exact.
 //! One test per binary (the repo convention) since each rebuilds the whole schema. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
     let _ = (
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
-        &meshble_mod_account::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
+        &kigumi_mod_account::MANIFEST,
     );
 }
 
@@ -53,7 +53,7 @@ async fn payment_term_shifts_the_invoice_due_date() {
     let net30 = db.insert_secured(&term, &su, &[], &[], json!({ "name": "30 Days", "days": 30, "active": true }).as_object().unwrap()).await.unwrap();
 
     let seller = Ctx::new(1, vec!["sales.user".to_string()]);
-    let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
+    let (acls, rules) = (kigumi_mod_sales::ACLS, kigumi_mod_sales::RECORD_RULES);
 
     // Order WITH a 30-day term: the due date is pushed past the accounting date.
     let with_term = db.insert_secured(&order, &su, &[], &[], json!({

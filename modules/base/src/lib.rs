@@ -6,7 +6,7 @@
 //! circular FK with res.company; company-specific contacts can be modelled later behind a deferred
 //! FK. The active-company filtering rule lives in the security layer (Ctx.company + a record rule).
 
-use meshble::prelude::*;
+use kigumi::prelude::*;
 
 /// Module manifest. `base` depends on nothing and anchors the catalog.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
@@ -16,7 +16,7 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     depends: &[],
     summary: "Foundational models: currency, partner, company",
 };
-meshble::register_module!(MANIFEST);
+kigumi::register_module!(MANIFEST);
 
 /// Currency used by monetary fields. Global (shared across companies).
 #[model(name = "res.currency", table = "res_currency")]
@@ -167,11 +167,11 @@ pub struct ResGroups {
     name: Text,
 }
 
-/// User (the `res.users` analog): a READ-ONLY projection of the auth subsystem's `meshble_user`
+/// User (the `res.users` analog): a READ-ONLY projection of the auth subsystem's `kigumi_user`
 /// table. An EXTERNAL table — the metamodel never migrates it (the auth subsystem owns it). The
 /// password hash is simply not a field here, so it is never selected; credentials, refresh tokens
 /// and the company scope stay in the auth subsystem. Exposes identity for the UI (user lists/pickers).
-#[model(name = "res.users", table = "meshble_user")]
+#[model(name = "res.users", table = "kigumi_user")]
 pub struct ResUsers {
     #[field(label = "Login", required, unique)]
     login: Text,
@@ -182,14 +182,14 @@ pub struct ResUsers {
     #[field(label = "Company", target = "res.company")]
     company_id: Many2one,
 }
-meshble::register_external!("res.users");
+kigumi::register_external!("res.users");
 
 /// Attachment (Odoo's `ir.attachment`): a file attached to any record via a polymorphic
 /// `(res_model, res_id)` link (no FK — like the mail thread). The bytes live in the content-addressed
 /// blob store keyed by `checksum` (sha256); this row holds only metadata. Generic CRUD is admin-only —
 /// uploads/downloads go through the gated `/attachments` endpoints, which run elevated after a host
 /// access check (read to list/download, write to upload/delete).
-#[model(name = "ir.attachment", table = "meshble_attachment")]
+#[model(name = "ir.attachment", table = "kigumi_attachment")]
 pub struct IrAttachment {
     #[field(label = "Name", required)]
     name: Text,
@@ -229,10 +229,10 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "res.users", group: "admin", read: true, write: false, create: false, delete: false },
     Acl { model: "ir.attachment", group: "admin", read: true, write: true, create: true, delete: true },
 ];
-meshble::register_acls!(ACLS);
+kigumi::register_acls!(ACLS);
 
 // Form layout: a partner with contact, address and accounting groups.
-meshble::register_view!(
+kigumi::register_view!(
     "res.partner",
     &[
         FieldGroup {

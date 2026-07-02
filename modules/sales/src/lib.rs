@@ -1,12 +1,12 @@
 //! Application module `sales`: `sale.order` + `sale_margin` extension.
 //! Defined by hand in the walking skeleton; in phase 2 it will be `#[model]` / `#[extend]`.
 
-use meshble::prelude::*;
+use kigumi::prelude::*;
 
 pub mod services;
-// The pure tax engine (relocated from meshble-db: tax math is ERP, owned by this module).
+// The pure tax engine (relocated from kigumi-db: tax math is ERP, owned by this module).
 pub mod tax;
-// The product-variant generation engine (relocated from meshble-db: the product graph is ERP).
+// The product-variant generation engine (relocated from kigumi-db: the product graph is ERP).
 pub mod variants;
 
 /// Module manifest: its own version + compatibility range with the framework.
@@ -18,11 +18,11 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     depends: &[ModuleDep { name: "base", req: "^1.0" }, ModuleDep { name: "mail", req: "^1.0" }],
     summary: "Sales order management",
 };
-meshble::register_module!(MANIFEST);
+kigumi::register_module!(MANIFEST);
 
 // `sale.order` opts into the mail subsystem: it gains a chatter thread (messages now; tracking,
 // followers and activities in later slices), and the framework cleans that thread up on delete.
-meshble::register_mailed!("sale.order");
+kigumi::register_mailed!("sale.order");
 
 /// The "base" of sale.order — now declared with `#[model]` (phase 2).
 /// The macro generates `ModelDescriptor` + `impl Model`; the field "types" are the DSL.
@@ -162,7 +162,7 @@ pub struct ProductTemplate {
 }
 
 // Retrofit: a product (template) has a chatter thread; price changes are tracked as audit entries.
-meshble::register_mailed!("product.template");
+kigumi::register_mailed!("product.template");
 
 /// Product variant (Odoo's `product.product`): a sellable unit that `_inherits` its product.template
 /// through the required `product_tmpl_id` FK, transparently exposing the template's name/price/etc.
@@ -655,21 +655,21 @@ fn product_display_name(i: &ComputeInput) -> Value {
     let code = i.str("default_code");
     Value::Str(if code.is_empty() { name.to_string() } else { format!("{name} ({code})") })
 }
-meshble::register_compute!("product_display_name", product_display_name);
+kigumi::register_compute!("product_display_name", product_display_name);
 /// A variant's effective sales price: the (inherited) template list_price plus the variant's own
 /// materialized surcharge. On-read, same-record (both inputs are on the variant record).
 fn variant_lst_price(i: &ComputeInput) -> Value {
     Value::Decimal(i.decimal("list_price") + i.decimal("price_extra"))
 }
-meshble::register_compute!("variant_lst_price", variant_lst_price);
-meshble::register_compute!("compute_amount", compute_amount);
-meshble::register_compute!("compute_amount_untaxed", compute_amount_untaxed);
-meshble::register_compute!("compute_amount_tax", compute_amount_tax);
-meshble::register_compute!("compute_margin", compute_margin);
-meshble::register_compute!("compute_line_subtotal", compute_line_subtotal);
-meshble::register_compute!("compute_line_tax", compute_line_tax);
-meshble::register_compute!("compute_line_total", compute_line_total);
-meshble::register_compute!("compute_line_margin", compute_line_margin);
+kigumi::register_compute!("variant_lst_price", variant_lst_price);
+kigumi::register_compute!("compute_amount", compute_amount);
+kigumi::register_compute!("compute_amount_untaxed", compute_amount_untaxed);
+kigumi::register_compute!("compute_amount_tax", compute_amount_tax);
+kigumi::register_compute!("compute_margin", compute_margin);
+kigumi::register_compute!("compute_line_subtotal", compute_line_subtotal);
+kigumi::register_compute!("compute_line_tax", compute_line_tax);
+kigumi::register_compute!("compute_line_total", compute_line_total);
+kigumi::register_compute!("compute_line_margin", compute_line_margin);
 
 /// Resolves the module's complete model from the catalog (base + auto-registered extensions).
 pub fn resolved_sale_order() -> ResolvedModel {
@@ -783,8 +783,8 @@ pub static RECORD_RULES: &[RecordRule] = &[
     },
 ];
 
-meshble::register_acls!(ACLS);
-meshble::register_rules!(RECORD_RULES);
+kigumi::register_acls!(ACLS);
+kigumi::register_rules!(RECORD_RULES);
 
 /// `confirm`: a draft order becomes a confirmed sale and is assigned its SO number from the sequence.
 fn confirm_order(i: &ActionInput) -> Result<ActionOutcome, String> {
@@ -796,7 +796,7 @@ fn confirm_order(i: &ActionInput) -> Result<ActionOutcome, String> {
         s => Err(format!("can only confirm a draft order (state is '{s}')")),
     }
 }
-meshble::register_action!("sale.order", "confirm", confirm_order, &["sales.user"]);
+kigumi::register_action!("sale.order", "confirm", confirm_order, &["sales.user"]);
 
 // Invoicing is a cross-record service that posts a real account.move (the account module's
 // `create_invoice` service on the register_service! seam — `POST /api/sale.order/:id/service/create_invoice`),
@@ -810,7 +810,7 @@ fn set_done(i: &ActionInput) -> Result<ActionOutcome, String> {
         s => Err(format!("can only finish a confirmed order (state is '{s}')")),
     }
 }
-meshble::register_action!("sale.order", "done", set_done, &["sales.user"]);
+kigumi::register_action!("sale.order", "done", set_done, &["sales.user"]);
 
 /// A purchase order (Odoo's `purchase.order`): the buy-side mirror of sale.order, sharing the line
 /// tax/total computes and the order amount aggregates. `confirm` assigns a PO number.
@@ -938,7 +938,7 @@ fn confirm_purchase(i: &ActionInput) -> Result<ActionOutcome, String> {
         s => Err(format!("can only confirm a draft purchase order (state is '{s}')")),
     }
 }
-meshble::register_action!("purchase.order", "confirm", confirm_purchase, &["sales.user"]);
+kigumi::register_action!("purchase.order", "confirm", confirm_purchase, &["sales.user"]);
 
 /// `done`: a confirmed purchase order is locked as received/done.
 fn done_purchase(i: &ActionInput) -> Result<ActionOutcome, String> {
@@ -947,7 +947,7 @@ fn done_purchase(i: &ActionInput) -> Result<ActionOutcome, String> {
         s => Err(format!("can only finish a confirmed purchase order (state is '{s}')")),
     }
 }
-meshble::register_action!("purchase.order", "done", done_purchase, &["sales.user"]);
+kigumi::register_action!("purchase.order", "done", done_purchase, &["sales.user"]);
 
 /// A discount wizard (Odoo's `sale.order.discount`): a transient scratchpad that applies a percentage
 /// discount to every line of its target order. Opened with `order_id` seeded from the active record;
@@ -964,30 +964,30 @@ pub struct SaleOrderDiscount {
     #[field(label = "Created")]
     create_date: Datetime,
 }
-meshble::register_transient!("sale.order.discount");
-meshble::register_wizard!("sale.order.discount", default_get_discount);
+kigumi::register_transient!("sale.order.discount");
+kigumi::register_wizard!("sale.order.discount", default_get_discount);
 // Cross-record SERVICES owned by this module (formerly hardcoded methods on Db). Each is one line; the
-// framework dispatches them generically — meshble-db no longer names sale.order/product.product for these.
+// framework dispatches them generically — kigumi-db no longer names sale.order/product.product for these.
 // No group gate (&[]): the originals gated purely on the order Write ACL — a group requirement would be
 // an authorization tightening, not a behavior-preserving relocation. The Write ACL is the gate.
 // The wizard's apply step: POST /api/sale.order.discount/:id/service/apply_discount.
-meshble::register_service!("sale.order.discount", "apply_discount", services::apply_discount, true, &[]);
+kigumi::register_service!("sale.order.discount", "apply_discount", services::apply_discount, true, &[]);
 // Re-price an order from its pricelist: POST /api/sale.order/:id/service/apply_pricelist.
-meshble::register_service!("sale.order", "apply_pricelist", services::apply_pricelist, true, &[]);
+kigumi::register_service!("sale.order", "apply_pricelist", services::apply_pricelist, true, &[]);
 // Read-only line defaults for a product (replaces the old /_onchange): POST /api/product.product/:id/service/line_defaults.
-meshble::register_service!("product.product", "line_defaults", services::line_defaults, false, &[]);
+kigumi::register_service!("product.product", "line_defaults", services::line_defaults, false, &[]);
 // Materialize the per-tax breakdown on an order's lines (sell + buy sides). No group gate: the original
 // methods gated purely on the order's Write ACL, and purchase.order Write is granted to sales.user AND
 // sales.manager — a group requirement here would narrow access (manager-only callers) vs the original.
-meshble::register_service!("sale.order", "apply_taxes", services::apply_taxes, true, &[]);
-meshble::register_service!("purchase.order", "apply_purchase_taxes", services::apply_purchase_taxes, true, &[]);
+kigumi::register_service!("sale.order", "apply_taxes", services::apply_taxes, true, &[]);
+kigumi::register_service!("purchase.order", "apply_purchase_taxes", services::apply_purchase_taxes, true, &[]);
 // Generate/reconcile a template's variants: POST /api/product.template/:id/service/generate_variants. No
 // group gate (&[]): the original gated purely on product.template Write, which the ACL already restricts to
 // managers. The reconciliation runs on one tx under a per-template advisory lock via ServiceCtx::tx.
-meshble::register_service!("product.template", "generate_variants", variants::generate, true, &[]);
+kigumi::register_service!("product.template", "generate_variants", variants::generate, true, &[]);
 // A PTAV price_extra edit re-materializes price_extra on the affected variants (the M2M aggregate the
 // compute engine can't express on read) — the former in-core M15.1 hook, now a module write trigger.
-meshble::register_write_trigger!("product.template.attribute.value", &["price_extra"], variants::ptav_price_extra_recompute);
+kigumi::register_write_trigger!("product.template.attribute.value", &["price_extra"], variants::ptav_price_extra_recompute);
 
 /// `default_get` for the discount wizard: seed `order_id` from the open context's active record. With
 /// no active record the seed is empty (the required `order_id` then makes the open fail — by design).
@@ -1056,11 +1056,11 @@ fn render_quotation(rec: &serde_json::Value) -> String {
          </tfoot></table></body></html>"
     )
 }
-meshble::register_report!("sale.order", "quotation", "Quotation", render_quotation);
+kigumi::register_report!("sale.order", "quotation", "Quotation", render_quotation);
 
 // Form layouts: a product variant and a sales order, grouped and tabbed instead of dumped in
 // declaration order.
-meshble::register_view!(
+kigumi::register_view!(
     "product.product",
     &[
         FieldGroup {
@@ -1099,7 +1099,7 @@ meshble::register_view!(
     &[NotebookPage { title: "Attributes", fields: &["product_template_attribute_value_ids"] }]
 );
 
-meshble::register_view!(
+kigumi::register_view!(
     "sale.order",
     &[
         FieldGroup {
@@ -1127,7 +1127,7 @@ meshble::register_view!(
     &[NotebookPage { title: "Order lines", fields: &["line_ids"] }]
 );
 
-meshble::register_view!(
+kigumi::register_view!(
     "purchase.order",
     &[
         FieldGroup {
@@ -1154,7 +1154,7 @@ meshble::register_view!(
 
 // Inline-table columns for the order lines: the customer-facing fields, in order. The order/company/
 // cost/margin fields are intentionally omitted so the inline grid stays readable.
-meshble::register_view!(
+kigumi::register_view!(
     "sale.order.line",
     &[FieldGroup {
         title: None,
@@ -1172,7 +1172,7 @@ meshble::register_view!(
     &[]
 );
 
-meshble::register_view!(
+kigumi::register_view!(
     "purchase.order.line",
     &[FieldGroup {
         title: None,
@@ -1220,7 +1220,7 @@ mod tests {
     #[test]
     fn module_closure_and_ownership() {
         // Link base and mail so their manifests/models are registered in this test binary.
-        let _ = (&meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+        let _ = (&kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
         // Installing sales pulls in its dependency closure, deps first (base, then mail, then sales).
         assert_eq!(module_closure("sales").unwrap(), vec!["base", "mail", "sales"]);
         assert_eq!(module_closure("base").unwrap(), vec!["base"]);
@@ -1282,7 +1282,7 @@ mod tests {
         assert!(matches!(img.kind, FieldKind::Image));
         assert!(img.has_column(), "Image is a stored FK column");
         let ddl = to_ddl(&m);
-        assert!(ddl.contains("image bigint REFERENCES meshble_attachment(id)"), "image FK in DDL: {ddl}");
+        assert!(ddl.contains("image bigint REFERENCES kigumi_attachment(id)"), "image FK in DDL: {ddl}");
         let contract = to_ui_contract(&m, &[]).unwrap();
         assert!(contract.contains("\"name\": \"image\""), "image in contract");
         assert!(contract.contains("\"widget\": \"image\""), "image widget");
@@ -1346,7 +1346,7 @@ mod tests {
     fn catalog_resolves_all_models() {
         // Reference a base symbol so the base crate is linked into this test binary and its
         // models self-register (the inventory linkage requirement).
-        let _ = meshble_mod_base::MANIFEST;
+        let _ = kigumi_mod_base::MANIFEST;
         // base (res.partner, res.currency) + sales (sale.order) are all registered.
         let names = registered_model_names();
         for expected in ["res.partner", "res.currency", "sale.order"] {
@@ -1364,7 +1364,7 @@ mod tests {
 
     #[test]
     fn line_discount_and_tax_computes() {
-        use meshble::prelude::{Children, ComputeInput};
+        use kigumi::prelude::{Children, ComputeInput};
         use rust_decimal::Decimal;
         use std::collections::BTreeMap;
         use std::str::FromStr;

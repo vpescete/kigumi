@@ -2,12 +2,12 @@
 //! (Many2one), not just free text. The models migrate (no FK cycle) and resolve on a partner. Requires
 //! DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
-    let _ = &meshble_mod_base::MANIFEST;
+    let _ = &kigumi_mod_base::MANIFEST;
 }
 
 #[tokio::test]

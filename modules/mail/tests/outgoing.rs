@@ -2,13 +2,13 @@
 //! marks it sent / exception. The transport is a stub here (a real SMTP send is the app's job). Requires
 //! DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::{Db, OutgoingMail};
+use kigumi::prelude::*;
+use kigumi_db::{Db, OutgoingMail};
 use serde_json::json;
 use std::sync::Mutex;
 
 fn link() {
-    let _ = (&meshble_mod_mail::MANIFEST, &meshble_mod_base::MANIFEST);
+    let _ = (&kigumi_mod_mail::MANIFEST, &kigumi_mod_base::MANIFEST);
 }
 
 #[tokio::test]

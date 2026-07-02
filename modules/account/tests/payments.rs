@@ -2,12 +2,12 @@
 //! draws it down, books a balanced bank/receivable entry, and flips payment_state not_paid -> partial
 //! -> paid (reconciled). Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
-    let _ = (&meshble_mod_account::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_account::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 fn money(v: &serde_json::Value, field: &str) -> f64 {
@@ -65,7 +65,7 @@ async fn register_payment_draws_down_the_residual() {
 
     // Pay as an accountant (gates on account.move write). First a partial 40.
     let acct = Ctx::new(2, vec!["account.user".to_string()]);
-    let (a_acls, a_rules) = (meshble_mod_account::ACLS, meshble_mod_account::RECORD_RULES);
+    let (a_acls, a_rules) = (kigumi_mod_account::ACLS, kigumi_mod_account::RECORD_RULES);
     let pay1 = db.run_service(&mv, &acct, a_acls, a_rules, move_id, "register_payment", serde_json::json!({"amount": "40", "journal_id": bank_journal}).as_object().unwrap().clone()).await.unwrap()["payment"].as_i64().unwrap();
 
     let p1 = db.find_one_secured(&mv, &su, &[], &[], pay1).await.unwrap().unwrap();

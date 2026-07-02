@@ -1,9 +1,9 @@
-# Mini-design: subsystem `mail` per Meshble (headless-first, più snello di Odoo)
+# Mini-design: subsystem `mail` per Kigumi (headless-first, più snello di Odoo)
 
 > Analisi grounded sul sorgente Odoo 19 (`mail_thread.py` 5118L, `mail_message.py`, `mail_activity.py`,
 > `mail_followers.py`, `mail_tracking_value.py`). Obiettivo: **tenere i punti di forza, eliminare le
 > debolezze**, sfruttando il metamodello tipizzato + i registry compile-time + l'unico path di scrittura/
-> delete controllato di Meshble.
+> delete controllato di Kigumi.
 
 ## 1. Come fa Odoo (sintesi)
 Un modello "diventa" chatter aggiungendo `mail.thread` (+ `mail.activity.mixin`) al suo `_inherit`. Quattro
@@ -32,7 +32,7 @@ in ingresso (`mail.alias`), realtime bus/`Store()` per il client Discuss, e cron
 - **Accoppiamento al client web**: `Store()`/bus serializzano un grafo Discuss-shaped — il layer dati non è usabile headless.
 - **`activity_state` scritto 3 volte** (Python + 2 subquery SQL): tre fonti di verità per una regoletta.
 
-## 4. Design Meshble (più efficiente)
+## 4. Design Kigumi (più efficiente)
 
 ### (a) Opt-in via REGISTRY, non god-mixin
 Un modello dichiara di essere "mailed" con un marker compile-time (side-registry come `register_acls!`/
@@ -40,7 +40,7 @@ Un modello dichiara di essere "mailed" con un marker compile-time (side-registry
 Il framework ITERA questo registry per: la pulizia alla cancellazione, il gating dell'API chatter (puoi postare
 solo su modelli mailed), e (futuro) le viste. **Niente mixin da 5000 righe, niente `_inherit` a runtime.**
 
-### (b) Modelli come normali `#[model]` Meshble (crate `modules/mail`)
+### (b) Modelli come normali `#[model]` Kigumi (crate `modules/mail`)
 - `mail.message`: `res_model` Text, `res_id` Integer, `author_id` M2o(res.users), `message_type` Selection
   (comment/notification/note), `body` Text, `date` **Datetime**, `parent_id` M2o(mail.message) per il threading.
 - `mail.activity`: `res_model`/`res_id`, `summary` Text, `date_deadline` **Date**, `user_id` M2o(res.users),
@@ -50,7 +50,7 @@ solo su modelli mailed), e (futuro) le viste. **Niente mixin da 5000 righe, nien
   **serializzato dal `Value` tipizzato** — una sola coppia di colonne, non 10 sparse).
 
 ### (c) Fix dell'integrità polimorfica — IL punto chiave
-Odoo non ha FK perché i record si cancellano per vie che bypassano l'ORM (SQL bulk, drop, uninstall). **Meshble
+Odoo non ha FK perché i record si cancellano per vie che bypassano l'ORM (SQL bulk, drop, uninstall). **Kigumi
 ha UN SOLO path di delete** (`delete_secured`): aggiungo lì un **delete-cleanup hook** — quando si cancella un
 record di un modello mailed, si cancellano le sue righe `mail.message`/`mail.activity`/`mail.follower`
 (`WHERE res_model=? AND res_id=?`). Affidabile *perché* il path è unico (a differenza di Odoo). Più un indice
@@ -77,7 +77,7 @@ in una fetta successiva). Niente di tutto ciò serve a un ERP headless v1.
 ## 5. Piano a fette (incrementi spedibili)
 1. **Fondazione** — `modules/mail` crate + `register_mailed!` (core registry) + modello `mail.message` + API
    `POST/GET .../message(s)` + **delete-cleanup hook** in `delete_secured`. File: `modules/mail`, `core/registry.rs`,
-   `meshble/src/lib.rs` (macro), `meshble-db/src/lib.rs` (hook), `meshble-server/src/lib.rs` (routes), `cli` (link).
+   `kigumi/src/lib.rs` (macro), `kigumi-db/src/lib.rs` (hook), `kigumi-server/src/lib.rs` (routes), `cli` (link).
 2. **Tracking** — `#[field(tracked)]` registry + diff nel write path → messaggio `notification` + righe `mail.tracking`.
 3. **Activities** — `mail.activity` + API schedule/done/list, state derivato.
 4. **Followers** — `mail.follower` + follow/unfollow/list.
@@ -121,5 +121,5 @@ in una fetta successiva). Niente di tutto ciò serve a un ERP headless v1.
 ## 6. Raccomandazione + rischi
 **Prima fetta**: la fondazione (registry opt-in + `mail.message` + post/list + cleanup hook) — è il minimo che
 rende la chatter reale ed è dove vivono le decisioni architetturali. **Rischio principale**: il link polimorfico —
-mitigato dal cleanup hook sull'unico delete path (forza di Meshble) + indice composito. Secondario: l'API chatter
+mitigato dal cleanup hook sull'unico delete path (forza di Kigumi) + indice composito. Secondario: l'API chatter
 aggiunge route fuori dal pattern CRUD generico; vanno tenute coerenti col layer secured.

@@ -2,16 +2,16 @@
 //! produce EXACTLY ONE invoice (one wins the to_invoice -> invoiced flip, the other is rejected), closing
 //! the read-then-claim double-invoice race. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
     let _ = (
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
-        &meshble_mod_account::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
+        &kigumi_mod_account::MANIFEST,
     );
 }
 
@@ -55,7 +55,7 @@ async fn concurrent_invoicing_claims_exactly_once() {
     db.run_action(&order, &su, &[], &[], oid, "confirm").await.unwrap();
 
     let seller = Ctx::new(1, vec!["sales.user".to_string()]);
-    let (acls, rules) = (meshble_mod_sales::ACLS, meshble_mod_sales::RECORD_RULES);
+    let (acls, rules) = (kigumi_mod_sales::ACLS, kigumi_mod_sales::RECORD_RULES);
 
     // Fire two invoicings of the SAME order concurrently.
     let (a, b) = tokio::join!(

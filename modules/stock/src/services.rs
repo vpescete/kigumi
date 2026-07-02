@@ -1,10 +1,10 @@
-//! Stock cross-record services — the reservation / validation engine, relocated from meshble-db onto the
+//! Stock cross-record services — the reservation / validation engine, relocated from kigumi-db onto the
 //! framework's `register_service!` seam so the ERP becomes an optional layer (the core no longer names
 //! stock.picking). Unlike the other relocated services these are genuinely TRANSACTIONAL: they run FOR
 //! UPDATE quant/picking locking + the quant math as raw SQL on the SERVICE transaction (`cx.tx()`), which
 //! run_service opens and commits. This is the sole consumer of the ServiceCtx v2 tx() surface.
 
-use meshble::prelude::*; // ServiceCtx, ServiceInput, ServiceOutput, DbError
+use kigumi::prelude::*; // ServiceCtx, ServiceInput, ServiceOutput, DbError
 use rust_decimal::Decimal;
 use serde_json::json;
 use sqlx::Row;

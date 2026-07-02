@@ -1,17 +1,17 @@
 # Custom modules
 
-This page is the complete guide to writing a custom module for Meshble. A module is a Rust crate that declares models, ACLs, record rules, views, computes, constraints, actions, reports, and wizards through compile-time macros and registries: everything auto-registers into the catalog via `inventory`, and the binary that links it (`apps/meshble-cli`) collects and serves it without any manual wiring. You start from the crate and end up with a generated REST API and an integration test. For the big picture see [architettura.md](architettura.md) and [moduli.md](moduli.md); for installation and configuration [installazione.md](installazione.md) and [configurazione.md](configurazione.md); for security [sicurezza.md](sicurezza.md); for routes [api.md](api.md).
+This page is the complete guide to writing a custom module for Kigumi. A module is a Rust crate that declares models, ACLs, record rules, views, computes, constraints, actions, reports, and wizards through compile-time macros and registries: everything auto-registers into the catalog via `inventory`, and the binary that links it (`apps/kigumi-cli`) collects and serves it without any manual wiring. You start from the crate and end up with a generated REST API and an integration test. For the big picture see [architettura.md](architettura.md) and [moduli.md](moduli.md); for installation and configuration [installazione.md](installazione.md) and [configurazione.md](configurazione.md); for security [sicurezza.md](sicurezza.md); for routes [api.md](api.md).
 
 ---
 
 ## 1. Crate setup
 
-A module lives in `modules/NAME/` and is a normal Rust crate. Its only mandatory dependency is the `meshble` facade, plus every module it depends on (to reuse their models as relation targets). A real example, `modules/stock/Cargo.toml`:
+A module lives in `modules/NAME/` and is a normal Rust crate. Its only mandatory dependency is the `kigumi` facade, plus every module it depends on (to reuse their models as relation targets). A real example, `modules/stock/Cargo.toml`:
 
 ```toml
 [package]
-name = "meshble-mod-stock"
-description = "Meshble stock module: inventory — locations, quants, pickings and moves"
+name = "kigumi-mod-stock"
+description = "Kigumi stock module: inventory — locations, quants, pickings and moves"
 # MODULE version, independent of the framework (see docs/VERSIONING.md).
 version = "1.0.0"
 edition.workspace = true
@@ -19,17 +19,17 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-meshble = { workspace = true }
+kigumi = { workspace = true }
 # Exact-quantity arithmetic in the quant/move math.
 rust_decimal = "1"
 # Depends on base (company), sales (product.product), and mail (pickings carry a chatter thread).
-meshble-mod-base = { path = "../base", version = "1.0.0" }
-meshble-mod-sales = { path = "../sales", version = "1.0.0" }
-meshble-mod-mail = { path = "../mail", version = "1.0.0" }
+kigumi-mod-base = { path = "../base", version = "1.0.0" }
+kigumi-mod-sales = { path = "../sales", version = "1.0.0" }
+kigumi-mod-mail = { path = "../mail", version = "1.0.0" }
 
 [dev-dependencies]
-meshble-db = { workspace = true }
-meshble-mod-sales = { path = "../sales", version = "1.0.0" }
+kigumi-db = { workspace = true }
+kigumi-mod-sales = { path = "../sales", version = "1.0.0" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde_json = "1"
 ```
@@ -37,35 +37,35 @@ serde_json = "1"
 Important notes:
 
 - The package `version` is the **module version**, independent of the framework version (SemVer per module). The framework version is shared by all the core crates (`0.1.0` in the workspace).
-- Cargo dependencies on other modules (`meshble-mod-base`, ...) must mirror the module manifest's `depends`. Keeping the two lists aligned is intentional: a dependency declared in the manifest but not linked as a Cargo crate would not be present in `inventory`.
+- Cargo dependencies on other modules (`kigumi-mod-base`, ...) must mirror the module manifest's `depends`. Keeping the two lists aligned is intentional: a dependency declared in the manifest but not linked as a Cargo crate would not be present in `inventory`.
 - `rust_decimal` is only needed if the module does exact arithmetic (money, quantities); `serde_json` only if it has reports or code that reads the JSON record.
 
 ### Linking the crate into the binary
 
-The module auto-registers only if its crate is **linked** into the final binary. This is done in two steps in `apps/meshble-cli`.
+The module auto-registers only if its crate is **linked** into the final binary. This is done in two steps in `apps/kigumi-cli`.
 
-First you add the dependency in `apps/meshble-cli/Cargo.toml`:
+First you add the dependency in `apps/kigumi-cli/Cargo.toml`:
 
 ```toml
 # Linked so their models/ACLs/rules self-register into the catalog (inventory).
-meshble-mod-base = { path = "../../modules/base" }
-meshble-mod-mail = { path = "../../modules/mail" }
-meshble-mod-sales = { path = "../../modules/sales" }
-meshble-mod-account = { path = "../../modules/account" }
-meshble-mod-stock = { path = "../../modules/stock" }
+kigumi-mod-base = { path = "../../modules/base" }
+kigumi-mod-mail = { path = "../../modules/mail" }
+kigumi-mod-sales = { path = "../../modules/sales" }
+kigumi-mod-account = { path = "../../modules/account" }
+kigumi-mod-stock = { path = "../../modules/stock" }
 ```
 
-Then you reference a symbol from the crate inside `link_modules()` in `apps/meshble-cli/src/main.rs`, so the linker does not discard the crate (its `inventory` registrations would otherwise be absent):
+Then you reference a symbol from the crate inside `link_modules()` in `apps/kigumi-cli/src/main.rs`, so the linker does not discard the crate (its `inventory` registrations would otherwise be absent):
 
 ```rust
 /// Forces the module crates to link so their `inventory` registrations are present in this binary.
 fn link_modules() {
     let _ = (
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_account::MANIFEST,
-        &meshble_mod_stock::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_account::MANIFEST,
+        &kigumi_mod_stock::MANIFEST,
     );
 }
 ```
@@ -77,16 +77,16 @@ fn link_modules() {
 Every module's `lib.rs` starts with a single import:
 
 ```rust
-use meshble::prelude::*;
+use kigumi::prelude::*;
 ```
 
-The prelude (`crates/meshble/src/lib.rs`) re-exports everything you need: the metamodel types (`FieldDef`, `FieldKind`, `Model`, `ModelDescriptor`, `ResolvedModel`), the manifest (`ModuleManifest`, `ModuleDep`), security (`Acl`, `Ctx`, `Operation`, `RecordRule`, `RuleDomain`), the domain (`Domain`, `Value`, `Operator`, `Condition`, ...), compute (`ComputeInput`, `ComputeFn`, `Children`), constraints (`ConstraintFn`), actions (`ActionInput`, `ActionOutcome`, `ActionFn`), reports (`ReportFn`), wizards (`WizardContext`, `WizardDefaultGet`), views (`FormView`, `FieldGroup`, `FieldSlot`, `NotebookPage`), the `FRAMEWORK_VERSION` constant, the `extend`/`model` macros, and from `meshble_schema` `to_ddl`, `to_ui_contract`, `openapi`, `FieldRule`, `UiRule`. The `register_*!` macros are crate-level macros (`meshble::register_acls!`, ...), invoked with the `meshble::` prefix.
+The prelude (`crates/kigumi/src/lib.rs`) re-exports everything you need: the metamodel types (`FieldDef`, `FieldKind`, `Model`, `ModelDescriptor`, `ResolvedModel`), the manifest (`ModuleManifest`, `ModuleDep`), security (`Acl`, `Ctx`, `Operation`, `RecordRule`, `RuleDomain`), the domain (`Domain`, `Value`, `Operator`, `Condition`, ...), compute (`ComputeInput`, `ComputeFn`, `Children`), constraints (`ConstraintFn`), actions (`ActionInput`, `ActionOutcome`, `ActionFn`), reports (`ReportFn`), wizards (`WizardContext`, `WizardDefaultGet`), views (`FormView`, `FieldGroup`, `FieldSlot`, `NotebookPage`), the `FRAMEWORK_VERSION` constant, the `extend`/`model` macros, and from `kigumi_schema` `to_ddl`, `to_ui_contract`, `openapi`, `FieldRule`, `UiRule`. The `register_*!` macros are crate-level macros (`kigumi::register_acls!`, ...), invoked with the `kigumi::` prefix.
 
 ---
 
 ## 2. Declaring a model
 
-A model is a `struct` annotated with `#[model(name = "...", table = "...")]`. The `#[model]` macro (`crates/meshble-macros/src/lib.rs`) **replaces** the struct with a marker type (`pub struct StockLocation;`), generates `impl Model` with a static `ModelDescriptor`, and auto-registers the model into the catalog via `inventory::submit!`. The field "types" (`Text`, `Many2one`, ...) are DSL keywords mapped onto `FieldKind`, not real Rust types.
+A model is a `struct` annotated with `#[model(name = "...", table = "...")]`. The `#[model]` macro (`crates/kigumi-macros/src/lib.rs`) **replaces** the struct with a marker type (`pub struct StockLocation;`), generates `impl Model` with a static `ModelDescriptor`, and auto-registers the model into the catalog via `inventory::submit!`. The field "types" (`Text`, `Many2one`, ...) are DSL keywords mapped onto `FieldKind`, not real Rust types.
 
 ```rust
 #[model(name = "stock.location", table = "stock_location")]
@@ -118,7 +118,7 @@ Arguments of `#[model(...)]`:
 
 ### Field types (FieldKind)
 
-The struct field's "type" selects the `FieldKind` variant (`crates/meshble-core/src/metamodel.rs`). The aliases the macro recognizes are exactly these; a different alias is a compile error.
+The struct field's "type" selects the `FieldKind` variant (`crates/kigumi-core/src/metamodel.rs`). The aliases the macro recognizes are exactly these; a different alias is a compile error.
 
 | DSL alias | FieldKind | Notes / required attributes |
 |-----------|-----------|----------------------------|
@@ -138,7 +138,7 @@ The struct field's "type" selects the `FieldKind` variant (`crates/meshble-core/
 
 ### Full reference for the `#[field(...)]` attributes
 
-All attributes are parsed in `build_field` (and the auxiliary submission functions) in `crates/meshble-macros/src/lib.rs`. They fill in the `FieldDef` (`metamodel.rs`) or emit a side registration.
+All attributes are parsed in `build_field` (and the auxiliary submission functions) in `crates/kigumi-macros/src/lib.rs`. They fill in the `FieldDef` (`metamodel.rs`) or emit a side registration.
 
 | Attribute | Form | Effect |
 |-----------|-------|---------|
@@ -224,14 +224,14 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     ],
     summary: "Inventory — locations, quants, pickings and moves",
 };
-meshble::register_module!(MANIFEST);
+kigumi::register_module!(MANIFEST);
 ```
 
-`ModuleManifest` (`crates/meshble-core/src/manifest.rs`) has the fields `name`, `version` (the module's SemVer), `framework` (the framework compatibility range, e.g. `">=0.1, <0.2"`), `depends` (a slice of `ModuleDep { name, req }` with checked SemVer ranges), and `summary`. The resolver (`resolve_module_set`) validates framework compatibility, dependency ranges, the absence of duplicates, self-dependencies, and cycles, and returns the modules in topological order.
+`ModuleManifest` (`crates/kigumi-core/src/manifest.rs`) has the fields `name`, `version` (the module's SemVer), `framework` (the framework compatibility range, e.g. `">=0.1, <0.2"`), `depends` (a slice of `ModuleDep { name, req }` with checked SemVer ranges), and `summary`. The resolver (`resolve_module_set`) validates framework compatibility, dependency ranges, the absence of duplicates, self-dependencies, and cycles, and returns the modules in topological order.
 
 ### `register_acls!` — the `Acl` struct
 
-Model-level ACLs (`crates/meshble-core/src/security.rs`). A `&'static [Acl]` registered; the server collects them via `registered_acls()`.
+Model-level ACLs (`crates/kigumi-core/src/security.rs`). A `&'static [Acl]` registered; the server collects them via `registered_acls()`.
 
 ```rust
 pub struct Acl {
@@ -254,7 +254,7 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "stock.move", group: "stock.user", read: true, write: true, create: true, delete: true },
     // ...
 ];
-meshble::register_acls!(ACLS);
+kigumi::register_acls!(ACLS);
 ```
 
 ### `register_rules!` — `RecordRule`, `RuleDomain`, and the `Domain` DSL
@@ -277,7 +277,7 @@ pub enum RuleDomain {
 
 Combination semantics (`record_rule_domain`): global rules (without a group) are all required → AND; the rules of the groups applicable to the user are alternatives → OR; the two sets are then AND-ed together. The superuser is subject to no restriction.
 
-The `Domain` DSL (`crates/meshble-core/src/domain.rs`) is built fluently:
+The `Domain` DSL (`crates/kigumi-core/src/domain.rs`) is built fluently:
 
 ```rust
 Domain::field("state").ne("done")                       // state <> 'done'
@@ -304,7 +304,7 @@ pub static RECORD_RULES: &[RecordRule] = &[
     RecordRule { model: "stock.move", groups: &[], ops: &[Operation::Create], domain: RuleDomain::Static(move_picking_not_done) },
     RecordRule { model: "stock.move", groups: &[], ops: &[Operation::Delete], domain: RuleDomain::Static(move_picking_not_done) },
 ];
-meshble::register_rules!(RECORD_RULES);
+kigumi::register_rules!(RECORD_RULES);
 ```
 
 ### `register_action!` — action functions and `ActionOutcome`
@@ -315,7 +315,7 @@ An action is a named state transition on a model, executable via `POST /api/<mod
 pub type ActionFn = fn(&ActionInput) -> Result<ActionOutcome, String>;
 ```
 
-`ActionInput` (`crates/meshble-core/src/action.rs`) is the read-only view of the current record, with typed accessors: `str(field)`, `int(field)`, `decimal(field)`, `bool(field)`, `get(field)`. The guard ("only if draft") lives in the body and returns `Err(message)` to reject. `ActionOutcome` collects the field updates (`set`) plus an optional `assign_sequence(field, code)` directive, resolved by the persistence layer (for gap-free numbering). From `modules/sales/src/lib.rs`:
+`ActionInput` (`crates/kigumi-core/src/action.rs`) is the read-only view of the current record, with typed accessors: `str(field)`, `int(field)`, `decimal(field)`, `bool(field)`, `get(field)`. The guard ("only if draft") lives in the body and returns `Err(message)` to reject. `ActionOutcome` collects the field updates (`set`) plus an optional `assign_sequence(field, code)` directive, resolved by the persistence layer (for gap-free numbering). From `modules/sales/src/lib.rs`:
 
 ```rust
 fn confirm_order(i: &ActionInput) -> Result<ActionOutcome, String> {
@@ -327,7 +327,7 @@ fn confirm_order(i: &ActionInput) -> Result<ActionOutcome, String> {
         s => Err(format!("can only confirm a draft order (state is '{s}')")),
     }
 }
-meshble::register_action!("sale.order", "confirm", confirm_order, &["sales.user"]);
+kigumi::register_action!("sale.order", "confirm", confirm_order, &["sales.user"]);
 ```
 
 The last argument is the slice of groups that may execute the action (on top of the model's Write ACL + record rules); `&[]` does not restrict further.
@@ -341,7 +341,7 @@ pub type ReportFn = fn(&serde_json::Value) -> String;
 ```
 
 ```rust
-meshble::register_report!("sale.order", "quotation", "Quotation", render_quotation);
+kigumi::register_report!("sale.order", "quotation", "Quotation", render_quotation);
 ```
 
 The arguments are `model`, `name` (URL segment), `title` (human label / file name), and the render function. The stored content is untrusted: it must always be escaped (the real `render_quotation` uses an `esc` helper to avoid persistent XSS).
@@ -361,8 +361,8 @@ pub struct SaleOrderDiscount {
     #[field(label = "Created")]
     create_date: Datetime,
 }
-meshble::register_transient!("sale.order.discount");
-meshble::register_wizard!("sale.order.discount", default_get_discount);
+kigumi::register_transient!("sale.order.discount");
+kigumi::register_wizard!("sale.order.discount", default_get_discount);
 
 /// default_get: seed `order_id` from the open context's active record.
 fn default_get_discount(ctx: &WizardContext) -> Vec<(&'static str, Value)> {
@@ -373,19 +373,19 @@ fn default_get_discount(ctx: &WizardContext) -> Vec<(&'static str, Value)> {
 }
 ```
 
-`WizardDefaultGet` has the signature `fn(&WizardContext) -> Vec<(&'static str, Value)>`; `WizardContext` (`crates/meshble-core/src/wizard.rs`) carries `active_model`, `active_id`, `active_ids`. It is pure in v1 (no DB access). The wizard opens via `POST /api/<model>/open`, which computes the defaults, creates the scratchpad row under the caller (normal create ACL), and returns it. The "apply" logic is a dedicated per-wizard service method plus an endpoint (e.g. `apply_discount` → `POST /api/sale.order.discount/<id>/apply_discount`), **not** part of the wizard registration.
+`WizardDefaultGet` has the signature `fn(&WizardContext) -> Vec<(&'static str, Value)>`; `WizardContext` (`crates/kigumi-core/src/wizard.rs`) carries `active_model`, `active_id`, `active_ids`. It is pure in v1 (no DB access). The wizard opens via `POST /api/<model>/open`, which computes the defaults, creates the scratchpad row under the caller (normal create ACL), and returns it. The "apply" logic is a dedicated per-wizard service method plus an endpoint (e.g. `apply_discount` → `POST /api/sale.order.discount/<id>/apply_discount`), **not** part of the wizard registration.
 
 ### `register_mailed!`
 
 One line, no mixin: the model acquires a thread of messages, followers, and activities through the polymorphic `(res_model, res_id)` link, and the framework cleans up the thread when the record is deleted. It is the precondition for `#[field(tracked)]` to record changes in the chatter.
 
 ```rust
-meshble::register_mailed!("stock.picking");
+kigumi::register_mailed!("stock.picking");
 ```
 
 ### `register_view!` — `FormView`, `FieldGroup`, `FieldSlot`, `NotebookPage`
 
-A form view (`crates/meshble-core/src/view.rs`) is static data emitted in the UI contract, so the frontend renders a real view instead of dumping the fields in declaration order. The structs:
+A form view (`crates/kigumi-core/src/view.rs`) is static data emitted in the UI contract, so the frontend renders a real view instead of dumping the fields in declaration order. The structs:
 
 ```rust
 pub struct FieldSlot   { pub name: &'static str, pub full: bool }            // full = spans both columns
@@ -397,7 +397,7 @@ pub struct FormView    { pub model: &'static str, pub groups: &'static [FieldGro
 The macro takes `model`, the slice of `FieldGroup`, and the slice of `NotebookPage`, and emits a `FormView`. From `modules/base/src/lib.rs`:
 
 ```rust
-meshble::register_view!(
+kigumi::register_view!(
     "res.partner",
     &[
         FieldGroup {
@@ -428,7 +428,7 @@ For a view with a notebook (a One2many relation in a tab), from `sales`:
 
 ## 4. Compute functions
 
-A compute is a pure `fn(&ComputeInput) -> Value` registered by name with `register_compute!`. The engine (`crates/meshble-core/src/compute.rs`) fills in every computed field, whether stored (on write, `compute_stored`) or on-read (on every read, `compute_on_read`), whose function is registered.
+A compute is a pure `fn(&ComputeInput) -> Value` registered by name with `register_compute!`. The engine (`crates/kigumi-core/src/compute.rs`) fills in every computed field, whether stored (on write, `compute_stored`) or on-read (on every read, `compute_on_read`), whose function is registered.
 
 `ComputeInput` is the read-only view of the record (its fields + the One2many children). Scalar accessors: `int`, `float`, `str`, `bool`, `decimal`, `get`. Aggregation accessors over the children: `children(o2m)`, `count(o2m)`, `sum_float(o2m, child_field)`, `sum_decimal(o2m, child_field)` (exact sum, no f64 rounding). `Value` is the value enum (`Str`, `Int`, `Float`, `Decimal`, `Bool`, `Null`, `List`).
 
@@ -439,13 +439,13 @@ Same-record compute (both inputs on the record) and aggregate compute (over the 
 fn compute_line_subtotal(i: &ComputeInput) -> Value {
     Value::Decimal(line_net(i))
 }
-meshble::register_compute!("compute_line_subtotal", compute_line_subtotal);
+kigumi::register_compute!("compute_line_subtotal", compute_line_subtotal);
 
 /// amount_total of an order = exact sum of its lines' taxed totals.
 fn compute_amount(i: &ComputeInput) -> Value {
     Value::Decimal(i.sum_decimal("line_ids", "price_total"))
 }
-meshble::register_compute!("compute_amount", compute_amount);
+kigumi::register_compute!("compute_amount", compute_amount);
 ```
 
 Key rules:
@@ -458,7 +458,7 @@ Key rules:
 
 ## 5. In-transaction constraints (`constrains`)
 
-A cross-record constraint (`crates/meshble-core/src/constraints.rs`) runs **inside the write transaction**, after the record and its One2many children have been written and re-read, and rejects the write (typed error, rollback) if the invariant is violated. Unlike a SQL `CHECK` (single-row), it reads the header together with the children through the same `ComputeInput` as the compute engine, so it expresses invariants that span a header and its lines.
+A cross-record constraint (`crates/kigumi-core/src/constraints.rs`) runs **inside the write transaction**, after the record and its One2many children have been written and re-read, and rejects the write (typed error, rollback) if the invariant is violated. Unlike a SQL `CHECK` (single-row), it reads the header together with the children through the same `ComputeInput` as the compute engine, so it expresses invariants that span a header and its lines.
 
 The signature and the limitation:
 
@@ -479,7 +479,7 @@ fn check_balanced(m: &ComputeInput) -> Result<(), String> {
     }
     Ok(())
 }
-meshble::register_constraint!("account.move", &["line_ids"], check_balanced);
+kigumi::register_constraint!("account.move", &["line_ids"], check_balanced);
 ```
 
 In v1, constraints run on the top-level model that is written: a constraint on a child written through the parent's nested One2many commands, or on a parent in delegation inheritance (`inherits`/`via`), is not evaluated.
@@ -490,7 +490,7 @@ In v1, constraints run on the top-level model that is written: a constraint on a
 
 Actions, computes, and constraints cover single-record transitions and header+lines invariants. For operations that touch **multiple records** in one transaction (creating linked documents, moving stock, posting entries) the pattern is different: a **service method** on `Db`, explicitly authorized with `check_access`, that then performs the elevated effect (`ctx.sudo()`), plus a **dedicated axum route** that authenticates and invokes it. This does not go through the `register_action!` macro.
 
-The real case is `validate_picking` / `create_delivery` (`crates/meshble-db/src/lib.rs`).
+The real case is `validate_picking` / `create_delivery` (`crates/kigumi-db/src/lib.rs`).
 
 ### The service method
 
@@ -548,7 +548,7 @@ let picking_id = self.insert_secured(&picking_model, &elevated, &[], &[], payloa
 
 ### The axum route
 
-Every service method has a dedicated handler in `crates/meshble-server/src/lib.rs`, registered in `router_with_data_rasterized`:
+Every service method has a dedicated handler in `crates/kigumi-server/src/lib.rs`, registered in `router_with_data_rasterized`:
 
 ```rust
 .route("/api/:name/:id/validate", post(validate_picking_handler))
@@ -589,20 +589,20 @@ Let's put it all together with a new, minimal module: a book catalog.
 
 ```toml
 [package]
-name = "meshble-mod-library"
-description = "Meshble library module: a tiny book catalog"
+name = "kigumi-mod-library"
+description = "Kigumi library module: a tiny book catalog"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-meshble = { workspace = true }
+kigumi = { workspace = true }
 # Depends on base to use res.partner (the author) as a relation target.
-meshble-mod-base = { path = "../base", version = "1.0.0" }
+kigumi-mod-base = { path = "../base", version = "1.0.0" }
 
 [dev-dependencies]
-meshble-db = { workspace = true }
+kigumi-db = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde_json = "1"
 ```
@@ -611,7 +611,7 @@ serde_json = "1"
 
 ```rust
 //! Application module `library`: a tiny book catalog.
-use meshble::prelude::*;
+use kigumi::prelude::*;
 
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "library",
@@ -620,7 +620,7 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     depends: &[ModuleDep { name: "base", req: "^1.0" }],
     summary: "A tiny book catalog",
 };
-meshble::register_module!(MANIFEST);
+kigumi::register_module!(MANIFEST);
 
 #[model(name = "library.book", table = "library_book")]
 pub struct LibraryBook {
@@ -645,7 +645,7 @@ pub static ACLS: &[Acl] = &[
     Acl { model: "library.book", group: "library.member", read: true, write: false, create: false, delete: false },
     Acl { model: "library.book", group: "library.librarian", read: true, write: true, create: true, delete: true },
 ];
-meshble::register_acls!(ACLS);
+kigumi::register_acls!(ACLS);
 
 /// Members never see borrowed books in the catalog list.
 fn only_available() -> Domain {
@@ -659,7 +659,7 @@ pub static RECORD_RULES: &[RecordRule] = &[
         domain: RuleDomain::Static(only_available),
     },
 ];
-meshble::register_rules!(RECORD_RULES);
+kigumi::register_rules!(RECORD_RULES);
 
 /// `borrow`: an available book becomes borrowed.
 fn borrow_book(i: &ActionInput) -> Result<ActionOutcome, String> {
@@ -668,10 +668,10 @@ fn borrow_book(i: &ActionInput) -> Result<ActionOutcome, String> {
         s => Err(format!("only an available book can be borrowed (state is '{s}')")),
     }
 }
-meshble::register_action!("library.book", "borrow", borrow_book, &["library.librarian"]);
+kigumi::register_action!("library.book", "borrow", borrow_book, &["library.librarian"]);
 
 /// Form layout.
-meshble::register_view!(
+kigumi::register_view!(
     "library.book",
     &[FieldGroup {
         title: None,
@@ -689,51 +689,51 @@ meshble::register_view!(
 
 ### 7.3 Linking the module
 
-In `apps/meshble-cli/Cargo.toml`:
+In `apps/kigumi-cli/Cargo.toml`:
 
 ```toml
-meshble-mod-library = { path = "../../modules/library" }
+kigumi-mod-library = { path = "../../modules/library" }
 ```
 
-In `apps/meshble-cli/src/main.rs`, inside `link_modules()`:
+In `apps/kigumi-cli/src/main.rs`, inside `link_modules()`:
 
 ```rust
 let _ = (
-    &meshble_mod_base::MANIFEST,
+    &kigumi_mod_base::MANIFEST,
     // ... the others ...
-    &meshble_mod_library::MANIFEST,
+    &kigumi_mod_library::MANIFEST,
 );
 ```
 
 ### 7.4 Installing the module
 
-On a fresh database the migration installs only `base` (+ closure); the other modules are opt-in. After compiling the `meshble` binary:
+On a fresh database the migration installs only `base` (+ closure); the other modules are opt-in. After compiling the `kigumi` binary:
 
 ```sh
 # Migrate the framework + base schemas (initial installation)
-meshble migrate
+kigumi migrate
 
 # Install library and its dependency closure (deps first), then migrate the tables
-meshble module install library
+kigumi module install library
 
 # Verify
-meshble module list
+kigumi module list
 ```
 
 `module install` calls `module_closure(name)` (the name + its transitive dependencies, deps first), marks the modules as installed, and then re-runs `migrate_installed` (idempotent) to create the tables. You then start the server (which serves only the models of the installed modules):
 
 ```sh
-meshble serve
+kigumi serve
 ```
 
 ### 7.5 Curl against the generated API
 
-All data routes require a bearer. First you log in (`POST /auth/login` returns `access_token` / `refresh_token` / `token_type: "Bearer"` / `expires_in`). The server listens by default on `127.0.0.1:8099` (`server.bind` in `meshble.toml`):
+All data routes require a bearer. First you log in (`POST /auth/login` returns `access_token` / `refresh_token` / `token_type: "Bearer"` / `expires_in`). The server listens by default on `127.0.0.1:8099` (`server.bind` in `kigumi.toml`):
 
 ```sh
 TOKEN=$(curl -s http://127.0.0.1:8099/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"login":"admin","password":"'"$MESHBLE_ADMIN_PASSWORD"'"}' \
+  -d '{"login":"admin","password":"'"$KIGUMI_ADMIN_PASSWORD"'"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
 
 # Create a book (POST /api/:name → { "id": <n> } with 201)
@@ -759,22 +759,22 @@ The generated CRUD routes are `GET/POST /api/:name`, `GET/PATCH/DELETE /api/:nam
 
 ## 8. Integration test for a module
 
-The pattern used in `modules/stock/tests/` is: a `#[tokio::test]` test that **skips** if `DATABASE_URL` is not set, links the modules, recreates the schema from `migration_plan()`, and operates on `Db` with a superuser `Ctx`. The test dependencies live in `[dev-dependencies]` (see `meshble-db`, `tokio`, `serde_json` in the module's `Cargo.toml`).
+The pattern used in `modules/stock/tests/` is: a `#[tokio::test]` test that **skips** if `DATABASE_URL` is not set, links the modules, recreates the schema from `migration_plan()`, and operates on `Db` with a superuser `Ctx`. The test dependencies live in `[dev-dependencies]` (see `kigumi-db`, `tokio`, `serde_json` in the module's `Cargo.toml`).
 
 A skeleton (from `modules/stock/tests/validate.rs`, trimmed):
 
 ```rust
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 /// Forces the modules to link so their inventory registrations are in the test binary.
 fn link() {
     let _ = (
-        &meshble_mod_stock::MANIFEST,
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
+        &kigumi_mod_stock::MANIFEST,
+        &kigumi_mod_sales::MANIFEST,
+        &kigumi_mod_base::MANIFEST,
+        &kigumi_mod_mail::MANIFEST,
     );
 }
 

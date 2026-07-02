@@ -2,12 +2,12 @@
 //! == Σ credit) saves and rolls up its total + per-line balance; an unbalanced move is rejected in-tx
 //! by the check_balanced @api.constrains and leaves nothing behind. Requires DATABASE_URL.
 
-use meshble::prelude::*;
-use meshble_db::Db;
+use kigumi::prelude::*;
+use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
-    let _ = (&meshble_mod_account::MANIFEST, &meshble_mod_base::MANIFEST, &meshble_mod_mail::MANIFEST);
+    let _ = (&kigumi_mod_account::MANIFEST, &kigumi_mod_base::MANIFEST, &kigumi_mod_mail::MANIFEST);
 }
 
 fn money(v: &serde_json::Value, field: &str) -> f64 {

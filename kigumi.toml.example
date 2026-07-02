@@ -1,0 +1,44 @@
+# Kigumi — example instance configuration (boot-time, NON-secret).
+# Copy to `kigumi.toml`. Secrets go in the environment, never here (see .env.example).
+# Runtime settings (base_url, mode, neutralized, banner) live in the DATABASE, not in this file.
+# Validate with:  kigumi-config check   ·   inspect with:  kigumi-config print
+#
+# Layering: defaults < this file < env vars prefixed KIGUMI_CONF_ (nested with __,
+#   e.g. KIGUMI_CONF_SERVER__BIND=0.0.0.0:9000).
+
+[instance]
+name = "acme-prod"
+
+[server]
+bind = "0.0.0.0:8099"
+workers = 8
+proxy_mode = true              # trust X-Forwarded-* behind a reverse proxy
+
+[database]                     # TUNING ONLY — the connection identity is the DATABASE_URL env var
+pool_max = 10
+connect_timeout = "5s"
+
+[storage]
+backend = "fs"                 # fs | s3
+path = "/var/lib/kigumi/blobs"
+# bucket = "kigumi-blobs"     # for backend = s3 (keys via env)
+# region = "eu-west-1"
+
+[auth]
+access_ttl = 900               # 15 min  (jwt secret via env KIGUMI_JWT_SECRET)
+refresh_ttl = 2592000          # 30 days
+
+[mail]
+smtp_host = "smtp.acme.com"    # smtp password via env KIGUMI_SMTP_PASSWORD
+smtp_port = 587
+from = "erp@acme.com"
+
+[modules]
+load = ["base", "sales"]
+
+[modules.sales]                # OPEN subtree — validated by the "sales" module, not the core schema
+default_tax = "0.22"
+
+[log]
+level = "info"                 # error | warn | info | debug | trace
+format = "json"                # json | text

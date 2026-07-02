@@ -1,9 +1,9 @@
 //! Sales cross-record services — module-owned multi-record operations registered on the framework's
 //! `register_service!` seam (the run_action twin). These used to live as hardcoded methods on `Db` in the
-//! framework crate; relocating them here is what makes the ERP an OPTIONAL layer: meshble-db no longer
+//! framework crate; relocating them here is what makes the ERP an OPTIONAL layer: kigumi-db no longer
 //! names `sale.order`. The model-name literals belong here, in the module that owns them.
 
-use meshble::prelude::*; // ServiceCtx, ServiceInput, ServiceOutput, DbError, Domain, Operation
+use kigumi::prelude::*; // ServiceCtx, ServiceInput, ServiceOutput, DbError, Domain, Operation
 use rust_decimal::Decimal;
 use serde_json::json;
 use sqlx::Row;

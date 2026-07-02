@@ -1,9 +1,9 @@
-//! Demo: `cargo run -p meshble-mod-sales --example demo`
+//! Demo: `cargo run -p kigumi-mod-sales --example demo`
 //! Shows: module-graph resolution (versioning) + model resolution → DDL + UI contract.
 
-use meshble::prelude::*;
-use meshble_mod_base as base; // depend on base so it joins the catalog
-use meshble_mod_sales::{resolved_sale_order, ACLS, MANIFEST, RECORD_RULES, UI_RULES};
+use kigumi::prelude::*;
+use kigumi_mod_base as base; // depend on base so it joins the catalog
+use kigumi_mod_sales::{resolved_sale_order, ACLS, MANIFEST, RECORD_RULES, UI_RULES};
 
 fn main() {
     // Reference a base symbol so the base module is linked and self-registers in the catalog.
