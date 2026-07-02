@@ -23,3 +23,5 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "rust_decimal"] }
 tempfile = "3"
+# The module-route test verifies a sha256 signature over the raw body.
+sha2 = "0.10"

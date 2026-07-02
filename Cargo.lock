@@ -1531,6 +1531,7 @@ dependencies = [
  "kigumi-storage",
  "rust_decimal",
  "serde_json",
+ "sha2",
  "sqlx",
  "tempfile",
  "tokio",

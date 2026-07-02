@@ -119,6 +119,100 @@ pub fn ledger_report_names() -> Vec<&'static str> {
     kigumi_core::inventory::iter::<LedgerReportRegistration>.into_iter().map(|r| r.name).collect()
 }
 
+/// HTTP method of a module route. An enum here (not an http-crate type) keeps this crate HTTP-free;
+/// the server translates. Get also serves HEAD (axum's default).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum RouteMethod {
+    Get,
+    Post,
+}
+
+/// Everything a module route body receives, expressed in DB/JSON terms (no axum types):
+/// the caller context (authenticated, or the GUEST context for `auth: false` routes), the query
+/// params, the parsed JSON body (empty when the body is not a JSON object — NOT an error: webhook
+/// senders post forms and raw payloads), the EXACT raw bytes (HMAC signature verification must hash
+/// what was sent, not a re-serialization), and the request headers (lowercased names, duplicate
+/// values joined with ", ").
+pub struct RouteInput {
+    pub ctx: Ctx,
+    pub query: Map<String, Json>,
+    pub body: Map<String, Json>,
+    pub raw_body: Vec<u8>,
+    pub headers: std::collections::BTreeMap<String, String>,
+}
+
+impl RouteInput {
+    /// A header by (lowercase) name.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.get(name).map(String::as_str)
+    }
+    /// A query param as &str (empty when absent).
+    pub fn query_str(&self, key: &str) -> &str {
+        self.query.get(key).and_then(|v| v.as_str()).unwrap_or("")
+    }
+}
+
+/// What a module route returns: JSON (the normal case) or PLAIN TEXT — some webhook providers'
+/// challenge handshakes require echoing a token as an unquoted text body (a JSON string would be
+/// quoted and fail their exact-match).
+pub enum RouteOutput {
+    Json(Json),
+    Text(String),
+}
+
+/// A registered module route body: bespoke logic over the full `Db` handle. Same trust class as a
+/// service body (`ServiceCtx::pool` already hands services the raw pool past the gate): module code
+/// is trusted first-party code once it compiles; AUTHORIZATION is the dispatcher's job.
+pub type RouteFn = for<'a> fn(&'a Db, RouteInput) -> BoxServiceFut<'a, Result<RouteOutput, DbError>>;
+
+/// Registration of a module HTTP route, emitted by `register_route!`. Keyed by (name, method) — a
+/// provider like Meta uses GET for its verification handshake and POST for delivery on the SAME
+/// path. `auth: true` routes require a bearer (plus the optional group gate); `auth: false` routes
+/// run under the GUEST context — uid −1, NO groups, non-su — which the default-deny ACL engine
+/// blocks from every secured read/write, so the body must authenticate the caller itself (e.g. an
+/// HMAC signature over `raw_body`) and then elevate explicitly via `Ctx::sudo` (the same greppable
+/// idiom as `ServiceCtx::elevated`).
+pub struct RouteRegistration {
+    pub name: &'static str,
+    pub method: RouteMethod,
+    pub auth: bool,
+    pub groups: &'static [&'static str],
+    pub func: RouteFn,
+}
+kigumi_core::inventory::collect!(RouteRegistration);
+
+/// Looks up a route by (name, method).
+pub fn route_for(name: &str, method: RouteMethod) -> Option<&'static RouteRegistration> {
+    kigumi_core::inventory::iter::<RouteRegistration>
+        .into_iter()
+        .find(|r| r.name == name && r.method == method)
+}
+
+/// The methods registered under `name` (for the 405 Allow header when the method doesn't match).
+pub fn route_methods(name: &str) -> Vec<RouteMethod> {
+    kigumi_core::inventory::iter::<RouteRegistration>
+        .into_iter()
+        .filter(|r| r.name == name)
+        .map(|r| r.method)
+        .collect()
+}
+
+/// Startup validation of the route registry: names must be single path segments (the generic
+/// `/api/x/:route` route can't match a slash) and (name, method) must be unique. Call once when
+/// building the router; a violation is an authoring bug, not a runtime condition.
+pub fn validate_routes() -> Result<(), String> {
+    let mut seen = std::collections::BTreeSet::new();
+    for r in kigumi_core::inventory::iter::<RouteRegistration> {
+        if r.name.contains('/') || r.name.is_empty() {
+            return Err(format!("module route '{}' must be a single, non-empty path segment", r.name));
+        }
+        if !seen.insert((r.name, r.method)) {
+            return Err(format!("duplicate module route registration: {} {:?}", r.name, r.method));
+        }
+    }
+    Ok(())
+}
+
 /// An in-tx WRITE TRIGGER — a module hook that runs on the caller's transaction AFTER a secured write to
 /// `model`, when one of `watch`ed columns changed (empty = any). The framework's own `depends`-driven
 /// recompute handles same-record + child aggregates; this seam covers the effects it can't express on read
@@ -376,5 +470,16 @@ impl Db {
             return Err(DbError::AccessDenied { model: reg.read_model.to_string(), operation: "report (group)" });
         }
         (reg.func)(&self.pool, params).await
+    }
+
+    /// The generic MODULE-ROUTE dispatcher (`POST|GET /api/x/:route`). The server has already
+    /// resolved the registration and built the caller context (bearer-authenticated, or the guest
+    /// context for `auth: false` routes); this applies the optional group gate and runs the body.
+    /// ZERO module literals — a new route needs no edit here or in the server.
+    pub async fn run_route(&self, reg: &RouteRegistration, input: RouteInput) -> Result<RouteOutput, DbError> {
+        if !reg.groups.is_empty() && !input.ctx.is_su() && !reg.groups.iter().any(|g| input.ctx.is_member(g)) {
+            return Err(DbError::AccessDenied { model: format!("route:{}", reg.name), operation: "route (group)" });
+        }
+        (reg.func)(self, input).await
     }
 }

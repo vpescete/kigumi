@@ -31,9 +31,11 @@ pub mod prelude {
     // The cross-record service seam (DB-typed, defined in kigumi-db) — registered via register_service!.
     // `DbError` is the service result's error type, so a module needs no direct kigumi-db dependency.
     pub use kigumi_db::{
-        ledger_report_for, ledger_report_names, service_for, services_for, write_triggers_for,
-        BoxServiceFut, DbError, LedgerReportFn, LedgerReportRegistration, ServiceCtx, ServiceFn,
-        ServiceInput, ServiceOutput, ServiceRegistration, WriteTriggerFn, WriteTriggerRegistration,
+        ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
+        validate_routes, write_triggers_for, BoxServiceFut, DbError, LedgerReportFn,
+        LedgerReportRegistration, RouteFn, RouteInput, RouteMethod, RouteOutput, RouteRegistration,
+        ServiceCtx, ServiceFn, ServiceInput, ServiceOutput, ServiceRegistration, WriteTriggerFn,
+        WriteTriggerRegistration,
     };
 }
 
@@ -179,6 +181,27 @@ macro_rules! register_ledger_report {
                 read_model: $read_model,
                 func: |pool, params| ::std::boxed::Box::pin($func(pool, params)),
                 groups: $groups,
+            }
+        }
+    };
+}
+
+/// Registers a MODULE HTTP ROUTE on the generic dispatch `GET|POST /api/x/<name>` — bespoke module
+/// endpoints (an inbound-webhook receiver, a custom search) without the module ever depending on the
+/// server crate or axum. `method` is a RouteMethod variant name (Get|Post); `auth: false` runs the
+/// body under the GUEST context (uid −1, no groups — the default-deny ACL blocks every secured call,
+/// so verify the sender yourself, e.g. an HMAC over raw_body, then elevate via `.sudo()`).
+/// `kigumi::register_route!("stripe-hook", Post, false, &[], stripe_hook);`
+#[macro_export]
+macro_rules! register_route {
+    ($name:expr, $method:ident, $auth:expr, $groups:expr, $func:path) => {
+        $crate::inventory::submit! {
+            $crate::prelude::RouteRegistration {
+                name: $name,
+                method: $crate::prelude::RouteMethod::$method,
+                auth: $auth,
+                groups: $groups,
+                func: |db, input| ::std::boxed::Box::pin($func(db, input)),
             }
         }
     };

@@ -27,7 +27,7 @@ use kigumi_core::{
     registered_acls, registered_rules, report_for, resolve_modules, wizard_for, Acl, Condition, Ctx,
     Domain, FieldDef, FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
 };
-use kigumi_db::{is_safe_ident, CustomField, Db, DbError, ViewOverride};
+use kigumi_db::{is_safe_ident, route_for, route_methods, validate_routes, CustomField, Db, DbError, RouteInput, RouteMethod, RouteOutput, ViewOverride};
 use kigumi_schema::{openapi, pg_column_type, to_ui_contract};
 use kigumi_storage::{sha256_hex, BlobStore};
 
@@ -436,6 +436,11 @@ fn build_data_router(
     blobs: Arc<dyn BlobStore>,
     rasterizer: Option<Arc<dyn Rasterizer>>,
 ) -> Router {
+    // Module route registrations are compile-time-authored; an invalid one (slash in the name, a
+    // duplicate (name, method)) is a bug that must fail the boot, not surface as a puzzling 404.
+    if let Err(e) = validate_routes() {
+        panic!("kigumi-server: {e}");
+    }
     base_router()
         .route("/auth/login", post(login_handler))
         .route("/auth/refresh", post(refresh_handler))
@@ -461,6 +466,9 @@ fn build_data_router(
         .route("/api/:name/:id/service/:service", post(service_handler))
         // Read-only ledger reports (trial balance, general ledger, aged balance): GET /api/reports/:report.
         .route("/api/reports/:report", get(ledger_report_handler))
+        // Module HTTP routes (register_route!): bespoke module endpoints — inbound webhook receivers,
+        // custom reads — dispatched by name with zero module literals here. x = extension.
+        .route("/api/x/:route", get(module_route_get).post(module_route_post))
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
         // Render a record's report as HTML (secured entirely by read access to the record).
@@ -1389,6 +1397,99 @@ async fn service_handler(
         Ok(json) => json_response(json.to_string()),
         Err(e) => write_error("service", e),
     }
+}
+
+/// The generic MODULE-ROUTE dispatch: `GET|POST /api/x/:route`. Resolves the module-registered
+/// route by (name, method), builds the caller context — bearer-authenticated for `auth: true`
+/// routes, the GUEST context (uid −1, no groups: default-deny under the ACL engine) for
+/// `auth: false` receivers that verify their sender themselves — and hands the body the query,
+/// the parsed-JSON-or-empty body, the EXACT raw bytes (HMAC material) and the lowercased headers.
+/// Method mismatch on an existing name → 405 with Allow. Zero module literals.
+async fn module_route_handler(
+    state: AppState,
+    method: RouteMethod,
+    route: String,
+    headers: HeaderMap,
+    query: HashMap<String, String>,
+    raw_body: Bytes,
+) -> Response {
+    let Some(reg) = route_for(&route, method) else {
+        let others = route_methods(&route);
+        if others.is_empty() {
+            return (StatusCode::NOT_FOUND, format!("unknown route: {route}")).into_response();
+        }
+        let allow = others
+            .iter()
+            .map(|m| match m {
+                RouteMethod::Get => "GET",
+                RouteMethod::Post => "POST",
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        return (StatusCode::METHOD_NOT_ALLOWED, [("allow", allow)], "method not allowed").into_response();
+    };
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = if reg.auth {
+        match authenticate(backend, &headers) {
+            Ok(c) => c,
+            Err(r) => return r,
+        }
+    } else {
+        // uid −1 is the reserved guest identity (0 = superuser, real users ≥ 1). No groups → the
+        // default-deny ACL engine rejects every secured call; the body authenticates the sender.
+        Ctx::new(-1, vec![])
+    };
+    // Headers: lowercased names, duplicates joined with ", ", non-UTF8 values dropped (signature
+    // headers are ASCII by construction).
+    let mut hdrs = std::collections::BTreeMap::new();
+    for (name, value) in headers.iter() {
+        if let Ok(v) = value.to_str() {
+            hdrs.entry(name.as_str().to_ascii_lowercase())
+                .and_modify(|cur: &mut String| {
+                    cur.push_str(", ");
+                    cur.push_str(v);
+                })
+                .or_insert_with(|| v.to_string());
+        }
+    }
+    // Body: a JSON object parses into `body`; anything else (forms, raw payloads, empty) is NOT an
+    // error — the raw bytes are always available.
+    let body_map = match serde_json::from_slice::<Json2>(&raw_body) {
+        Ok(Json2::Object(m)) => m,
+        _ => serde_json::Map::new(),
+    };
+    let input = RouteInput {
+        ctx,
+        query: query.into_iter().map(|(k, v)| (k, Json2::String(v))).collect(),
+        body: body_map,
+        raw_body: raw_body.to_vec(),
+        headers: hdrs,
+    };
+    match backend.db.run_route(reg, input).await {
+        Ok(RouteOutput::Json(json)) => json_response(json.to_string()),
+        Ok(RouteOutput::Text(text)) => (StatusCode::OK, [("content-type", "text/plain; charset=utf-8")], text).into_response(),
+        Err(e) => write_error("route", e),
+    }
+}
+
+async fn module_route_get(
+    State(state): State<AppState>,
+    Path(route): Path<String>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    raw_body: Bytes,
+) -> Response {
+    module_route_handler(state, RouteMethod::Get, route, headers, query, raw_body).await
+}
+
+async fn module_route_post(
+    State(state): State<AppState>,
+    Path(route): Path<String>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    raw_body: Bytes,
+) -> Response {
+    module_route_handler(state, RouteMethod::Post, route, headers, query, raw_body).await
 }
 
 /// The ONE generic read-only ledger-report dispatch: GET /api/reports/:report?<params>. Resolves the
