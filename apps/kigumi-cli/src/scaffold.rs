@@ -178,6 +178,30 @@ Common attrs: `label` (required), `required`, `unique`, `default="..."`,
 const CLAUDE_MD: &str = r#"@AGENTS.md
 "#;
 
+// The project-local Claude Code skill: deep recipes (models, actions, services, jobs, routes,
+// migrations) discovered automatically when an agent works in the generated app. Single source:
+// packaged with this crate and embedded at compile time.
+const SKILL_MD: &str = include_str!("../skill/SKILL.md");
+
+const AGENT_DEF: &str = r#"---
+name: kigumi-module-author
+description: Implements features in this Kigumi app - models, ACLs, actions with numbering, computed fields, validation, cross-record services, background jobs, webhook routes, seeds and data migrations. Use for any business-logic change in the module crate.
+tools: Read, Write, Edit, Bash, Grep, Glob
+---
+
+You implement features in a Kigumi application module. Read AGENTS.md and the kigumi skill
+recipes first; all business declarations live in the module crate's src/lib.rs.
+
+Rules: follow the seam idiom (one register_*! per capability, declared next to the model);
+namespace every global (computes, jobs, sequence codes) with the module name; keep seeds,
+migrations and jobs idempotent; gate permissions before any ctx.sudo(); verify signatures with
+RouteInput::verify_hmac_sha256. Ship model/data changes with a MANIFEST version bump and a
+register_migration! step.
+
+Verify your work: cargo build (composition is checked by the compiler), cargo test -p <module>,
+and remind the operator to re-run migrate after model changes.
+"#;
+
 const MODULE_TOML: &str = r#"[package]
 name = "__APP__"
 version = "1.0.0"
@@ -446,12 +470,14 @@ pub fn scaffold(dest: &Path, opts: &ScaffoldOptions) -> Result<(), String> {
     if dest.as_os_str().is_empty() || dest.exists() {
         return Err(format!("'{}' already exists — refusing to write into it", dest.display()));
     }
-    let files: [(&str, &str); 8] = [
+    let files: [(&str, &str); 10] = [
         ("Cargo.toml", WORKSPACE_TOML),
         (".gitignore", GITIGNORE),
         ("README.md", README_MD),
         ("AGENTS.md", AGENTS_MD),
         ("CLAUDE.md", CLAUDE_MD),
+        (".claude/skills/kigumi/SKILL.md", SKILL_MD),
+        (".claude/agents/kigumi-module-author.md", AGENT_DEF),
         ("__MOD__/Cargo.toml", MODULE_TOML),
         ("__MOD__/src/lib.rs", MODULE_LIB_RS),
         ("app/Cargo.toml", APP_TOML),
@@ -532,6 +558,8 @@ mod tests {
             "README.md",
             "AGENTS.md",
             "CLAUDE.md",
+            ".claude/skills/kigumi/SKILL.md",
+            ".claude/agents/kigumi-module-author.md",
             "demoapp/Cargo.toml",
             "demoapp/src/lib.rs",
             "app/Cargo.toml",
