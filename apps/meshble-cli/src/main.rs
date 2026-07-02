@@ -26,15 +26,21 @@ const CRON_TICK_SECS: u64 = 60;
 /// How often a running server re-reads the install ledger to pick up out-of-band module changes.
 const MODULE_REFRESH_SECS: u64 = 8;
 
-/// Forces the module crates to link so their `inventory` registrations are present in this binary.
+/// Forces the feature-enabled module crates to link so their `inventory` registrations are present in this
+/// binary. A module absent at build time (its feature off) simply never registers — `resolve_modules` and
+/// the rest of the CLI are inventory-driven, so nothing else needs to know it is gone. With every feature
+/// off (`--no-default-features`) this is empty and the binary is a bare framework server.
 fn link_modules() {
-    let _ = (
-        &meshble_mod_base::MANIFEST,
-        &meshble_mod_mail::MANIFEST,
-        &meshble_mod_sales::MANIFEST,
-        &meshble_mod_account::MANIFEST,
-        &meshble_mod_stock::MANIFEST,
-    );
+    #[cfg(feature = "base")]
+    let _ = &meshble_mod_base::MANIFEST;
+    #[cfg(feature = "mail")]
+    let _ = &meshble_mod_mail::MANIFEST;
+    #[cfg(feature = "sales")]
+    let _ = &meshble_mod_sales::MANIFEST;
+    #[cfg(feature = "account")]
+    let _ = &meshble_mod_account::MANIFEST;
+    #[cfg(feature = "stock")]
+    let _ = &meshble_mod_stock::MANIFEST;
 }
 
 #[derive(Parser)]

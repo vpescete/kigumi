@@ -17,12 +17,15 @@ meshble-db = { workspace = true }
 meshble-server = { workspace = true }
 meshble-auth = { workspace = true }
 meshble-storage = { workspace = true }
-# Linked so their models/ACLs/rules self-register into the catalog (inventory).
-meshble-mod-base = { path = "../../modules/base" }
-meshble-mod-mail = { path = "../../modules/mail" }
-meshble-mod-sales = { path = "../../modules/sales" }
-meshble-mod-account = { path = "../../modules/account" }
-meshble-mod-stock = { path = "../../modules/stock" }
+# The ERP modules are OPTIONAL: the framework is first, the ERP is a layer you opt into at build time via
+# the features below. Each is linked only when its feature is on, so their models/ACLs/rules/services
+# self-register into the catalog (inventory) only then. `--no-default-features` builds a bare framework
+# server (a metamodel engine with no ERP), the artifact-level proof of "framework first, ERP optional".
+meshble-mod-base = { path = "../../modules/base", optional = true }
+meshble-mod-mail = { path = "../../modules/mail", optional = true }
+meshble-mod-sales = { path = "../../modules/sales", optional = true }
+meshble-mod-account = { path = "../../modules/account", optional = true }
+meshble-mod-stock = { path = "../../modules/stock", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 axum = "0.7"
 clap = { version = "4", features = ["derive"] }
@@ -32,3 +35,17 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 hmac = "0.12"
 sha2 = "0.10"
+
+# Which ERP modules are compiled into the `meshble` binary. Each feature both links its crate (`dep:`) and
+# pulls its module dependency closure, mirroring the inter-crate deps (mail needs base; sales/account need
+# base+mail; stock needs base+mail+sales), so a module's inventory registrations are never linked without
+# the models they reference. `default` is the full ERP stack — the current behavior — so an ordinary build
+# is unchanged. Build a lean instance with e.g. `--no-default-features --features sales`, or a bare
+# framework server with `--no-default-features`.
+[features]
+default = ["sales", "account", "stock"]
+base = ["dep:meshble-mod-base"]
+mail = ["dep:meshble-mod-mail", "base"]
+sales = ["dep:meshble-mod-sales", "mail"]
+account = ["dep:meshble-mod-account", "mail"]
+stock = ["dep:meshble-mod-stock", "sales"]
