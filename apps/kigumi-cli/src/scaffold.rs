@@ -324,7 +324,7 @@ fn render(template: &str, opts: &ScaffoldOptions) -> String {
         .collect();
     let repo_url = match &opts.framework {
         FrameworkSource::Git(url) => url.trim_end_matches(".git").to_string(),
-        FrameworkSource::Path(_) => "https://github.com/vpescete/msh_framework".to_string(),
+        FrameworkSource::Path(_) => "https://github.com/vpescete/kigumi".to_string(),
     };
     // __APP__ FIRST: the dep lines carry a user-supplied filesystem path that may itself contain
     // the literal token (review finding) — substituted afterwards, they are never rescanned.
@@ -379,7 +379,7 @@ mod tests {
         ScaffoldOptions {
             name: name.to_string(),
             extra_modules: extras.iter().map(|s| s.to_string()).collect(),
-            framework: FrameworkSource::Git("https://github.com/vpescete/msh_framework.git".to_string()),
+            framework: FrameworkSource::Git("https://github.com/vpescete/kigumi.git".to_string()),
         }
     }
 

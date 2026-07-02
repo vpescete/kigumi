@@ -269,7 +269,7 @@ async fn run(cli: Cli) -> Fallible {
                     p.canonicalize().map_err(|e| format!("--framework-path '{}': {e}", p.display()))?,
                 ),
                 None => scaffold::FrameworkSource::Git(
-                    "https://github.com/vpescete/msh_framework.git".to_string(),
+                    "https://github.com/vpescete/kigumi.git".to_string(),
                 ),
             };
             let dest = PathBuf::from(&ident);

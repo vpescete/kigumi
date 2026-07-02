@@ -17,8 +17,8 @@ This guide describes the installation and deployment of a Kigumi instance, from 
 Clone the repository and build the workspace in release mode:
 
 ```bash
-git clone https://github.com/vpescete/msh_framework
-cd msh_framework
+git clone https://github.com/vpescete/kigumi
+cd kigumi
 cargo build --release
 ```
 

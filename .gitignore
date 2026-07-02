@@ -3,8 +3,13 @@
 /odoo19
 
 # Instance config & secrets (real files — keep only the .example)
-/meshble.toml
+/kigumi.toml
 .env
 
 # Local Claude session state
 .claude/
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

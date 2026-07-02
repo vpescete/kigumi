@@ -33,7 +33,7 @@ All framework crates share the version declared in `[workspace.package]`:
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/vpescete/msh_framework"
+repository = "https://github.com/vpescete/kigumi"
 ```
 
 ### Responsibilities of the framework crates

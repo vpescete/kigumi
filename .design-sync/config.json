@@ -1,0 +1,22 @@
+{
+  "pkg": "meshble-web",
+  "globalName": "MeshbleUI",
+  "projectId": "557d4e1b-0061-462b-b53e-56a8a9b55c5b",
+  "shape": "package",
+  "entry": "web/src/ds-bundle-entry.ts",
+  "srcDir": "src",
+  "tsconfig": "tsconfig.json",
+  "componentSrcMap": {
+    "Dialog": "src/ui/Dialog.tsx",
+    "Combobox": "src/ui/Combobox.tsx",
+    "CommandPalette": "src/ui/CommandPalette.tsx",
+    "Tooltip": "src/ui/Tooltip.tsx",
+    "Tabs": "src/ui/Tabs.tsx",
+    "Skeleton": "src/ui/Skeleton.tsx",
+    "Sparkline": "src/ui/Sparkline.tsx",
+    "ToastProvider": "src/ui/Toast.tsx"
+  },
+  "cssEntry": "dist/assets/index-BlfpPYLK.css",
+  "runtimeFontPrefixes": ["Space Grotesk", "Hanken Grotesk", "JetBrains Mono"],
+  "readmeHeader": ".design-sync/conventions.md"
+}
