@@ -7,6 +7,8 @@ use kigumi::prelude::*;
 // The reservation/validation engine (relocated from kigumi-db onto the service seam).
 pub mod services;
 
+pub mod seed;
+
 /// Module manifest: own version + framework compatibility range + module dependencies.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "stock",
@@ -20,6 +22,10 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     summary: "Inventory — locations, quants, pickings and moves",
 };
 kigumi::register_module!(MANIFEST);
+
+// One default warehouse + standard locations, seeded at migrate when stock is installed (after
+// base, by dependency order). Skipped entirely once any location exists.
+kigumi::register_seed!("stock", seed::seed_stock_data);
 
 /// A stock location (Odoo's `stock.location`): a place stock sits. `usage` drives behavior — only
 /// `internal` counts as real on-hand; supplier/customer/inventory are virtual (infinite) source/sinks.

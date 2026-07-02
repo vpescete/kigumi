@@ -35,8 +35,8 @@ pub mod prelude {
         job_for, ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
         validate_routes, write_triggers_for, BoxServiceFut, DbError, LedgerReportFn,
         LedgerReportRegistration, JobFn, JobRegistration, RouteFn, RouteInput, RouteMethod, RouteOutput,
-        RouteRegistration, ServiceCtx, ServiceFn, ServiceInput, ServiceOutput, ServiceRegistration,
-        WriteTriggerFn, WriteTriggerRegistration,
+        RouteRegistration, SeedFn, SeedRegistration, ServiceCtx, ServiceFn, ServiceInput,
+        ServiceOutput, ServiceRegistration, WriteTriggerFn, WriteTriggerRegistration,
     };
     // The full DB handle — what a route/job body receives (services get the richer ServiceCtx).
     pub use kigumi_db::Db;
@@ -134,6 +134,22 @@ macro_rules! register_rules {
     ($rules:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::RecordRuleRegistration { rules: || $rules }
+        }
+    };
+}
+
+/// Registers a module's idempotent reference-data seeder, run at every migrate while the module
+/// is installed (in dependency order). Bodies must never overwrite operator changes — guard with
+/// count/exists checks: the DB is the authority. `func` is an `async fn(&Db) -> Result<(), DbError>`.
+/// `kigumi::register_seed!("base", seed::seed_base_data);`
+#[macro_export]
+macro_rules! register_seed {
+    ($module:expr, $func:path) => {
+        $crate::inventory::submit! {
+            $crate::prelude::SeedRegistration {
+                module: $module,
+                func: |db| ::std::boxed::Box::pin($func(db)),
+            }
         }
     };
 }

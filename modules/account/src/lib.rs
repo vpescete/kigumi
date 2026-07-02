@@ -7,6 +7,8 @@ use rust_decimal::Decimal;
 // Cross-record invoicing / billing / payment / posting engine (relocated from kigumi-db onto the seam).
 pub mod services;
 
+pub mod seed;
+
 /// Module manifest: own version + framework compatibility range + module dependencies.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "account",
@@ -16,6 +18,10 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     summary: "Double-entry general ledger",
 };
 kigumi::register_module!(MANIFEST);
+
+// A minimal chart of accounts + journals for the default company, seeded at migrate when account
+// is installed (after base, by dependency order). Skipped entirely once any account exists.
+kigumi::register_seed!("account", seed::seed_account_data);
 
 /// A general-ledger account (Odoo's `account.account`): one line of the chart of accounts. Its
 /// `account_type` drives downstream behavior (receivable/payable ledgers, income/expense, tax).

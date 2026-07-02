@@ -9,6 +9,20 @@
 use crate::{Db, DbError};
 use kigumi_core::migration_plan;
 use sqlx::Row;
+use std::future::Future;
+use std::pin::Pin;
+
+/// A module's reference-data seeder (emitted by `register_seed!`). Runs at EVERY migrate for
+/// installed modules, in dependency order — so bodies must be idempotent and never overwrite an
+/// operator change (guard with count/exists checks: the DB is the authority).
+pub type SeedFn =
+    for<'a> fn(&'a Db) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>>;
+
+pub struct SeedRegistration {
+    pub module: &'static str,
+    pub func: SeedFn,
+}
+kigumi_core::inventory::collect!(SeedRegistration);
 
 const ENSURE: &str = "CREATE TABLE IF NOT EXISTS installed_module \
      (name text PRIMARY KEY, installed_version text NOT NULL, \
@@ -89,6 +103,49 @@ impl Db {
         self.ensure_event_schema().await?;
         self.ensure_crons().await?;
         self.ensure_registered_sequences().await?;
+        self.run_installed_seeds().await?;
+        Ok(())
+    }
+
+    /// Runs every `register_seed!` body whose module is installed, in dependency order (a module
+    /// seeds after everything it depends on — account's chart needs base's company).
+    pub async fn run_installed_seeds(&self) -> Result<(), DbError> {
+        let installed: std::collections::HashSet<String> =
+            self.installed_modules().await?.into_iter().collect();
+        // Kahn's algorithm over the linked manifests, restricted to installed modules; candidates
+        // are taken name-sorted each round so the order is deterministic.
+        let mods: Vec<_> = kigumi_core::resolve_modules()
+            .map_err(|e| DbError::Migration(format!("{e:?}")))?
+            .into_iter()
+            .filter(|m| installed.contains(m.name))
+            .collect();
+        let mut done: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut order: Vec<&str> = Vec::with_capacity(mods.len());
+        while order.len() < mods.len() {
+            let mut ready: Vec<&str> = mods
+                .iter()
+                .filter(|m| !done.contains(m.name))
+                .filter(|m| {
+                    m.depends.iter().all(|d| done.contains(d.name) || !installed.contains(d.name))
+                })
+                .map(|m| m.name)
+                .collect();
+            if ready.is_empty() {
+                return Err(DbError::Migration("module dependency cycle in seed ordering".to_string()));
+            }
+            ready.sort_unstable();
+            for name in ready {
+                done.insert(name);
+                order.push(name);
+            }
+        }
+        for name in order {
+            for reg in kigumi_core::inventory::iter::<SeedRegistration>() {
+                if reg.module == name {
+                    (reg.func)(self).await?;
+                }
+            }
+        }
         Ok(())
     }
 }

@@ -9,6 +9,8 @@ repository.workspace = true
 
 [dependencies]
 kigumi = { workspace = true }
+# Seed payloads (insert_secured takes JSON maps).
+serde_json = "1"
 
 [dev-dependencies]
 # res.users/res.groups projection test against a real database.

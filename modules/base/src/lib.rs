@@ -8,6 +8,8 @@
 
 use kigumi::prelude::*;
 
+pub mod seed;
+
 /// Module manifest. `base` depends on nothing and anchors the catalog.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "base",
@@ -17,6 +19,10 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
     summary: "Foundational models: currency, partner, company",
 };
 kigumi::register_module!(MANIFEST);
+
+// Reference data (default currency + company, starter countries, the res.groups projection),
+// seeded at migrate when base is installed. Idempotent: the DB stays the authority.
+kigumi::register_seed!("base", seed::seed_base_data);
 
 /// Currency used by monetary fields. Global (shared across companies).
 #[model(name = "res.currency", table = "res_currency")]
