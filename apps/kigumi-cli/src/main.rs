@@ -19,6 +19,8 @@ use kigumi_server::{
     router_with_data_dynamic_rasterized, GenpdfRasterizer,
 };
 
+mod scaffold;
+
 type Fallible = Result<(), Box<dyn std::error::Error>>;
 
 /// How often the scheduler checks for due cron jobs (each job's own interval lives in the DB).
@@ -89,6 +91,31 @@ enum Cmd {
     },
     /// Print the framework version and the linked modules.
     Version,
+    /// Scaffold a new Kigumi application workspace (module crate + server binary on kigumi-runtime).
+    New {
+        /// Name of the new app (also the directory and module crate name).
+        name: String,
+        /// Extra modules beyond base+mail, CSV of sales,account,stock. Prompted when omitted.
+        #[arg(long)]
+        modules: Option<String>,
+        /// Point the generated Cargo.toml at a local framework checkout instead of the git URL.
+        #[arg(long)]
+        framework_path: Option<PathBuf>,
+        /// Accept defaults without prompting.
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+}
+
+/// One-line interactive prompt with a default (used only on a TTY).
+fn ask(question: &str, default: &str) -> String {
+    use std::io::Write;
+    print!("{question} [{default}]: ");
+    std::io::stdout().flush().ok();
+    let mut s = String::new();
+    std::io::stdin().read_line(&mut s).ok();
+    let t = s.trim();
+    if t.is_empty() { default.to_string() } else { t.to_string() }
 }
 
 #[derive(Subcommand)]
@@ -210,6 +237,54 @@ async fn run(cli: Cli) -> Fallible {
     link_modules();
     let path = config_path(&cli);
     match cli.cmd {
+        Cmd::New { name, modules, framework_path, yes } => {
+            let ident = scaffold::sanitize_name(&name);
+            if ident.is_empty() || ident.chars().all(|c| c == '_') {
+                return Err(format!("'{name}' is not a valid app name").into());
+            }
+            if ident != name {
+                println!("note: using '{ident}' as the crate/module name");
+            }
+            let extras_csv = match modules {
+                Some(csv) => csv,
+                None => {
+                    use std::io::IsTerminal;
+                    if !yes && std::io::stdin().is_terminal() {
+                        ask("Extra modules (sales,account,stock)", "none")
+                    } else {
+                        eprintln!("note: non-interactive, no extra modules (use --modules to pick some)");
+                        "none".to_string()
+                    }
+                }
+            };
+            let extras: Vec<String> = extras_csv
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty() && s != "none")
+                .collect();
+            scaffold::validate_extras(&extras)?;
+            let extras = scaffold::module_closure(&extras);
+            let framework = match framework_path {
+                Some(p) => scaffold::FrameworkSource::Path(
+                    p.canonicalize().map_err(|e| format!("--framework-path '{}': {e}", p.display()))?,
+                ),
+                None => scaffold::FrameworkSource::Git(
+                    "https://github.com/vpescete/msh_framework.git".to_string(),
+                ),
+            };
+            let dest = PathBuf::from(&ident);
+            let opts = scaffold::ScaffoldOptions { name: ident.clone(), extra_modules: extras, framework };
+            scaffold::scaffold(&dest, &opts)?;
+            println!("created {ident}/");
+            println!("next steps:");
+            println!("  cd {ident}");
+            println!("  createdb {ident}");
+            println!("  export DATABASE_URL=postgres://localhost/{ident}");
+            println!("  export KIGUMI_JWT_SECRET=change-me");
+            println!("  KIGUMI_ADMIN_PASSWORD=change-me cargo run -p app -- migrate");
+            println!("  cargo run -p app -- serve");
+            Ok(())
+        }
         Cmd::Config { action } => {
             let s = Settings::load(Some(&path))?;
             match action {
