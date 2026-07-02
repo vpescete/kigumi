@@ -1225,7 +1225,11 @@ impl Db {
     /// values flow only through the bound id and the rule/company params, so there is no injection surface.
     /// Returns true iff THIS call matched (won the transition). Generalizes the invoice-claim CAS so a
     /// relocated module service can atomically transition a record (e.g. invoice_status `to_invoice` ->
-    /// `invoiced`) under the caller's authorization. Autocommit on the pool; reachable only via ServiceCtx.
+    /// `invoiced`) under the caller's authorization. Runs on the caller's transaction `tx` (the service
+    /// tx), so the claim commits — or rolls back — with the rest of the service's writes; a concurrent
+    /// claimant blocks on the row lock until this tx resolves, then re-evaluates its guard. Reachable
+    /// only via ServiceCtx.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn guarded_cas(
         &self,
         model: &ResolvedModel,
@@ -1234,6 +1238,7 @@ impl Db {
         id: i64,
         set_clause: &str,
         extra_where: &str,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
     ) -> Result<bool, DbError> {
         let mut params: Vec<Value> = vec![Value::Int(id)];
         let mut where_sql = match record_rule_domain(Operation::Write, model.name, ctx, rules) {
@@ -1246,7 +1251,7 @@ impl Db {
         for v in &params {
             q = bind_query(q, v);
         }
-        Ok(q.fetch_optional(&self.pool).await?.is_some())
+        Ok(q.fetch_optional(&mut **tx).await?.is_some())
     }
 
     /// Flushes the outgoing mail queue: hands every `mail.mail` in state `outgoing` to `send` (the host's

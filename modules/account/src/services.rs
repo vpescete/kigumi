@@ -1,14 +1,19 @@
 //! Account cross-record services — the invoicing / billing / payment / posting engine, relocated from
 //! meshble-db onto the framework's `register_service!` seam so the ERP becomes an optional layer (the core
-//! no longer names account.move / sale.order). These are v1 services (no single transaction): the methods
-//! never opened one — the claim-then-post non-atomicity is documented, not enforced — so the behaviour is
-//! preserved exactly. The account module owns invoicing because it owns the GL; it registers services on
-//! the ORDER models (sale.order / purchase.order) resolved at runtime, so no cross-module crate dep.
+//! no longer names account.move / sale.order). The account module owns invoicing because it owns the GL;
+//! it registers services on the ORDER models (sale.order / purchase.order) resolved at runtime, so no
+//! cross-module crate dep.
 //!
-//! Helpers reach the DB through ServiceCtx: secured reads/writes (find/insert/update_secured), the generic
-//! chart resolution (first_match, elevated), the guarded invoice claim (guarded_cas), numbering
-//! (ensure_sequence/next_value), the clock (today); and module-owned bespoke SQL (FX rates, company
-//! currency, fiscal lock, the residual draw-down, per-group tax buckets) on the pool ServiceCtx hands out.
+//! ATOMICITY (owner-approved): each service runs on the ONE transaction run_service opens — the order
+//! claim (guarded_cas), the move + lines insert (insert_in_tx), the residual draw-down, and the posting
+//! state flip (update_in_tx) commit together or roll back together. A crash or error anywhere leaves no
+//! claimed-but-uninvoiced order and no drawn-down-but-unpaid invoice. The one deliberate exception is
+//! sequence NUMBERING (ensure_sequence/next_value on the pool): a rollback after the number is claimed
+//! gaps the sequence — the same pre-existing tradeoff every failure path already had.
+//!
+//! Reads of COMMITTED reference data (chart, journals, FX rates, company currency, fiscal lock, tax
+//! buckets over order lines) stay on the pool ServiceCtx hands out; only state the service itself writes
+//! in-tx (the move and its lines) must be read back through `cx.tx()`.
 
 use meshble::prelude::*; // ServiceCtx, ServiceInput, ServiceOutput, DbError, Domain, Ctx
 use rust_decimal::Decimal;
@@ -20,25 +25,39 @@ use sqlx::Row;
 /// invoice/bill/payment services call after building a draft move, and the body of the `post` service.
 /// `ctx` is the authorization context (the caller for the `post` service; elevated when called by the
 /// engine after creating a move). Returns the assigned entry number. Relocated from `Db::post_move`.
-pub(crate) async fn post_move(cx: &ServiceCtx<'_, '_>, ctx: &Ctx, move_id: i64) -> Result<String, DbError> {
+///
+/// Runs on the SERVICE transaction: the move and its lines are read through `cx.tx()` (they may have been
+/// inserted, uncommitted, earlier in this same tx by create_invoice/vendor_bill/register_payment), and the
+/// state flip goes through `update_in_tx`, so create + post commit atomically. For the standalone `post`
+/// service the target's visibility was already gated by run_service on this exact id; the journal read
+/// stays SECURED under the caller (committed config — the caller's journal-visibility gate is preserved).
+pub(crate) async fn post_move(cx: &mut ServiceCtx<'_, '_>, ctx: &Ctx, move_id: i64) -> Result<String, DbError> {
     let move_model = cx.resolve("account.move")?;
     let journal_model = cx.resolve("account.journal")?;
-    let line_model = cx.resolve("account.move.line")?;
 
-    let mv = cx
-        .find_one_secured(&move_model, ctx, move_id)
+    let (state, mdate, company_id, journal_id) = {
+        let tx = cx.tx();
+        let row = sqlx::query(
+            "SELECT state, date::text AS date, company_id, journal_id FROM account_move WHERE id = $1",
+        )
+        .bind(move_id)
+        .fetch_optional(&mut **tx)
         .await?
         .ok_or_else(|| DbError::BadInput("move not found or not permitted".to_string()))?;
-    let state = mv.get("state").and_then(|v| v.as_str()).unwrap_or("");
+        (
+            row.try_get::<Option<String>, _>("state")?.unwrap_or_default(),
+            row.try_get::<Option<String>, _>("date")?,
+            row.try_get::<Option<i64>, _>("company_id")?,
+            row.try_get::<Option<i64>, _>("journal_id")?,
+        )
+    };
     if state != "draft" {
         return Err(DbError::BadInput(format!("only a draft entry can be posted (state is '{state}')")));
     }
 
     // Fiscal lock: an entry dated on or before its company's lock date cannot be posted (ISO dates compare
-    // lexically; a move with no date/company, or a company with no lock, is free).
-    if let (Some(md), Some(cid)) =
-        (mv.get("date").and_then(|v| v.as_str()), mv.get("company_id").and_then(|v| v.as_i64()))
-    {
+    // lexically; a move with no date/company, or a company with no lock, is free). Committed config → pool.
+    if let (Some(md), Some(cid)) = (mdate.as_deref(), company_id) {
         if let Some(lock) = company_lock_date(cx, cid).await? {
             if md <= lock.as_str() {
                 return Err(DbError::BadInput(format!(
@@ -48,28 +67,29 @@ pub(crate) async fn post_move(cx: &ServiceCtx<'_, '_>, ctx: &Ctx, move_id: i64) 
         }
     }
 
-    // Re-check the balance at post time (defense in depth — create already enforced it).
-    let lines = cx.find_secured(&line_model, ctx, Some(&Domain::field("move_id").eq(move_id))).await?;
-    if lines.is_empty() {
-        return Err(DbError::BadInput("cannot post an entry with no lines".to_string()));
-    }
-    let (mut debit, mut credit) = (Decimal::ZERO, Decimal::ZERO);
-    let parse = |l: &serde_json::Value, f: &str| -> Decimal {
-        l.get(f).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or_default()
+    // Re-check the balance at post time (defense in depth — create already enforced it). Summed on the tx
+    // so just-inserted lines are visible; the invariant is a property of the WHOLE entry, so it sums every
+    // line (a visibility-filtered read could false-fail a caller whose record rules hide some lines).
+    let (debit, credit, nlines) = {
+        let tx = cx.tx();
+        let row = sqlx::query(
+            "SELECT COALESCE(SUM(debit), 0) AS d, COALESCE(SUM(credit), 0) AS c, COUNT(*) AS n \
+             FROM account_move_line WHERE move_id = $1",
+        )
+        .bind(move_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        (row.try_get::<Decimal, _>("d")?, row.try_get::<Decimal, _>("c")?, row.try_get::<i64, _>("n")?)
     };
-    for l in &lines {
-        debit += parse(l, "debit");
-        credit += parse(l, "credit");
+    if nlines == 0 {
+        return Err(DbError::BadInput("cannot post an entry with no lines".to_string()));
     }
     if debit != credit {
         return Err(DbError::BadInput(format!("cannot post an unbalanced entry: debit {debit} != credit {credit}")));
     }
 
     // Number the entry from its journal's sequence (sequence_code, else the journal code).
-    let journal_id = mv
-        .get("journal_id")
-        .and_then(|v| v.as_i64())
-        .ok_or_else(|| DbError::BadInput("the move has no journal".to_string()))?;
+    let journal_id = journal_id.ok_or_else(|| DbError::BadInput("the move has no journal".to_string()))?;
     let journal = cx
         .find_one_secured(&journal_model, ctx, journal_id)
         .await?
@@ -83,11 +103,16 @@ pub(crate) async fn post_move(cx: &ServiceCtx<'_, '_>, ctx: &Ctx, move_id: i64) 
     } else {
         return Err(DbError::BadInput("the journal has no sequence code".to_string()));
     };
+    // Pool-side numbering: a rollback below gaps the sequence (pre-existing tradeoff, see module header).
     cx.ensure_sequence(seq, &format!("{seq}/"), "", 5).await?;
     let number = cx.next_value(seq).await?;
 
     let payload = json!({ "state": "posted", "name": number });
-    cx.update_secured(&move_model, ctx, move_id, payload.as_object().unwrap()).await?;
+    if cx.update_in_tx(&move_model, ctx, move_id, payload.as_object().unwrap()).await? == 0 {
+        // A write-rule-filtered row would previously "post" silently (number returned, state unchanged);
+        // atomically, a no-op flip is an error so the whole service rolls back instead of lying.
+        return Err(DbError::BadInput("move not found or not permitted".to_string()));
+    }
     Ok(number)
 }
 
@@ -246,7 +271,8 @@ pub async fn create_invoice(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) ->
         "date": today, "invoice_date_due": due_date,
         "amount_residual": total.to_string(), "amount_total_company": receivable_co.to_string()
     });
-    let move_id = cx.insert_secured(&move_model, &elevated, move_payload.as_object().unwrap()).await?;
+    // In-tx: the move + lines commit with the claim above; a posting failure rolls the claim back too.
+    let move_id = cx.insert_in_tx(&move_model, &elevated, move_payload.as_object().unwrap()).await?;
     post_move(cx, &elevated, move_id).await?;
     Ok(ServiceOutput::json(json!({ "invoice": move_id })))
 }
@@ -366,7 +392,8 @@ pub async fn create_vendor_bill(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput
         "date": today, "invoice_date_due": today,
         "amount_residual": total.to_string(), "amount_total_company": payable_co.to_string()
     });
-    let move_id = cx.insert_secured(&move_model, &elevated, move_payload.as_object().unwrap()).await?;
+    // In-tx: the bill + lines commit with the claim above; a posting failure rolls the claim back too.
+    let move_id = cx.insert_in_tx(&move_model, &elevated, move_payload.as_object().unwrap()).await?;
     post_move(cx, &elevated, move_id).await?;
     Ok(ServiceOutput::json(json!({ "bill": move_id })))
 }
@@ -436,19 +463,24 @@ pub async fn register_payment(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) 
         .ok_or_else(|| DbError::BadInput(format!("no {counter_type} account configured")))?;
 
     // Atomically draw down the open residual (validates no over-payment + records settlement state). The
-    // CASE reads the OLD residual (Postgres evaluates SET RHS against the pre-update row).
-    let row = sqlx::query(
-        "UPDATE account_move \
-         SET amount_residual = amount_residual - $2, \
-             payment_state = CASE WHEN amount_residual - $2 <= 0 THEN 'paid' ELSE 'partial' END, \
-             reconciled = (amount_residual - $2 <= 0) \
-         WHERE id = $1 AND amount_residual >= $2 \
-         RETURNING id",
-    )
-    .bind(invoice_id)
-    .bind(amount)
-    .fetch_optional(cx.pool())
-    .await?;
+    // CASE reads the OLD residual (Postgres evaluates SET RHS against the pre-update row). On the SERVICE
+    // tx: the draw-down commits with the payment entry below, or rolls back with it — a failure while
+    // booking the entry can no longer leave the invoice drawn down without a payment on the books.
+    let row = {
+        let tx = cx.tx();
+        sqlx::query(
+            "UPDATE account_move \
+             SET amount_residual = amount_residual - $2, \
+                 payment_state = CASE WHEN amount_residual - $2 <= 0 THEN 'paid' ELSE 'partial' END, \
+                 reconciled = (amount_residual - $2 <= 0) \
+             WHERE id = $1 AND amount_residual >= $2 \
+             RETURNING id",
+        )
+        .bind(invoice_id)
+        .bind(amount)
+        .fetch_optional(&mut **tx)
+        .await?
+    };
     if row.is_none() {
         return Err(DbError::BadInput("payment exceeds the invoice's open balance".to_string()));
     }
@@ -505,7 +537,8 @@ pub async fn register_payment(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) 
         "move_type": "entry", "journal_id": journal_id, "partner_id": partner,
         "currency_id": currency, "company_id": company, "line_ids": lines
     });
-    let pay_id = cx.insert_secured(&move_model, &elevated, pay_payload.as_object().unwrap()).await?;
+    // In-tx: the payment entry commits with the residual draw-down above, and posting with both.
+    let pay_id = cx.insert_in_tx(&move_model, &elevated, pay_payload.as_object().unwrap()).await?;
     post_move(cx, &elevated, pay_id).await?;
     Ok(ServiceOutput::json(json!({ "payment": pay_id })))
 }

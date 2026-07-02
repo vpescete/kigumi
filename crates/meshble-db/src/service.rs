@@ -164,6 +164,10 @@ pub struct ServiceCtx<'a, 't> {
     /// validation stays durable even if the backorder can't be created). run_service drains this after the
     /// body's tx commits.
     deferred: Vec<(ResolvedModel, Ctx, Map<String, Json>)>,
+    /// Tracked-field diffs from `update_in_tx`, written to the chatter POST-COMMIT (best-effort, never
+    /// propagated) — the same contract as `Db::update_secured`, which writes tracking only after its own
+    /// commit. Queued per update as (model, record, author uid, changes); drained by run_service.
+    tracking: Vec<(String, i64, i64, Vec<(String, Option<String>, Option<String>)>)>,
 }
 
 impl<'a, 't> ServiceCtx<'a, 't> {
@@ -239,8 +243,23 @@ impl<'a, 't> ServiceCtx<'a, 't> {
     /// A guarded compare-and-set under the CALLER's row-level authorization (Write record rule + company):
     /// `UPDATE model SET set_clause WHERE id AND extra_where`. Static fragments only (no injection surface).
     /// Returns true iff this call won the transition — e.g. atomically claiming an order for invoicing.
-    pub async fn guarded_cas(&self, model: &ResolvedModel, id: i64, set_clause: &str, extra_where: &str) -> Result<bool, DbError> {
-        self.db.guarded_cas(model, &self.caller, self.rules, id, set_clause, extra_where).await
+    /// Runs on the LIVE service transaction, so the claim commits (or rolls back) WITH the body's other
+    /// writes: a failure after the claim un-claims. A concurrent claimant's UPDATE blocks on the row lock
+    /// until this tx resolves, then re-evaluates its guard — exactly one caller wins either way.
+    pub async fn guarded_cas(&mut self, model: &ResolvedModel, id: i64, set_clause: &str, extra_where: &str) -> Result<bool, DbError> {
+        self.db.guarded_cas(model, &self.caller, self.rules, id, set_clause, extra_where, self.tx).await
+    }
+    /// A secured update on the LIVE service transaction (not its own) — the in-tx twin of `update_secured`,
+    /// for a write that must commit atomically with the body's other effects (e.g. posting flips a move's
+    /// state in the same tx that created it). The full secured path (ACL Write + D6 + record rule/company +
+    /// recompute + constraints + write triggers + domain events) runs in-tx; the tracked-field diff is
+    /// queued and written to the chatter after run_service commits (best-effort), matching `update_secured`.
+    pub async fn update_in_tx(&mut self, m: &ResolvedModel, ctx: &Ctx, id: i64, values: &Map<String, Json>) -> Result<u64, DbError> {
+        let (affected, track) = self.db.update_secured_in_tx(m, ctx, self.acls, self.rules, id, values, self.tx).await?;
+        if affected > 0 && !track.is_empty() {
+            self.tracking.push((m.name.to_string(), id, ctx.uid, track));
+        }
+        Ok(affected)
     }
     /// The connection pool, for a module's own bespoke SQL the domain-based secured finds cannot express:
     /// reference reads (currency, fiscal positions, recursive category trees), junction reads, most-
@@ -313,12 +332,21 @@ impl Db {
         // ONE transaction for the whole body: a tx-bound service (FOR UPDATE / CAS / atomic multi-write)
         // runs its SQL on cx.tx() and commits here; a pool-based service leaves it empty (a no-op commit).
         let mut tx = self.pool.begin().await?;
-        let mut cx = ServiceCtx { db: self, tx: &mut tx, caller: ctx.clone(), acls, rules, deferred: Vec::new() };
+        let mut cx = ServiceCtx { db: self, tx: &mut tx, caller: ctx.clone(), acls, rules, deferred: Vec::new(), tracking: Vec::new() };
         let result = (reg.func)(&mut cx, ServiceInput { record_id: id, body }).await;
         let deferred = std::mem::take(&mut cx.deferred);
+        let tracking = std::mem::take(&mut cx.tracking);
         drop(cx); // release the tx borrow before commit
         let out = result?; // Err → tx drops (rollback) and returns
         tx.commit().await?;
+        // Post-commit tracking for the in-tx secured updates: best-effort and never propagated (the write
+        // is already durable — an error here would mislead the caller into a retry), exactly like
+        // `update_secured`'s own post-commit tracking.
+        for (model_name, rec_id, uid, changes) in &tracking {
+            if let Err(e) = self.write_tracking(model_name, *rec_id, *uid, changes).await {
+                eprintln!("meshble-db tracking write failed (write committed): {e:?}");
+            }
+        }
         // Post-commit follow-on inserts (best-effort ordering, each its own tx) — the main effect is already
         // durable, so a failure here surfaces to the caller without un-doing the committed work.
         for (m, c, payload) in &deferred {
