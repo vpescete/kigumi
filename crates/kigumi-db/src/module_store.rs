@@ -24,6 +24,21 @@ pub struct SeedRegistration {
 }
 kigumi_core::inventory::collect!(SeedRegistration);
 
+/// A versioned per-module DATA migration (emitted by `register_migration!`): the upgrade contract.
+/// Runs when migrate finds the module installed at a ledger version < `to_version` while the
+/// linked crate is >= `to_version`. Steps run in semver order, each bumping the ledger to its
+/// `to_version` — a failed upgrade resumes exactly where it stopped, so bodies must be idempotent
+/// (at-least-once, like jobs). A fresh install runs no migrations: the declarative schema is
+/// already current-shape, and the ledger starts at the linked version.
+pub type DataMigrationFn = SeedFn;
+
+pub struct DataMigrationRegistration {
+    pub module: &'static str,
+    pub to_version: &'static str,
+    pub func: DataMigrationFn,
+}
+kigumi_core::inventory::collect!(DataMigrationRegistration);
+
 const ENSURE: &str = "CREATE TABLE IF NOT EXISTS installed_module \
      (name text PRIMARY KEY, installed_version text NOT NULL, \
       installed_at timestamptz NOT NULL DEFAULT now())";
@@ -103,8 +118,95 @@ impl Db {
         self.ensure_event_schema().await?;
         self.ensure_crons().await?;
         self.ensure_registered_sequences().await?;
+        // Upgrades BEFORE seeds: migrations transform existing data (the additive columns they
+        // backfill were just materialized above); seeds then top up missing reference data.
+        self.run_pending_upgrades().await?;
         self.run_installed_seeds().await?;
         Ok(())
+    }
+
+    /// Runs every pending `register_migration!` step: for each installed module whose linked crate
+    /// is NEWER than the ledger version, applies the registered migrations with
+    /// `ledger < to_version <= linked` in semver order, bumping the ledger after each step (a
+    /// failure resumes from the failed step on the next migrate). Modules with a version bump but
+    /// no registered steps just get their ledger bumped. A linked version OLDER than the ledger is
+    /// a refused downgrade. Returns the applied `(module, to_version)` steps.
+    pub async fn run_pending_upgrades(&self) -> Result<Vec<(String, String)>, DbError> {
+        use semver::Version;
+        fn bad(m: &str, e: semver::Error) -> DbError {
+            DbError::Migration(format!("{m}: {e}"))
+        }
+
+        let mods = kigumi_core::resolve_modules().map_err(|e| DbError::Migration(format!("{e:?}")))?;
+        // Author-bug validation over ALL linked registrations, installed or not: an unknown module
+        // name, an unparseable/duplicate to_version, or a step beyond the linked crate version
+        // (a forgotten manifest bump) must fail migrate loudly, not skip silently.
+        let mut seen: std::collections::HashSet<(&str, &str)> = std::collections::HashSet::new();
+        for r in kigumi_core::inventory::iter::<DataMigrationRegistration>() {
+            let Some(m) = mods.iter().find(|m| m.name == r.module) else {
+                return Err(DbError::Migration(format!(
+                    "migration to {} registered for unknown module '{}'",
+                    r.to_version, r.module
+                )));
+            };
+            let to = Version::parse(r.to_version).map_err(|e| bad(r.module, e))?;
+            let linked = Version::parse(m.version).map_err(|e| bad(r.module, e))?;
+            if to > linked {
+                return Err(DbError::Migration(format!(
+                    "module '{}' registers a migration to {to} but the linked crate is {linked} — bump the manifest version",
+                    r.module
+                )));
+            }
+            if !seen.insert((r.module, r.to_version)) {
+                return Err(DbError::Migration(format!(
+                    "duplicate migration to {to} for module '{}'",
+                    r.module
+                )));
+            }
+        }
+
+        let ledger: Vec<(String, String)> =
+            sqlx::query("SELECT name, installed_version FROM installed_module")
+                .fetch_all(&self.pool)
+                .await?
+                .into_iter()
+                .map(|row| (row.get(0), row.get(1)))
+                .collect();
+
+        let mut applied = Vec::new();
+        for (name, db_ver_str) in ledger {
+            // A ledger row without a linked crate (module removed from the binary) is left alone —
+            // uninstall is an explicit operator action, not a side effect of a build change.
+            let Some(m) = mods.iter().find(|m| m.name == name) else { continue };
+            let db_ver = Version::parse(&db_ver_str).map_err(|e| bad(&name, e))?;
+            let linked = Version::parse(m.version).map_err(|e| bad(&name, e))?;
+            if linked < db_ver {
+                return Err(DbError::Migration(format!(
+                    "module '{name}' is installed at {db_ver} but this binary links {linked}: downgrades are not supported"
+                )));
+            }
+            if linked == db_ver {
+                continue;
+            }
+            let mut steps: Vec<(Version, &DataMigrationRegistration)> = Vec::new();
+            for r in kigumi_core::inventory::iter::<DataMigrationRegistration>() {
+                if r.module == name {
+                    let to = Version::parse(r.to_version).map_err(|e| bad(&name, e))?;
+                    if db_ver < to && to <= linked {
+                        steps.push((to, r));
+                    }
+                }
+            }
+            steps.sort_by(|a, b| a.0.cmp(&b.0));
+            for (to, reg) in steps {
+                (reg.func)(self).await?;
+                self.mark_module_installed(&name, reg.to_version).await?;
+                println!("upgraded module {name} to {to}");
+                applied.push((name.clone(), reg.to_version.to_string()));
+            }
+            self.mark_module_installed(&name, m.version).await?;
+        }
+        Ok(applied)
     }
 
     /// Runs every `register_seed!` body whose module is installed, in dependency order (a module

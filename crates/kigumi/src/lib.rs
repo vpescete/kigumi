@@ -35,7 +35,8 @@ pub mod prelude {
         job_for, ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
         validate_routes, write_triggers_for, BoxServiceFut, DbError, LedgerReportFn,
         LedgerReportRegistration, JobFn, JobRegistration, RouteFn, RouteInput, RouteMethod, RouteOutput,
-        RouteRegistration, SeedFn, SeedRegistration, ServiceCtx, ServiceFn, ServiceInput,
+        RouteRegistration, DataMigrationFn, DataMigrationRegistration, SeedFn, SeedRegistration,
+        ServiceCtx, ServiceFn, ServiceInput,
         ServiceOutput, ServiceRegistration, WriteTriggerFn, WriteTriggerRegistration,
     };
     // The full DB handle — what a route/job body receives (services get the richer ServiceCtx).
@@ -134,6 +135,25 @@ macro_rules! register_rules {
     ($rules:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::RecordRuleRegistration { rules: || $rules }
+        }
+    };
+}
+
+/// Registers a versioned DATA migration for a module — the upgrade contract. It runs when migrate
+/// finds the module installed at a ledger version < `to_version` while the linked crate is
+/// >= `to_version`; steps run in semver order, each bumping the ledger, so a failed upgrade
+/// resumes where it stopped. Bodies must be idempotent (at-least-once, like jobs). A fresh
+/// install runs no migrations. `func` is an `async fn(&Db) -> Result<(), DbError>`.
+/// `kigumi::register_migration!("workshop", "1.1.0", backfill_closing_notes);`
+#[macro_export]
+macro_rules! register_migration {
+    ($module:expr, $to_version:expr, $func:path) => {
+        $crate::inventory::submit! {
+            $crate::prelude::DataMigrationRegistration {
+                module: $module,
+                to_version: $to_version,
+                func: |db| ::std::boxed::Box::pin($func(db)),
+            }
         }
     };
 }
