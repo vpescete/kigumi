@@ -48,6 +48,23 @@ pub struct RecordRuleRegistration {
 }
 inventory::collect!(RecordRuleRegistration);
 
+/// A module's document-numbering sequence (emitted by `register_sequence!`): declared next to the
+/// action that consumes it, ensured at migrate — an existing sequence keeps its counter. `module`
+/// is diagnostic only (a cross-module code collision is reported with both names).
+pub struct SequenceRegistration {
+    pub module: &'static str,
+    pub code: &'static str,
+    pub prefix: &'static str,
+    pub suffix: &'static str,
+    pub padding: i32,
+}
+inventory::collect!(SequenceRegistration);
+
+/// All sequences registered across linked modules.
+pub fn registered_sequences() -> Vec<&'static SequenceRegistration> {
+    inventory::iter::<SequenceRegistration>.into_iter().collect()
+}
+
 /// A model whose table is owned OUTSIDE the metamodel (e.g. the auth subsystem's `kigumi_user`, or
 /// a SQL view): registered so it is resolved/served like any model, but EXCLUDED from migration — the
 /// metamodel never creates or alters its table. Odoo's `_auto = False`. Emitted by `register_external!`.

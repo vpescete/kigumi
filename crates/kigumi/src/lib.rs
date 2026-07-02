@@ -12,7 +12,7 @@ pub mod prelude {
         inherits_of, is_mailed, is_transient, json_string, mailed_models, migration_plan, module_closure, module_of,
         check_constraints, has_constraints, has_read_computes, compute_on_read, transient_models,
         record_rule_domain, registered_acls, registered_group_names, registered_model_names,
-        registered_rules, related_path, resolve, resolve_all_registered, resolve_module_set,
+        registered_rules, registered_sequences, related_path, resolve, resolve_all_registered, resolve_module_set,
         resolve_modules, resolve_registered, tracked_fields, validate_depends, Acl, AclRegistration,
         ActionFn, ActionInput, ActionOutcome, ActionRegistration, Children, ComputeFn, ComputeInput,
         ComputeRegistration, ConstraintFn, ConstraintRegistration, Condition, Ctx, DelegatedField, Domain, DomainError, ExternalTable,
@@ -20,7 +20,8 @@ pub mod prelude {
         InheritsRegistration, MailedRegistration, MigrationTarget, Model, ModelDescriptor,
         ModelRegistration, ModuleDep, ModuleManifest, ModuleRegistration, Operation, Operator,
         ReadonlyFieldRegistration, RecordRule, RecordRuleRegistration, RelatedRegistration,
-        ResolutionError, ResolvedModel, RuleDomain, Sql, TrackedFieldRegistration, TransientRegistration,
+        ResolutionError, ResolvedModel, RuleDomain, SequenceRegistration, Sql,
+        TrackedFieldRegistration, TransientRegistration,
         Value, FRAMEWORK_VERSION,
         wizard_for, WizardContext, WizardDefaultGet, WizardRegistration,
         report_for, reports_for, ReportFn, ReportRegistration,
@@ -133,6 +134,24 @@ macro_rules! register_rules {
     ($rules:expr) => {
         $crate::inventory::submit! {
             $crate::prelude::RecordRuleRegistration { rules: || $rules }
+        }
+    };
+}
+
+/// Registers a document-numbering sequence, declared by the module whose action consumes it
+/// (`ActionOutcome::assign_sequence`). Ensured at migrate; an existing sequence keeps its counter.
+/// `kigumi::register_sequence!("sales", "SO", "SO/", "", 5);` → SO/00001.
+#[macro_export]
+macro_rules! register_sequence {
+    ($module:expr, $code:expr, $prefix:expr, $suffix:expr, $padding:expr) => {
+        $crate::inventory::submit! {
+            $crate::prelude::SequenceRegistration {
+                module: $module,
+                code: $code,
+                prefix: $prefix,
+                suffix: $suffix,
+                padding: $padding,
+            }
         }
     };
 }

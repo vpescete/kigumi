@@ -24,6 +24,11 @@ kigumi::register_module!(MANIFEST);
 // followers and activities in later slices), and the framework cleans that thread up on delete.
 kigumi::register_mailed!("sale.order");
 
+// Document-numbering sequences consumed by the confirm actions (SO/00001, PO/00001), declared by
+// the module that owns them and ensured at migrate.
+kigumi::register_sequence!("sales", "SO", "SO/", "", 5);
+kigumi::register_sequence!("sales", "PO", "PO/", "", 5);
+
 /// The "base" of sale.order — now declared with `#[model]` (phase 2).
 /// The macro generates `ModelDescriptor` + `impl Model`; the field "types" are the DSL.
 #[model(name = "sale.order", table = "sale_order")]

@@ -88,6 +88,7 @@ impl Db {
         self.ensure_stock_indexes().await?;
         self.ensure_event_schema().await?;
         self.ensure_crons().await?;
+        self.ensure_registered_sequences().await?;
         Ok(())
     }
 }

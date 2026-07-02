@@ -42,6 +42,25 @@ impl Db {
         Ok(())
     }
 
+    /// Ensures every `register_sequence!`-declared sequence exists (existing counters kept).
+    /// Two modules claiming the same code is an author bug reported with both names.
+    pub async fn ensure_registered_sequences(&self) -> Result<(), DbError> {
+        self.ensure_sequence_schema().await?;
+        let mut owner: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+        for s in kigumi_core::registered_sequences() {
+            if let Some(prev) = owner.insert(s.code, s.module) {
+                if prev != s.module {
+                    return Err(DbError::Migration(format!(
+                        "sequence code '{}' is declared by both '{}' and '{}'",
+                        s.code, prev, s.module
+                    )));
+                }
+            }
+            self.ensure_sequence(s.code, s.prefix, s.suffix, s.padding).await?;
+        }
+        Ok(())
+    }
+
     /// Returns the next formatted value for `code` (e.g. `SO/0001`) and advances the counter
     /// atomically. Errors if the code is unknown.
     pub async fn next_value(&self, code: &str) -> Result<String, DbError> {

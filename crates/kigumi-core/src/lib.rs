@@ -31,11 +31,13 @@ pub use metamodel::{resolve, validate_depends, validate_depends_with_extra, Fiel
 pub use registry::{
     delegated_fields, external_tables, inherits_of, is_mailed, is_transient, mailed_models,
     field_is_readonly, migration_plan, module_closure, module_of, registered_acls,
-    registered_group_names, registered_model_names, registered_rules, related_path,
+    registered_group_names, registered_model_names, registered_rules, registered_sequences,
+    related_path,
     resolve_all_registered, resolve_modules, resolve_registered, tracked_fields, transient_models,
     AclRegistration, DelegatedField, ExternalTable, FieldExtension, InheritsRegistration,
     MailedRegistration, MigrationTarget, ModelRegistration, ModuleRegistration, ReadonlyFieldRegistration,
-    RecordRuleRegistration, RelatedRegistration, TransientRegistration, TrackedFieldRegistration,
+    RecordRuleRegistration, RelatedRegistration, SequenceRegistration, TransientRegistration,
+    TrackedFieldRegistration,
 };
 pub use security::{
     check_access, field_accessible, field_required_groups, record_rule_domain, Acl, Ctx,

@@ -196,6 +196,7 @@ async fn ensure_all(db: &Db) -> Result<(), DbError> {
     db.ensure_transient_defaults().await?;
     db.ensure_mail_indexes().await?;
     db.ensure_stock_indexes().await?;
+    db.ensure_registered_sequences().await?;
     Ok(())
 }
 
