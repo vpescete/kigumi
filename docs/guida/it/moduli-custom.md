@@ -2,6 +2,13 @@
 
 Questa pagina è la guida completa alla scrittura di un modulo custom per Kigumi. Un modulo è un crate Rust che dichiara modelli, ACL, record rule, viste, compute, vincoli, azioni, report e wizard tramite macro e registri a compile time: tutto si auto-registra nel catalogo via `inventory`, e il binario che lo collega (`apps/kigumi-cli`) lo raccoglie e lo serve senza cablaggi manuali. Si parte dal crate, si arriva a un'API REST generata e a un test di integrazione. Per il quadro generale vedi [architettura.md](architettura.md) e [moduli.md](moduli.md); per installazione e configurazione [installazione.md](installazione.md) e [configurazione.md](configurazione.md); per la sicurezza [sicurezza.md](sicurezza.md); per le rotte [api.md](api.md).
 
+
+> **Due modi per scrivere un modulo.** Il percorso raccomandato per un'applicazione tua è un
+> workspace fuori dal repo generato da `kigumi new <nome>`: produce un crate modulo identico a
+> quelli descritti qui più un binario server di ~45 righe su `kigumi-runtime` (migrate, bootstrap
+> admin, worker, serve — vedi [installazione.md](installazione.md)). Tutto ciò che è in questa
+> pagina vale invariato sia per quel workspace sia per un modulo in-tree sotto `modules/`.
+
 ---
 
 ## 1. Setup del crate
@@ -332,6 +339,35 @@ kigumi::register_action!("sale.order", "confirm", confirm_order, &["sales.user"]
 
 L'ultimo argomento è la slice di gruppi che possono eseguire l'azione (oltre alla ACL Write + record rule del modello); `&[]` non restringe oltre.
 
+### `register_sequence!` — numerazione documenti
+
+`assign_sequence` ha bisogno che il suo codice esista. Un modulo dichiara le sue sequence accanto all'azione che le consuma; il migrate le crea (una sequence esistente conserva il contatore — un upgrade non azzera mai la numerazione), e una collisione di codice tra moduli fa fallire il migrate con entrambi i nomi:
+
+```rust
+kigumi::register_sequence!("sales", "SO", "SO/", "", 5);   // modulo, codice, prefisso, suffisso, padding → SO/00001
+```
+
+### `register_seed!` — dati di riferimento
+
+Seeding idempotente di dati di riferimento, eseguito a **ogni** migrate finché il modulo è installato, in ordine di dipendenza tra moduli (il piano dei conti di account può contare sulla company di base già esistente). Il body non deve mai sovrascrivere una modifica dell'operatore — proteggi ogni insert con un check count/exists: il database è l'autorità.
+
+```rust
+pub async fn seed_base_data(db: &Db) -> Result<(), DbError> { /* insert protetti */ }
+kigumi::register_seed!("base", seed::seed_base_data);
+```
+
+### `register_migration!` — il contratto di upgrade
+
+Un modulo spedisce le sue migrazioni dati accanto ai modelli. Quando il migrate trova il modulo installato a una versione del ledger più vecchia del crate linkato, applica gli step registrati con `ledger < to_version <= linked` in ordine semver, **aggiornando il ledger dopo ogni step** — un upgrade fallito riprende esattamente da dove si era fermato, quindi i body devono essere idempotenti (at-least-once, come i job). Un'installazione fresca non rigioca nulla (lo schema dichiarativo è già nella forma corrente); i downgrade sono rifiutati; uno step per un modulo sconosciuto, un `to_version` duplicato o oltre la versione del crate fanno fallire il migrate in modo esplicito. La disinstallazione conserva la riga del ledger flaggata, così una reinstallazione successiva rigioca le migrazioni che i dati conservati hanno davvero perso.
+
+```rust
+// 1.0.0 → 1.1.0: gli ordini guadagnano `reference`; le righe esistenti ne ricevono una legacy.
+pub async fn backfill_references(db: &Db) -> Result<(), DbError> { /* backfill idempotente */ }
+kigumi::register_migration!("myshop", "1.1.0", backfill_references);
+```
+
+Aggiorna `version` nel `ModuleManifest` del modulo nello stesso cambiamento; `migrate` stampa una riga `upgraded module <nome> to <versione>` per ogni step applicato.
+
 ### `register_report!`
 
 Un report è una `fn(&serde_json::Value) -> String` pura che rende un record (con i figli One2many già inlinati) in un documento HTML, esposto a `GET /api/<model>/<id>/report/<name>` e protetto dall'accesso in lettura al record.
@@ -486,98 +522,67 @@ In v1 i vincoli girano sul modello top-level scritto: un vincolo su un figlio sc
 
 ---
 
-## 6. Operazioni cross-record: metodo di servizio + endpoint dedicato
+## 6. Operazioni cross-record: servizi, route e job
 
-Azioni, compute e vincoli coprono le transizioni single-record e le invarianti header+righe. Per operazioni che toccano **più record** in una transazione (creare documenti collegati, spostare giacenza, postare scritture) il pattern è diverso: un **metodo di servizio** sul `Db`, autorizzato esplicitamente con `check_access`, che poi esegue l'effetto elevato (`ctx.sudo()`), più una **rotta axum dedicata** che autentica e lo invoca. Questo non passa per la macro `register_action!`.
+Azioni, compute e constraint coprono le transizioni single-record e le invarianti testata+righe. Per tutto il resto, tre giunti — tutti registrati dal modulo, tutti smistati genericamente dal server, zero codice server da toccare.
 
-Il caso reale è `validate_picking` / `create_delivery` (`crates/kigumi-db/src/lib.rs`).
+### `register_service!` — lavoro cross-record, una transazione
 
-### Il metodo di servizio
-
-`validate_picking` valida un trasferimento draft: setta i suoi move done, aggiorna i quant e numera il documento, tutto in una transazione. Estratto della struttura (gate di accesso → lettura sicura → effetto in transazione):
+Un servizio è un metodo di business che tocca **più record atomicamente** (creare documenti collegati, muovere stock, registrare scritture), eseguibile via `POST /api/<model>/<id>/service/<name>`. Il body riceve un `ServiceCtx` che possiede UNA transazione: commit su `Ok`, rollback su `Err` — incluso tutto ciò che vi è stato accodato.
 
 ```rust
-pub async fn validate_picking(
-    &self,
-    ctx: &Ctx,
-    acls: &[Acl],
-    rules: &[RecordRule],
-    picking_id: i64,
-) -> Result<String, DbError> {
-    let picking_model = resolve_registered("stock.picking").map_err(DbError::BadInput)?;
+pub async fn complete_order(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+    let order_model = cx.resolve("workshop.order")?;
+    let ctx = cx.caller().clone();
 
-    // 1) Gate: il chiamante deve avere WRITE su stock.picking.
-    if !check_access(Operation::Write, picking_model.name, ctx, acls) {
-        return Err(DbError::AccessDenied { model: picking_model.name.to_string(), operation: "validate" });
+    // Lettura secured sotto ACL/rule del chiamante; guardia di stato in codice normale.
+    let order = cx.find_one_secured(&order_model, &ctx, input.record_id).await?
+        .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
+    if order.get("state").and_then(|v| v.as_str()) != Some("in_progress") {
+        return Err(DbError::BadInput("can only complete an order in progress".to_string()));
     }
-    // 2) Lettura sicura del record sotto ACL + record rule del chiamante.
-    let picking = self
-        .find_one_secured(&picking_model, ctx, acls, rules, picking_id)
-        .await?
-        .ok_or_else(|| DbError::BadInput("transfer not found or not permitted".to_string()))?;
-    // 3) Guardia di stato e poi l'effetto in transazione (quant upsert, move → done, numerazione).
-    // ... (begin tx, FOR UPDATE compare-and-set su state='draft', upsert quant, commit) ...
+    let patch = serde_json::json!({ "state": "done" });
+    cx.update_secured(&order_model, &ctx, input.record_id, patch.as_object().unwrap()).await?;
+    // Enqueue transazionale: il job esiste se e solo se il cambio di stato committa.
+    cx.enqueue_job("workshop_close_note", serde_json::json!({ "order_id": input.record_id })).await?;
+    Ok(ServiceOutput::json(serde_json::json!({ "done": true })))
 }
+kigumi::register_service!("workshop.order", "complete", complete_order, true, &["workshop.user"]);
 ```
 
-`create_delivery` mostra il pattern dell'effetto elevato. Crea una consegna draft da un ordine confermato: il gate è sulla WRITE dell'ordine del chiamante, ma la risoluzione delle location e la creazione di picking + move avvengono **elevate** (`ctx.sudo()`), così un commerciale non deve anche avere i diritti di create sullo stock:
+Il quarto argomento è il write gate (`true` = il chiamante deve avere Write sul modello); l'ultimo è la restrizione di gruppo aggiuntiva. Dove un effetto di sistema deve superare i diritti del chiamante (un commerciale che crea un picking di magazzino), prima il gate esplicito, poi l'elevazione: `let elevated = ctx.sudo();` — l'idioma greppabile di ogni elevazione.
+
+### `register_route!` — HTTP su misura del modulo
+
+Per endpoint che non hanno la forma di un modello — un receiver di webhook in ingresso, una ricerca custom — un modulo registra una route sul dispatch generico `GET|POST /api/x/<name>`, con chiave `(name, method)`:
 
 ```rust
-pub async fn create_delivery(
-    &self, ctx: &Ctx, acls: &[Acl], rules: &[RecordRule], order_id: i64,
-) -> Result<i64, DbError> {
-    self.create_order_picking(ctx, acls, rules, "sale.order", order_id,
-        "create_delivery", "sale", "delivery", "internal", "customer").await
-}
-```
-
-dove `create_order_picking` fa, semplificato:
-
-```rust
-if !check_access(Operation::Write, order_model.name, ctx, acls) {
-    return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation });
-}
-let order = self.find_one_secured(&order_model, ctx, acls, rules, order_id).await?
-    .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
-// ... guardia di stato ...
-// L'effetto di sistema (risolvere endpoint + creare picking/move) gira elevato:
-let elevated = ctx.sudo();
-let picking_id = self.insert_secured(&picking_model, &elevated, &[], &[], payload.as_object().unwrap()).await?;
-// ... insert dei move elevati ...
-```
-
-### La rotta axum
-
-Ogni metodo di servizio ha un handler dedicato in `crates/kigumi-server/src/lib.rs`, registrato in `router_with_data_rasterized`:
-
-```rust
-.route("/api/:name/:id/validate", post(validate_picking_handler))
-.route("/api/:name/:id/create_delivery", post(create_delivery_handler))
-.route("/api/:name/:id/create_receipt", post(create_receipt_handler))
-```
-
-L'handler vincola il modello (v1: pinned), autentica il `Ctx` dal bearer, invoca il metodo e mappa l'errore:
-
-```rust
-async fn create_delivery_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "sale.order" {
-        return (StatusCode::BAD_REQUEST, "create_delivery is only valid on sale.order").into_response();
+pub async fn parts_webhook(db: &Db, input: RouteInput) -> Result<RouteOutput, DbError> {
+    let secret = std::env::var("WORKSHOP_WEBHOOK_SECRET").unwrap_or_default();
+    let signature = input.headers.get("x-parts-signature").cloned().unwrap_or_default();
+    if secret.is_empty() || !input.verify_hmac_sha256(secret.as_bytes(), &signature) {
+        return Err(DbError::AccessDenied { model: "workshop.order.line".to_string(), operation: "create" });
     }
-    if let Err(r) = resolve_model(&state, &name) { return r; }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) { Ok(c) => c, Err(r) => return r };
-    match backend.db.create_delivery(&ctx, backend.acls, backend.rules, id).await {
-        Ok(picking) => json_status(StatusCode::CREATED, serde_json::json!({ "picking": picking }).to_string()),
-        Err(e) => write_error("create_delivery", e),
-    }
+    // Mittente verificato: elevazione esplicita e poi la scrittura.
+    let su = input.ctx.clone().sudo();
+    /* ... insert via db.insert_secured(&model, &su, &[], &[], values) ... */
+    Ok(RouteOutput::Json(serde_json::json!({ "ok": true })))
 }
+kigumi::register_route!("parts-webhook", Post, false, &[], parts_webhook);
 ```
 
-In sintesi: l'autorizzazione vive nel layer db (`check_access`), l'effetto di sistema gira elevato dopo il gate, e l'handler si limita ad autenticare e a dare forma alla risposta.
+`auth: false` esegue il body sotto il contesto GUEST (uid −1, zero gruppi): la ACL default-deny blocca ogni chiamata secured finché il body non verifica da sé il mittente — usa `RouteInput::verify_hmac_sha256` (constant-time) o lo schema esatto del tuo provider, mai un hash fatto a mano confrontato con `==`. `RouteInput` porta `ctx`, `query`, `body` (oggetto JSON parsato), `raw_body` (per le firme) e `headers` in minuscolo. `RouteOutput::Text` esiste per gli handshake a challenge. I body sono limitati a 2 MB.
+
+### `register_job!` — lavoro in background con retry
+
+La controparte ad-hoc del cron ("esegui X ora, async, con retry"). I job vivono nella tabella Postgres `kigumi_job` — nessun broker — reclamati con `SKIP LOCKED` (più worker sono sicuri), ritentati con backoff esponenziale fino a `max_attempts`, poi dead-letter. I body DEVONO essere idempotenti (esecuzione at-least-once):
+
+```rust
+pub async fn close_note_job(db: &Db, payload: serde_json::Value) -> Result<(), DbError> { /* ... */ }
+kigumi::register_job!("workshop_close_note", 5, close_note_job);
+```
+
+Enqueue con `Db::enqueue_job(name, payload)` oppure — da un servizio — `ServiceCtx::enqueue_job`, che viaggia sulla transazione del servizio: il job esiste se e solo se la scrittura business ha committato. Un nome non registrato fallisce subito all'enqueue; un tipo di job non registrato in questo binario resta reclamabile da un worker capace (flotte miste durante i rolling deploy).
 
 ---
 

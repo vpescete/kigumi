@@ -204,7 +204,11 @@ Errors (unknown action, access denied, invalid transition) follow `write_error` 
 
 ## Service-method endpoints
 
-These are model-specific business methods. The handler checks the model **pin** (a different name → `400`), authenticates, and shapes the response; authorization and transactional logic live in the `kigumi-db` layer. If the model is not served (module not installed) → `404`.
+Cross-record business methods registered by modules on the `register_service!` seam run through the generic dispatch:
+
+`POST /api/:name/:id/service/:service` — body: a JSON object (the service's input), result: the service's JSON output. The service owns ONE transaction (commit on success, rollback on error, including jobs enqueued through it); the optional write gate requires the caller to hold Write on the model, plus any group restriction the registration declares.
+
+A few legacy methods predate the seam and keep dedicated pinned routes. The handler checks the model **pin** (a different name → `400`), authenticates, and shapes the response; authorization and transactional logic live in the `kigumi-db` layer. If the model is not served (module not installed) → `404`.
 
 | Route | Method | Required model | JSON result | Status |
 |---|---|---|---|---|
@@ -241,6 +245,26 @@ export async function callEndpoint<T = Record<string, unknown>>(
   return asJson<T>(await request(`/api/${model}/${id}/${path}`, { method: 'POST' }))
 }
 ```
+
+## Module routes: `GET|POST /api/x/:route`
+
+Bespoke module endpoints registered with `register_route!` (webhook receivers, custom searches) are dispatched generically on `/api/x/<name>`, keyed by `(name, method)`. Authenticated routes run under the caller's `Ctx` (plus any group restriction); `auth: false` routes run under the GUEST context (uid −1, no groups — the default-deny ACL blocks every secured call until the body itself verifies the sender, e.g. with the constant-time `RouteInput::verify_hmac_sha256`). Request bodies are capped at 2 MB; a wrong method on an existing name answers `405` with an `Allow` header.
+
+## Live events (SSE): `GET /api/events/stream`
+
+Server-sent events for every committed write, filtered per caller: an event is delivered only if the caller can read the record now (ACLs + record rules re-checked per batch), changed-field names are filtered by field-group visibility, and delete events are suppressed where a read record rule applies. Each event carries an id of the form `txn:id`; reconnect with `Last-Event-ID` for an exact, gap-free resume (the cursor is the pair, so no committed event is skipped or duplicated). Streams are bounded to 15 minutes — clients reconnect and the resume is seamless; access revocation is therefore never stale for longer than one batch.
+
+```
+event: message
+id: 668129:15
+data: {"type":"model.created","model":"workshop.vehicle","record_id":2,"txn":668129,"changes":{},...}
+```
+
+Authentication is the same bearer token (`EventSource` cannot send headers — use `fetch` with a readable stream, as `web/src/api.ts` does).
+
+## Ledger reports: `GET /api/reports/:name`
+
+Record-less aggregate queries (a trial balance, a stock valuation) registered with `register_ledger_report!`, returning JSON rows; each report is gated by the Read ACL of the model it declares. Distinct from per-record document reports (`/api/:name/:id/report/:report`).
 
 ## Attachments
 
@@ -403,18 +427,13 @@ curl -s http://127.0.0.1:8099/openapi.json | head -40
 
 ## Error format and status codes
 
-Errors are returned as plain text in the response body, with a status code indicating their class. The internal detail (schema, SQL, Postgres error text) **never** reaches the client: unmapped errors are logged server-side and returned as an opaque `500 internal error` (`internal_error`). The mapping of write `DbError`s is centralized in `write_error`:
+Errors are returned as a structured JSON envelope, with a status code indicating their class:
 
-```rust
-fn write_error(context: &str, e: DbError) -> Response {
-    match e {
-        DbError::AccessDenied { .. } => (StatusCode::FORBIDDEN, "access denied").into_response(),
-        DbError::BadInput(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
-        DbError::Conflict(msg) => (StatusCode::CONFLICT, msg).into_response(),
-        other => internal_error(context, other),
-    }
-}
+```json
+{ "error": { "code": "invalid", "message": "hours cannot be negative", "fields": { "hours": ["hours cannot be negative"] } } }
 ```
+
+`code` is a stable kebab-case class (`bad-input`, `invalid`, `access-denied`, `conflict`, `internal`); `message` is human-readable; `fields` (present on validation errors) maps field names to messages, ready for inline form rendering — `@api.constrains` violations carry the rule's declared fields, not-null rejections carry the missing column. The internal detail (schema, SQL, Postgres error text) **never** reaches the client: unmapped errors are logged server-side and returned as an opaque `500` envelope.
 
 | Status | When | Example body |
 |---|---|---|

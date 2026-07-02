@@ -12,6 +12,24 @@ Questa guida descrive l'installazione e il deploy di un'istanza Kigumi, dal codi
 
 > Il workspace dichiara `edition = "2021"` ma non fissa una `rust-version` (MSRV) esplicita; usa una toolchain stabile recente. Vedi le **Incertezze** in coda.
 
+## Creare un'applicazione (`kigumi new`)
+
+Il percorso raccomandato per costruire il tuo verticale: genera un workspace fuori dal repo con la CLI `kigumi` (oggi da un checkout del framework; `cargo install kigumi-cli` una volta pubblicato):
+
+```bash
+kigumi new mioshop           # chiede quali moduli extra includere (sales, account, stock)
+cd mioshop
+createdb mioshop
+export DATABASE_URL=postgres://localhost/mioshop
+export KIGUMI_JWT_SECRET=cambiami
+KIGUMI_ADMIN_PASSWORD=cambiami cargo run -p app -- migrate
+cargo run -p app -- serve    # http://127.0.0.1:8600 (override con KIGUMI_BIND)
+```
+
+Il workspace contiene un crate modulo (un modello ticket di partenza — vedi [moduli-custom.md](moduli-custom.md)) e un binario server di ~45 righe su `kigumi-runtime`, che possiede il wiring operativo: schemi del framework, installazione moduli con replay delle migrazioni dati, seeding dei dati di riferimento, bootstrap dell'admin, i worker cron/job e il server a catalogo statico. `migrate` è idempotente — eseguilo a ogni deploy; applica anche gli step `register_migration!` pendenti.
+
+Il resto di questa pagina copre l'operatività del repository del framework stesso (la CLI `kigumi` completa con il suo file di configurazione, l'installazione dinamica dei moduli e la SPA di amministrazione).
+
 ## Ottenere il sorgente e compilare
 
 Clona il repository e compila il workspace in modalità release:

@@ -1,6 +1,12 @@
 # Custom modules
 
-This page is the complete guide to writing a custom module for Kigumi. A module is a Rust crate that declares models, ACLs, record rules, views, computes, constraints, actions, reports, and wizards through compile-time macros and registries: everything auto-registers into the catalog via `inventory`, and the binary that links it (`apps/kigumi-cli`) collects and serves it without any manual wiring. You start from the crate and end up with a generated REST API and an integration test. For the big picture see [architettura.md](architettura.md) and [moduli.md](moduli.md); for installation and configuration [installazione.md](installazione.md) and [configurazione.md](configurazione.md); for security [sicurezza.md](sicurezza.md); for routes [api.md](api.md).
+This page is the complete guide to writing a custom module for Kigumi. A module is a Rust crate that declares models, ACLs, record rules, views, computes, constraints, actions, services, jobs, routes, reports, and wizards through compile-time macros and registries: everything auto-registers into the catalog via `inventory`, and the binary that links it collects and serves it without any manual wiring. You start from the crate and end up with a generated REST API and an integration test. For the big picture see [architettura.md](architettura.md) and [moduli.md](moduli.md); for installation and configuration [installazione.md](installazione.md) and [configurazione.md](configurazione.md); for security [sicurezza.md](sicurezza.md); for routes [api.md](api.md).
+
+> **Two ways to author a module.** The recommended path for an application of your own is an
+> out-of-tree workspace scaffolded by `kigumi new <name>`: it generates a module crate exactly like
+> the ones described here plus a ~45-line server binary on `kigumi-runtime` (migrate, admin
+> bootstrap, workers, serve — see [installazione.md](installazione.md)). Everything on this page
+> applies unchanged to both that workspace and an in-tree module under `modules/`.
 
 ---
 
@@ -332,6 +338,35 @@ kigumi::register_action!("sale.order", "confirm", confirm_order, &["sales.user"]
 
 The last argument is the slice of groups that may execute the action (on top of the model's Write ACL + record rules); `&[]` does not restrict further.
 
+### `register_sequence!` — document numbering
+
+`assign_sequence` needs its code to exist. A module declares its sequences next to the action that consumes them; migrate ensures them (an existing sequence keeps its counter — upgrades never reset numbering), and a cross-module code collision fails migrate with both module names:
+
+```rust
+kigumi::register_sequence!("sales", "SO", "SO/", "", 5);   // module, code, prefix, suffix, padding → SO/00001
+```
+
+### `register_seed!` — reference data
+
+Idempotent reference-data seeding, run at **every** migrate while the module is installed, in module dependency order (account's chart can rely on base's company already existing). The body must never overwrite an operator change — guard every insert with a count/exists check: the database is the authority.
+
+```rust
+pub async fn seed_base_data(db: &Db) -> Result<(), DbError> { /* guarded inserts */ }
+kigumi::register_seed!("base", seed::seed_base_data);
+```
+
+### `register_migration!` — the upgrade contract
+
+A module ships its data migrations next to its models. When migrate finds the module installed at a ledger version older than the linked crate, it applies the registered steps with `ledger < to_version <= linked` in semver order, **bumping the ledger after each step** — a failed upgrade resumes exactly where it stopped, so bodies must be idempotent (at-least-once, like jobs). A fresh install replays nothing (the declarative schema is already current-shape); downgrades are refused; a step for an unknown module, a duplicate `to_version`, or a step beyond the linked crate version fails migrate loudly. Uninstalling keeps the ledger row flagged, so a later re-install replays the migrations the kept data actually missed.
+
+```rust
+// 1.0.0 → 1.1.0: orders gain `reference`; existing rows get a legacy one.
+pub async fn backfill_references(db: &Db) -> Result<(), DbError> { /* idempotent backfill */ }
+kigumi::register_migration!("myshop", "1.1.0", backfill_references);
+```
+
+Bump `version` in the module's `ModuleManifest` in the same change; `migrate` prints one `upgraded module <name> to <version>` line per applied step.
+
 ### `register_report!`
 
 A report is a pure `fn(&serde_json::Value) -> String` that renders a record (with its One2many children already inlined) into an HTML document, exposed at `GET /api/<model>/<id>/report/<name>` and protected by read access to the record.
@@ -486,100 +521,69 @@ In v1, constraints run on the top-level model that is written: a constraint on a
 
 ---
 
-## 6. Cross-record operations: a service method + a dedicated endpoint
+## 6. Cross-record operations: services, routes, and jobs
 
-Actions, computes, and constraints cover single-record transitions and header+lines invariants. For operations that touch **multiple records** in one transaction (creating linked documents, moving stock, posting entries) the pattern is different: a **service method** on `Db`, explicitly authorized with `check_access`, that then performs the elevated effect (`ctx.sudo()`), plus a **dedicated axum route** that authenticates and invokes it. This does not go through the `register_action!` macro.
+Actions, computes, and constraints cover single-record transitions and header+lines invariants. For everything beyond them, three seams — all registered from the module, all dispatched generically by the server, no server code to touch.
 
-The real case is `validate_picking` / `create_delivery` (`crates/kigumi-db/src/lib.rs`).
+### `register_service!` — cross-record work, one transaction
 
-### The service method
-
-`validate_picking` validates a draft transfer: it sets its moves done, updates the quants, and numbers the document, all in one transaction. An excerpt of the structure (access gate → secured read → in-transaction effect):
+A service is a business method that touches **multiple records atomically** (creating linked documents, moving stock, posting entries), runnable via `POST /api/<model>/<id>/service/<name>`. The body receives a `ServiceCtx` that owns ONE transaction: commit on `Ok`, rollback on `Err` — including everything enqueued through it.
 
 ```rust
-pub async fn validate_picking(
-    &self,
-    ctx: &Ctx,
-    acls: &[Acl],
-    rules: &[RecordRule],
-    picking_id: i64,
-) -> Result<String, DbError> {
-    let picking_model = resolve_registered("stock.picking").map_err(DbError::BadInput)?;
+pub async fn complete_order(cx: &mut ServiceCtx<'_, '_>, input: ServiceInput) -> Result<ServiceOutput, DbError> {
+    let order_model = cx.resolve("workshop.order")?;
+    let ctx = cx.caller().clone();
 
-    // 1) Gate: the caller must have WRITE on stock.picking.
-    if !check_access(Operation::Write, picking_model.name, ctx, acls) {
-        return Err(DbError::AccessDenied { model: picking_model.name.to_string(), operation: "validate" });
+    // Secured read under the caller's ACLs/rules; state guard in plain code.
+    let order = cx.find_one_secured(&order_model, &ctx, input.record_id).await?
+        .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
+    if order.get("state").and_then(|v| v.as_str()) != Some("in_progress") {
+        return Err(DbError::BadInput("can only complete an order in progress".to_string()));
     }
-    // 2) Secured read of the record under the caller's ACL + record rules.
-    let picking = self
-        .find_one_secured(&picking_model, ctx, acls, rules, picking_id)
-        .await?
-        .ok_or_else(|| DbError::BadInput("transfer not found or not permitted".to_string()))?;
-    // 3) State guard and then the in-transaction effect (quant upsert, move → done, numbering).
-    // ... (begin tx, FOR UPDATE compare-and-set on state='draft', upsert quant, commit) ...
+    let patch = serde_json::json!({ "state": "done" });
+    cx.update_secured(&order_model, &ctx, input.record_id, patch.as_object().unwrap()).await?;
+    // Transactional enqueue: the job exists iff the state change commits.
+    cx.enqueue_job("workshop_close_note", serde_json::json!({ "order_id": input.record_id })).await?;
+    Ok(ServiceOutput::json(serde_json::json!({ "done": true })))
 }
+kigumi::register_service!("workshop.order", "complete", complete_order, true, &["workshop.user"]);
 ```
 
-`create_delivery` shows the elevated-effect pattern. It creates a draft delivery from a confirmed order: the gate is on the caller's WRITE of the order, but resolving the locations and creating the picking + moves happen **elevated** (`ctx.sudo()`), so a salesperson does not also need create rights on stock:
+The fourth argument is the write gate (`true` = the caller must hold Write on the model); the last is the extra group restriction. Where a system effect must exceed the caller's rights (a salesperson creating a stock picking), gate explicitly first, then elevate: `let elevated = ctx.sudo();` — the grep-able idiom for every elevation.
+
+### `register_route!` — bespoke module HTTP
+
+For endpoints that are not shaped like a model — an inbound-webhook receiver, a custom search — a module registers a route on the generic dispatch `GET|POST /api/x/<name>`, keyed by `(name, method)`:
 
 ```rust
-pub async fn create_delivery(
-    &self, ctx: &Ctx, acls: &[Acl], rules: &[RecordRule], order_id: i64,
-) -> Result<i64, DbError> {
-    self.create_order_picking(ctx, acls, rules, "sale.order", order_id,
-        "create_delivery", "sale", "delivery", "internal", "customer").await
-}
-```
-
-where `create_order_picking` does, simplified:
-
-```rust
-if !check_access(Operation::Write, order_model.name, ctx, acls) {
-    return Err(DbError::AccessDenied { model: order_model.name.to_string(), operation });
-}
-let order = self.find_one_secured(&order_model, ctx, acls, rules, order_id).await?
-    .ok_or_else(|| DbError::BadInput("order not found or not permitted".to_string()))?;
-// ... state guard ...
-// The system effect (resolving endpoints + creating picking/moves) runs elevated:
-let elevated = ctx.sudo();
-let picking_id = self.insert_secured(&picking_model, &elevated, &[], &[], payload.as_object().unwrap()).await?;
-// ... insert of the elevated moves ...
-```
-
-### The axum route
-
-Every service method has a dedicated handler in `crates/kigumi-server/src/lib.rs`, registered in `router_with_data_rasterized`:
-
-```rust
-.route("/api/:name/:id/validate", post(validate_picking_handler))
-.route("/api/:name/:id/create_delivery", post(create_delivery_handler))
-.route("/api/:name/:id/create_receipt", post(create_receipt_handler))
-```
-
-The handler pins the model (v1: pinned), authenticates the `Ctx` from the bearer, invokes the method, and maps the error:
-
-```rust
-async fn create_delivery_handler(
-    State(state): State<AppState>,
-    Path((name, id)): Path<(String, i64)>,
-    headers: HeaderMap,
-) -> Response {
-    if name != "sale.order" {
-        return (StatusCode::BAD_REQUEST, "create_delivery is only valid on sale.order").into_response();
+pub async fn parts_webhook(db: &Db, input: RouteInput) -> Result<RouteOutput, DbError> {
+    let secret = std::env::var("WORKSHOP_WEBHOOK_SECRET").unwrap_or_default();
+    let signature = input.headers.get("x-parts-signature").cloned().unwrap_or_default();
+    if secret.is_empty() || !input.verify_hmac_sha256(secret.as_bytes(), &signature) {
+        return Err(DbError::AccessDenied { model: "workshop.order.line".to_string(), operation: "create" });
     }
-    if let Err(r) = resolve_model(&state, &name) { return r; }
-    let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) { Ok(c) => c, Err(r) => return r };
-    match backend.db.create_delivery(&ctx, backend.acls, backend.rules, id).await {
-        Ok(picking) => json_status(StatusCode::CREATED, serde_json::json!({ "picking": picking }).to_string()),
-        Err(e) => write_error("create_delivery", e),
-    }
+    // Sender verified: elevate explicitly and do the write.
+    let su = input.ctx.clone().sudo();
+    /* ... insert via db.insert_secured(&model, &su, &[], &[], values) ... */
+    Ok(RouteOutput::Json(serde_json::json!({ "ok": true })))
 }
+kigumi::register_route!("parts-webhook", Post, false, &[], parts_webhook);
 ```
 
-In short: authorization lives in the db layer (`check_access`), the system effect runs elevated after the gate, and the handler merely authenticates and shapes the response.
+`auth: false` runs the body under the GUEST context (uid −1, no groups): the default-deny ACL blocks every secured call until the body verifies the sender itself — use `RouteInput::verify_hmac_sha256` (constant-time) or your provider's exact scheme, never a hand-rolled hash compared with `==`. `RouteInput` carries `ctx`, `query`, `body` (parsed JSON object), `raw_body` (for signatures), and lowercased `headers`. `RouteOutput::Text` exists for challenge handshakes. Bodies are capped at 2 MB.
 
----
+### `register_job!` — background work with retries
+
+The ad-hoc counterpart of cron ("run X now, async, with retries"). Jobs live in the `kigumi_job` Postgres table — no broker — claimed with `SKIP LOCKED` (multiple workers are safe), retried with exponential backoff up to `max_attempts`, then dead-lettered. Bodies MUST be idempotent (at-least-once execution):
+
+```rust
+pub async fn close_note_job(db: &Db, payload: serde_json::Value) -> Result<(), DbError> { /* ... */ }
+kigumi::register_job!("workshop_close_note", 5, close_note_job);
+```
+
+Enqueue with `Db::enqueue_job(name, payload)`, or — from a service — `ServiceCtx::enqueue_job`, which rides the service transaction: the job exists iff the business write committed. An unregistered name fails fast at enqueue; a job kind not registered in this binary is left claimable for a capable worker (mixed fleets during rolling deploys).
+
+--
 
 ## 7. End-to-end example: a small `library` module
 

@@ -38,6 +38,8 @@ Il workspace Cargo (`Cargo.toml`, `members = ["crates/*", "modules/*", "apps/*"]
 | `kigumi-storage` | blob store content-addressed dietro un trait (`BlobStore`) per gli allegati |
 | `kigumi-server` | server axum headless: metadata + CRUD dal catalogo |
 | `kigumi` | facade (prelude): un modulo dipende solo da questo crate |
+| `kigumi-runtime` | wiring per binari adopter: migrate, bootstrap admin, worker, serve a catalogo statico in quattro chiamate |
+| `kigumi-test` | kit di test: reset del database a fingerprint (secondi, non minuti) + fixture condivise |
 
 Il prelude pubblico è in `crates/kigumi/src/lib.rs`: un modulo apre la propria definizione con
 
@@ -45,7 +47,7 @@ Il prelude pubblico è in `crates/kigumi/src/lib.rs`: un modulo apre la propria 
 use kigumi::prelude::*;
 ```
 
-e riceve tutto il necessario — `#[model]`, `#[extend]`, `Ctx`, `Domain`, `Model`, `ModelDescriptor`, `ModuleManifest`, `ModuleDep`, i tipi della security (`Acl`, `RecordRule`) e i registratori esposti come macro dal crate `kigumi` (`register_module!`, `register_acls!`, `register_rules!`, `register_action!`, e simili).
+e riceve tutto il necessario — `#[model]`, `#[extend]`, `Ctx`, `Domain`, `Model`, `ModelDescriptor`, `ModuleManifest`, `ModuleDep`, i tipi della security (`Acl`, `RecordRule`) e i registratori esposti come macro dal crate `kigumi` (`register_module!`, `register_acls!`, `register_rules!`, `register_action!`, `register_service!`, `register_route!`, `register_job!`, `register_sequence!`, `register_seed!`, `register_migration!`, e simili).
 
 ### Moduli (`modules/`)
 
