@@ -35,10 +35,14 @@ pub(crate) async fn post_move(cx: &mut ServiceCtx<'_, '_>, ctx: &Ctx, move_id: i
     let move_model = cx.resolve("account.move")?;
     let journal_model = cx.resolve("account.journal")?;
 
+    // FOR UPDATE serializes concurrent posts of the SAME move from the very first read: the loser blocks
+    // here until the winner commits, then re-reads state='posted' and fails below — before consuming a
+    // sequence number or double-flipping the entry. (For an engine-created move this tx already owns the
+    // row, so the lock is a no-op.)
     let (state, mdate, company_id, journal_id) = {
         let tx = cx.tx();
         let row = sqlx::query(
-            "SELECT state, date::text AS date, company_id, journal_id FROM account_move WHERE id = $1",
+            "SELECT state, date::text AS date, company_id, journal_id FROM account_move WHERE id = $1 FOR UPDATE",
         )
         .bind(move_id)
         .fetch_optional(&mut **tx)

@@ -254,6 +254,9 @@ impl<'a, 't> ServiceCtx<'a, 't> {
     /// state in the same tx that created it). The full secured path (ACL Write + D6 + record rule/company +
     /// recompute + constraints + write triggers + domain events) runs in-tx; the tracked-field diff is
     /// queued and written to the chatter after run_service commits (best-effort), matching `update_secured`.
+    /// Like `insert_in_tx`, it does NOT run the pool wrapper's post-commit parent re-parenting/recompute —
+    /// use it where the updated model has no aggregate parent to roll up (e.g. account.move), or roll the
+    /// parent up yourself.
     pub async fn update_in_tx(&mut self, m: &ResolvedModel, ctx: &Ctx, id: i64, values: &Map<String, Json>) -> Result<u64, DbError> {
         let (affected, track) = self.db.update_secured_in_tx(m, ctx, self.acls, self.rules, id, values, self.tx).await?;
         if affected > 0 && !track.is_empty() {
