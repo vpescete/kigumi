@@ -43,7 +43,9 @@ impl Db {
     }
 
     /// Ensures every `register_sequence!`-declared sequence exists (existing counters kept).
-    /// Two modules claiming the same code is an author bug reported with both names.
+    /// Two modules claiming the same code is an author bug reported with both names. Deliberately
+    /// LINKED-scoped, not installed-scoped (unlike seeds/migrations): a sequence row is inert
+    /// shape, and the test kit runs without an install ledger.
     pub async fn ensure_registered_sequences(&self) -> Result<(), DbError> {
         self.ensure_sequence_schema().await?;
         let mut owner: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
@@ -57,6 +59,22 @@ impl Db {
                 }
             }
             self.ensure_sequence(s.code, s.prefix, s.suffix, s.padding).await?;
+            // Drift check: the insert is DO NOTHING, so a row created by another binary (or tuned
+            // by an operator) with a different shape silently wins. The DB stays the authority —
+            // this only makes the divergence visible instead of formatting numbers surprisingly.
+            let row =
+                sqlx::query("SELECT prefix, suffix, padding FROM kigumi_sequence WHERE code = $1")
+                    .bind(s.code)
+                    .fetch_one(&self.pool)
+                    .await?;
+            let (prefix, suffix, padding): (String, String, i32) =
+                (row.get("prefix"), row.get("suffix"), row.get("padding"));
+            if (prefix.as_str(), suffix.as_str(), padding) != (s.prefix, s.suffix, s.padding) {
+                eprintln!(
+                    "warning: sequence '{}' is ('{}', '{}', {}) in the DB but module '{}' declares ('{}', '{}', {}); keeping the DB shape",
+                    s.code, prefix, suffix, padding, s.module, s.prefix, s.suffix, s.padding
+                );
+            }
         }
         Ok(())
     }

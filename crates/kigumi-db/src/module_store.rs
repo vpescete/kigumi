@@ -41,25 +41,43 @@ kigumi_core::inventory::collect!(DataMigrationRegistration);
 
 const ENSURE: &str = "CREATE TABLE IF NOT EXISTS installed_module \
      (name text PRIMARY KEY, installed_version text NOT NULL, \
-      installed_at timestamptz NOT NULL DEFAULT now())";
+      installed_at timestamptz NOT NULL DEFAULT now(), \
+      uninstalled_at timestamptz)";
 
 impl Db {
     /// Creates the installed-module table if absent (idempotent).
     pub async fn ensure_module_schema(&self) -> Result<(), DbError> {
         sqlx::query(ENSURE).execute(&self.pool).await?;
+        // Pre-existing DBs: uninstall used to DELETE the row (losing the data's version, so a
+        // re-install skipped its pending data migrations); it now flags the row instead.
+        sqlx::query("ALTER TABLE installed_module ADD COLUMN IF NOT EXISTS uninstalled_at timestamptz")
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
-    /// The names of the currently-installed modules (sorted).
-    pub async fn installed_modules(&self) -> Result<Vec<String>, DbError> {
+    /// Every module the ledger has ever seen — installed AND explicitly-uninstalled rows. Lets a
+    /// reconciling caller (kigumi-runtime) distinguish "never installed" (install it) from
+    /// "operator uninstalled it" (respect that).
+    pub async fn ledger_modules(&self) -> Result<Vec<String>, DbError> {
         let rows = sqlx::query("SELECT name FROM installed_module ORDER BY name")
             .fetch_all(&self.pool)
             .await?;
         Ok(rows.iter().map(|r| r.get::<String, _>("name")).collect())
     }
 
+    /// The names of the currently-installed modules (sorted).
+    pub async fn installed_modules(&self) -> Result<Vec<String>, DbError> {
+        let rows = sqlx::query(
+            "SELECT name FROM installed_module WHERE uninstalled_at IS NULL ORDER BY name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|r| r.get::<String, _>("name")).collect())
+    }
+
     pub async fn is_module_installed(&self, name: &str) -> Result<bool, DbError> {
-        let row = sqlx::query("SELECT 1 FROM installed_module WHERE name = $1")
+        let row = sqlx::query("SELECT 1 FROM installed_module WHERE name = $1 AND uninstalled_at IS NULL")
             .bind(name)
             .fetch_optional(&self.pool)
             .await?;
@@ -67,11 +85,17 @@ impl Db {
     }
 
     /// Records a module as installed (or updates its recorded version). Migrating its tables is the
-    /// caller's job.
+    /// caller's job. RE-installing a previously-uninstalled module keeps the OLD recorded version:
+    /// its tables kept their old-shape data, so the next migrate must replay the pending
+    /// `register_migration!` steps from where that data really is — recording the linked version
+    /// here would skip them silently (review must-fix).
     pub async fn mark_module_installed(&self, name: &str, version: &str) -> Result<(), DbError> {
         sqlx::query(
             "INSERT INTO installed_module (name, installed_version) VALUES ($1, $2) \
-             ON CONFLICT (name) DO UPDATE SET installed_version = EXCLUDED.installed_version",
+             ON CONFLICT (name) DO UPDATE SET \
+               installed_version = CASE WHEN installed_module.uninstalled_at IS NULL \
+                 THEN EXCLUDED.installed_version ELSE installed_module.installed_version END, \
+               uninstalled_at = NULL",
         )
         .bind(name)
         .bind(version)
@@ -80,10 +104,11 @@ impl Db {
         Ok(())
     }
 
-    /// Removes a module from the installed set. Its tables and data are left untouched (disable, not
-    /// drop), so re-installing restores it with the data intact.
+    /// Removes a module from the installed set. Its tables and data are left untouched (disable,
+    /// not drop) and the ledger row is kept flagged — NOT deleted — so a later re-install still
+    /// knows what version the kept data is at and replays the data migrations it missed.
     pub async fn mark_module_uninstalled(&self, name: &str) -> Result<(), DbError> {
-        sqlx::query("DELETE FROM installed_module WHERE name = $1")
+        sqlx::query("UPDATE installed_module SET uninstalled_at = now() WHERE name = $1")
             .bind(name)
             .execute(&self.pool)
             .await?;
@@ -165,8 +190,13 @@ impl Db {
             }
         }
 
-        let ledger: Vec<(String, String)> =
-            sqlx::query("SELECT name, installed_version FROM installed_module")
+        // Ledger rows without a linked crate (module removed from the binary) are left alone —
+        // uninstall is an explicit operator action, not a side effect of a build change. The walk
+        // below follows resolve_modules() order, which is topological: a module's migrations run
+        // AFTER those of everything it depends on (account's 1.1.0 step may read base data that
+        // base's 1.1.0 step reshapes), and the order is deterministic run-to-run (review fix).
+        let ledger: std::collections::HashMap<String, String> =
+            sqlx::query("SELECT name, installed_version FROM installed_module WHERE uninstalled_at IS NULL")
                 .fetch_all(&self.pool)
                 .await?
                 .into_iter()
@@ -174,11 +204,10 @@ impl Db {
                 .collect();
 
         let mut applied = Vec::new();
-        for (name, db_ver_str) in ledger {
-            // A ledger row without a linked crate (module removed from the binary) is left alone —
-            // uninstall is an explicit operator action, not a side effect of a build change.
-            let Some(m) = mods.iter().find(|m| m.name == name) else { continue };
-            let db_ver = Version::parse(&db_ver_str).map_err(|e| bad(&name, e))?;
+        for m in &mods {
+            let name = m.name.to_string();
+            let Some(db_ver_str) = ledger.get(&name) else { continue };
+            let db_ver = Version::parse(db_ver_str).map_err(|e| bad(&name, e))?;
             let linked = Version::parse(m.version).map_err(|e| bad(&name, e))?;
             if linked < db_ver {
                 return Err(DbError::Migration(format!(
@@ -190,7 +219,7 @@ impl Db {
             }
             let mut steps: Vec<(Version, &DataMigrationRegistration)> = Vec::new();
             for r in kigumi_core::inventory::iter::<DataMigrationRegistration>() {
-                if r.module == name {
+                if r.module == name.as_str() {
                     let to = Version::parse(r.to_version).map_err(|e| bad(&name, e))?;
                     if db_ver < to && to <= linked {
                         steps.push((to, r));
@@ -211,39 +240,15 @@ impl Db {
 
     /// Runs every `register_seed!` body whose module is installed, in dependency order (a module
     /// seeds after everything it depends on — account's chart needs base's company).
+    /// `resolve_modules()` already returns the catalog topologically sorted and cycle-checked, so
+    /// filtering it to the installed set preserves that order (review fix: no second hand-rolled sort).
     pub async fn run_installed_seeds(&self) -> Result<(), DbError> {
         let installed: std::collections::HashSet<String> =
             self.installed_modules().await?.into_iter().collect();
-        // Kahn's algorithm over the linked manifests, restricted to installed modules; candidates
-        // are taken name-sorted each round so the order is deterministic.
-        let mods: Vec<_> = kigumi_core::resolve_modules()
-            .map_err(|e| DbError::Migration(format!("{e:?}")))?
-            .into_iter()
-            .filter(|m| installed.contains(m.name))
-            .collect();
-        let mut done: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        let mut order: Vec<&str> = Vec::with_capacity(mods.len());
-        while order.len() < mods.len() {
-            let mut ready: Vec<&str> = mods
-                .iter()
-                .filter(|m| !done.contains(m.name))
-                .filter(|m| {
-                    m.depends.iter().all(|d| done.contains(d.name) || !installed.contains(d.name))
-                })
-                .map(|m| m.name)
-                .collect();
-            if ready.is_empty() {
-                return Err(DbError::Migration("module dependency cycle in seed ordering".to_string()));
-            }
-            ready.sort_unstable();
-            for name in ready {
-                done.insert(name);
-                order.push(name);
-            }
-        }
-        for name in order {
+        let mods = kigumi_core::resolve_modules().map_err(|e| DbError::Migration(format!("{e:?}")))?;
+        for m in mods.iter().filter(|m| installed.contains(m.name)) {
             for reg in kigumi_core::inventory::iter::<SeedRegistration>() {
-                if reg.module == name {
+                if reg.module == m.name {
                     (reg.func)(self).await?;
                 }
             }

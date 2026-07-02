@@ -92,4 +92,18 @@ async fn upgrades_run_pending_steps_in_order_and_refuse_downgrades() {
     db.mark_module_installed("upgtest", "9.9.9").await.unwrap();
     let err = db.run_pending_upgrades().await.unwrap_err();
     assert!(format!("{err:?}").contains("downgrades are not supported"), "got: {err:?}");
+
+    // Uninstall/re-install (review must-fix): uninstall keeps the ledger row flagged with the
+    // DATA's version; re-installing at the linked version must NOT overwrite it, so the pending
+    // steps replay against the kept old-shape data instead of being skipped silently.
+    sqlx::query("TRUNCATE upgrade_probe").execute(db.pool()).await.unwrap();
+    db.mark_module_installed("upgtest", "1.0.0").await.unwrap();
+    db.mark_module_uninstalled("upgtest").await.unwrap();
+    assert!(!db.is_module_installed("upgtest").await.unwrap());
+    assert!(db.run_pending_upgrades().await.unwrap().is_empty(), "uninstalled modules never migrate");
+    db.mark_module_installed("upgtest", "1.2.0").await.unwrap(); // what a re-install records
+    assert_eq!(ledger_version(db, "upgtest").await, "1.0.0", "re-install keeps the data's version");
+    let applied = db.run_pending_upgrades().await.unwrap();
+    assert_eq!(applied.len(), 2, "the kept data replays its pending migrations");
+    assert_eq!(ledger_version(db, "upgtest").await, "1.2.0");
 }

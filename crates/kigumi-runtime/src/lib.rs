@@ -42,17 +42,23 @@ pub async fn ensure_framework_schemas(db: &Db) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Full migrate: framework schemas, first-boot module install (every linked module — an adopter
-/// binary links exactly the set it wants served), then schema migration + registered sequences +
-/// pending data migrations + module seeds via `migrate_installed_schema`.
+/// Full migrate: framework schemas, ledger reconciliation, then schema migration + registered
+/// sequences + pending data migrations + module seeds via `migrate_installed_schema`.
+///
+/// Reconciliation: a linked module the ledger has NEVER seen is installed (so a release that ADDS
+/// a module just works — an empty-ledger-only check would drop it silently). A module the
+/// operator explicitly uninstalled stays uninstalled, and a ledger row whose crate is no longer
+/// linked is left untouched.
 pub async fn migrate(db: &Db) -> Result<(), DbError> {
     ensure_framework_schemas(db).await?;
-    if db.installed_modules().await?.is_empty() {
-        let mods = resolve_modules().map_err(migration_err)?;
-        for m in &mods {
-            db.mark_module_installed(m.name, m.version).await?;
-        }
-        println!("installed modules: {}", mods.iter().map(|m| m.name).collect::<Vec<_>>().join(", "));
+    let known: std::collections::HashSet<String> = db.ledger_modules().await?.into_iter().collect();
+    let mods = resolve_modules().map_err(migration_err)?;
+    let newly: Vec<&str> = mods.iter().filter(|m| !known.contains(m.name)).map(|m| m.name).collect();
+    for m in mods.iter().filter(|m| newly.contains(&m.name)) {
+        db.mark_module_installed(m.name, m.version).await?;
+    }
+    if !newly.is_empty() {
+        println!("installed modules: {}", newly.join(", "));
     }
     db.migrate_installed_schema().await?;
     Ok(())
@@ -62,6 +68,11 @@ pub async fn migrate(db: &Db) -> Result<(), DbError> {
 /// and scoped to every existing company, exactly like kigumi-cli. Returns false when an admin
 /// already exists (never touches it).
 pub async fn bootstrap_admin(db: &Db, password: &str) -> Result<bool, DbError> {
+    // The CLI's guard, kept here too (review must-fix): an empty password — the classic
+    // unwrap_or_default() on an unset env var — must never become an authenticable superuser.
+    if password.is_empty() {
+        return Err(DbError::BadInput("refusing to bootstrap admin with an empty password".to_string()));
+    }
     if db.find_user("admin").await?.is_some() {
         return Ok(false);
     }
@@ -120,6 +131,12 @@ pub struct ServeOptions {
 
 /// Serves the full secured API (data, auth, actions/services, module routes, reports, SSE,
 /// OpenAPI/contract) for the linked catalog, with the background workers running. Blocks forever.
+///
+/// STATIC catalog: the served model set is fixed at startup from the linked modules. An
+/// out-of-band ledger change (e.g. an uninstall issued by another process or by SQL) does NOT
+/// stop this process serving those models until it restarts — unlike kigumi-cli's serve, which
+/// re-reads the ledger live. If that matters operationally, restart after ledger changes or
+/// graduate to the CLI's dynamic wiring.
 pub async fn serve(db: Db, opts: ServeOptions) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let models: Vec<_> = resolve_all_registered().map_err(|e| e.to_string())?.into_iter().collect();
     // The static router wants 'static security data; the registry Vecs live for the process anyway.
