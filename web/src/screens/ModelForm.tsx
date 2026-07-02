@@ -64,6 +64,7 @@ export function ModelForm() {
   const resolve = useResolver(contract, relOptions)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({})
   const [report, setReport] = useState<api.ReportMeta | null>(null)
   const [wizard, setWizard] = useState<WizardSpec | null>(null)
   const [addFieldOpen, setAddFieldOpen] = useState(false)
@@ -251,8 +252,14 @@ export function ModelForm() {
         toast.success('Changes saved')
         await load()
       }
+      setFieldErrors({})
     } catch (err: unknown) {
-      toast.error(err instanceof api.ApiError ? err.message : 'Save failed')
+      if (err instanceof api.ApiError) {
+        setFieldErrors(err.fields)
+        toast.error(err.message)
+      } else {
+        toast.error('Save failed')
+      }
     } finally {
       setBusy(false)
     }
@@ -392,6 +399,7 @@ export function ModelForm() {
           values={values}
           relOptions={relOptions}
           onChange={setField}
+          fieldErrors={fieldErrors}
           context={{ model, recordId: isNew ? null : Number(id) }}
           customize={
             isAdmin && customizing

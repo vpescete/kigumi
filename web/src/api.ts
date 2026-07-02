@@ -27,10 +27,25 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    /** Per-field validation messages from the server's error envelope (empty when not field-level). */
+    public readonly fields: Record<string, string[]> = {},
   ) {
     super(message)
     this.name = 'ApiError'
   }
+}
+
+/** Builds an ApiError from a failed response: parses the structured envelope
+ *  ({"error":{code,message,fields}}), falling back to the raw text body. */
+async function toApiError(res: Response, fallback: string): Promise<ApiError> {
+  const text = (await res.text()) || fallback
+  try {
+    const parsed = JSON.parse(text) as { error?: { message?: string; fields?: Record<string, string[]> } }
+    if (parsed?.error?.message) return new ApiError(res.status, parsed.error.message, parsed.error.fields ?? {})
+  } catch {
+    /* plain-text body (auth/404 paths) */
+  }
+  return new ApiError(res.status, text)
 }
 
 // ---- Contract types (the shape the server emits at /api/:name/view) ----
@@ -151,13 +166,13 @@ async function request(path: string, init?: RequestInit, allowRetry = true): Pro
 }
 
 async function asJson<T>(res: Response): Promise<T> {
-  if (!res.ok) throw new ApiError(res.status, (await res.text()) || res.statusText)
+  if (!res.ok) throw await toApiError(res, res.statusText)
   return (await res.json()) as T
 }
 
 /// Throws an ApiError (the response body, or `msg`) on a non-2xx response; for endpoints with no body.
 async function expectOk(res: Response, msg: string): Promise<void> {
-  if (!res.ok) throw new ApiError(res.status, (await res.text()) || msg)
+  if (!res.ok) throw await toApiError(res, msg)
 }
 
 async function tryRefresh(): Promise<boolean> {
@@ -285,12 +300,12 @@ export async function update(
 
 export async function remove(model: string, id: number): Promise<void> {
   const res = await request(`/api/${model}/${id}`, { method: 'DELETE' })
-  if (!res.ok && res.status !== 404) throw new ApiError(res.status, await res.text())
+  if (!res.ok && res.status !== 404) throw await toApiError(res, res.statusText)
 }
 
 export async function runAction(model: string, id: number, action: string): Promise<void> {
   const res = await request(`/api/${model}/${id}/action/${action}`, { method: 'POST' })
-  if (!res.ok) throw new ApiError(res.status, (await res.text()) || 'action failed')
+  if (!res.ok) throw await toApiError(res, 'action failed')
 }
 
 /// Whether `identity` may run `action` (empty groups = everyone).
@@ -305,7 +320,7 @@ export function canRun(action: ActionMeta, identity: Identity | null): boolean {
 /** The HTML body of a record's report (text/html), fetched with the bearer (a bare <a> cannot). */
 export async function reportHtml(model: string, id: number, report: string): Promise<string> {
   const res = await request(`/api/${model}/${id}/report/${report}`)
-  if (!res.ok) throw new ApiError(res.status, (await res.text()) || 'report failed')
+  if (!res.ok) throw await toApiError(res, 'report failed')
   return res.text()
 }
 
@@ -313,7 +328,7 @@ export async function reportHtml(model: string, id: number, report: string): Pro
 export async function reportPdf(model: string, id: number, report: string): Promise<Blob> {
   const res = await request(`/api/${model}/${id}/report/${report}?format=pdf`)
   if (res.status === 501) throw new ApiError(501, 'PDF rendering is not configured')
-  if (!res.ok) throw new ApiError(res.status, (await res.text()) || 'pdf failed')
+  if (!res.ok) throw await toApiError(res, 'pdf failed')
   return res.blob()
 }
 

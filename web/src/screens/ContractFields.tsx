@@ -128,6 +128,7 @@ export function FieldCell({
   full,
   context,
   customize,
+  errors,
 }: {
   field: api.FieldMeta
   values: Record<string, unknown>
@@ -137,6 +138,8 @@ export function FieldCell({
   full?: boolean
   context?: FieldContext
   customize?: CustomizeApi
+  /** Validation messages for THIS field from a failed save (the ApiError envelope). */
+  errors?: string[]
 }) {
   if (evalDomain(field.invisible_when, values)) return null
   const readonly = field.readonly || evalDomain(field.readonly_when, values)
@@ -199,6 +202,11 @@ export function FieldCell({
           context={context}
         />
       )}
+      {errors?.map((msg, i) => (
+        <p key={i} className="mt-1 text-xs text-danger" role="alert">
+          {msg}
+        </p>
+      ))}
     </div>
   )
 }
@@ -211,6 +219,7 @@ export function ContractFields({
   onChange,
   context,
   customize,
+  fieldErrors,
 }: {
   contract: api.Contract
   values: Record<string, unknown>
@@ -218,6 +227,8 @@ export function ContractFields({
   onChange: (name: string, value: unknown) => void
   context?: FieldContext
   customize?: CustomizeApi
+  /** Per-field validation messages from a failed save (the ApiError envelope). */
+  fieldErrors?: Record<string, string[]>
 }) {
   const resolve = useResolver(contract, relOptions)
   const groups = useMemo(() => sheetGroups(contract), [contract])
@@ -243,6 +254,7 @@ export function ContractFields({
                 full={s.full}
                 context={context}
                 customize={customize}
+                errors={fieldErrors?.[s.field.name]}
               />
             ))}
           </div>

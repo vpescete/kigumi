@@ -536,12 +536,36 @@ fn resolve_model(state: &AppState, name: &str) -> Result<ResolvedModel, Response
     Ok(model)
 }
 
+/// The structured error envelope every DbError-mapped response carries:
+/// `{"error": {"code": "<kebab>", "message": "...", "fields": {"<field>": ["<msg>", …]}}}`.
+/// `fields` is present only when the failure is attributable to specific fields (a form renders
+/// them inline); `message` is always the human line. Statuses are unchanged from the plain-text era.
+fn error_response(status: StatusCode, code: &str, message: &str, fields: &[(String, String)]) -> Response {
+    let mut err = serde_json::Map::new();
+    err.insert("code".into(), serde_json::Value::String(code.to_string()));
+    err.insert("message".into(), serde_json::Value::String(message.to_string()));
+    if !fields.is_empty() {
+        let mut map = serde_json::Map::new();
+        for (field, msg) in fields {
+            map.entry(field.clone())
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()))
+                .as_array_mut()
+                .expect("fields entries are arrays")
+                .push(serde_json::Value::String(msg.clone()));
+        }
+        err.insert("fields".into(), serde_json::Value::Object(map));
+    }
+    let body = serde_json::json!({ "error": err }).to_string();
+    (status, [("content-type", "application/json")], body).into_response()
+}
+
 /// Maps a write DbError to an HTTP response (opaque 500, never leaking schema/SQL on the 500 path).
 fn write_error(context: &str, e: DbError) -> Response {
     match e {
-        DbError::AccessDenied { .. } => (StatusCode::FORBIDDEN, "access denied").into_response(),
-        DbError::BadInput(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
-        DbError::Conflict(msg) => (StatusCode::CONFLICT, msg).into_response(),
+        DbError::AccessDenied { .. } => error_response(StatusCode::FORBIDDEN, "access-denied", "access denied", &[]),
+        DbError::BadInput(msg) => error_response(StatusCode::BAD_REQUEST, "bad-input", &msg, &[]),
+        DbError::Invalid { message, fields } => error_response(StatusCode::BAD_REQUEST, "invalid", &message, &fields),
+        DbError::Conflict(msg) => error_response(StatusCode::CONFLICT, "conflict", &msg, &[]),
         other => internal_error(context, other),
     }
 }
@@ -566,7 +590,7 @@ async fn models_handler(State(state): State<AppState>) -> Json<Vec<String>> {
 /// reach the client (it would leak table/column names and Postgres error text).
 fn internal_error(context: &str, detail: impl std::fmt::Debug) -> Response {
     eprintln!("kigumi-server {context} error: {detail:?}");
-    (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+    error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal", "internal error", &[])
 }
 
 /// Liveness: the process is up. No DB touch — safe for a fast container health probe.

@@ -64,6 +64,11 @@ pub enum DbError {
     Migration(String),
     /// Invalid write input (unknown/non-writable field, or a value incompatible with its kind).
     BadInput(String),
+    /// A VALIDATION failure attributable to specific fields — the structured sibling of `BadInput`
+    /// (same HTTP 400), carrying `(field, message)` pairs a form can render inline. Produced by
+    /// `@api.constrains` violations (the rule's declared trigger fields) and not-null rejections
+    /// (the missing column). `fields` may be empty when the rule is whole-record.
+    Invalid { message: String, fields: Vec<(String, String)> },
     /// A constraint conflict (unique violation, FK violation) — maps to HTTP 409.
     Conflict(String),
 }
@@ -85,7 +90,21 @@ impl From<sqlx::Error> for DbError {
                 Some("23505") => return DbError::Conflict(format!("duplicate value violates unique constraint '{constraint}'")),
                 Some("23503") => return DbError::Conflict(format!("foreign-key constraint '{constraint}' violated (referenced row missing or still in use)")),
                 Some("23514") => return DbError::BadInput(format!("value violates check constraint '{constraint}'")),
-                Some("23502") => return DbError::BadInput("a required field is missing".to_string()),
+                Some("23502") => {
+                    // Postgres names the offending column on not-null violations — surface it so a
+                    // form can highlight the exact field instead of showing a generic banner.
+                    let column = db
+                        .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+                        .and_then(|pg| pg.column())
+                        .map(str::to_string);
+                    return match column {
+                        Some(col) => DbError::Invalid {
+                            message: format!("'{col}' is required"),
+                            fields: vec![(col, "required".to_string())],
+                        },
+                        None => DbError::BadInput("a required field is missing".to_string()),
+                    };
+                }
                 // Malformed date/time literal or out-of-range value (e.g. an invalid Date/Datetime).
                 Some("22007") | Some("22008") => return DbError::BadInput("invalid date/time value".to_string()),
                 _ => {}
@@ -1674,14 +1693,20 @@ fn validate_write_values(
             return Err(DbError::BadInput(format!("field '{key}' is read-only and not writable")));
         }
         if jv.is_null() && field.required {
-            return Err(DbError::BadInput(format!("field '{key}' is required and cannot be null")));
+            return Err(DbError::Invalid {
+                message: format!("field '{key}' is required and cannot be null"),
+                fields: vec![(key.clone(), "required".to_string())],
+            });
         }
         out.push((field.name, json_to_value(field, jv)?));
     }
     if require_all {
         for f in &model.fields {
             if f.has_column() && !f.is_computed() && f.required && !values.contains_key(f.name) {
-                return Err(DbError::BadInput(format!("field '{}' is required", f.name)));
+                return Err(DbError::Invalid {
+                    message: format!("field '{}' is required", f.name),
+                    fields: vec![(f.name.to_string(), "required".to_string())],
+                });
             }
         }
     }
@@ -2136,7 +2161,10 @@ async fn check_constraints_in_tx(
         DbError::BadInput(format!("constraint check: '{}' row {id} vanished inside its own write", model.name))
     })?;
     let children = read_children_on(&mut *conn, model, id).await?;
-    check_constraints(model.name, changed, &record, &children).map_err(DbError::BadInput)
+    check_constraints(model.name, changed, &record, &children).map_err(|v| DbError::Invalid {
+        fields: v.fields.iter().map(|f| (f.to_string(), v.message.clone())).collect(),
+        message: v.message,
+    })
 }
 
 /// Recomputes `parent`'s stored computed columns from its current children and writes them, all on

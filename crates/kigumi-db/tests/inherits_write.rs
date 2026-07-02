@@ -91,7 +91,7 @@ async fn write_splits_to_parent_and_auto_creates() {
     // 5) Required delegated field missing on auto-create → clean error, nothing inserted.
     let before = count(&db, "wr_tpl").await;
     let err = db.insert_secured(&var, &su, ACLS, &[], json!({ "default_code": "V3" }).as_object().unwrap()).await;
-    assert!(matches!(err, Err(DbError::BadInput(_))), "required parent field enforced: {err:?}");
+    assert!(matches!(err, Err(DbError::Invalid { .. })), "required parent field enforced (field-level): {err:?}");
     assert_eq!(count(&db, "wr_tpl").await, before, "failed create rolled back — no orphan template");
 
     db.drop_table(&var).await.unwrap();

@@ -24,7 +24,7 @@ pub use report::{report_for, reports_for, ReportFn, ReportRegistration};
 pub use view::{view_for, FieldGroup, FieldSlot, FormView, NotebookPage};
 pub use wizard::{wizard_for, WizardContext, WizardDefaultGet, WizardRegistration};
 pub use compute::{compute_fn, compute_on_read, compute_stored, computed_fields, has_read_computes, Children, ComputeFn, ComputeInput, ComputeRegistration};
-pub use constraints::{check_constraints, has_constraints, ConstraintFn, ConstraintRegistration};
+pub use constraints::{check_constraints, has_constraints, ConstraintFn, ConstraintRegistration, ConstraintViolation};
 pub use domain::{json_string, Condition, Domain, DomainError, FieldBuilder, Operator, Sql, Value};
 pub use manifest::{check_compat, resolve_module_set, ModuleDep, ModuleManifest, ResolutionError};
 pub use metamodel::{resolve, validate_depends, validate_depends_with_extra, FieldDef, FieldKind, Model, ModelDescriptor, ResolvedModel};

@@ -32,16 +32,25 @@ pub fn has_constraints(model: &str) -> bool {
     inventory::iter::<ConstraintRegistration>.into_iter().any(|c| c.model == model)
 }
 
+/// A constraint violation: the failing rule's message plus the fields the rule DECLARED as its
+/// triggers — the fields a form should highlight. Empty for an unconditional (whole-record) rule.
+#[derive(Debug)]
+pub struct ConstraintViolation {
+    pub message: String,
+    pub fields: &'static [&'static str],
+}
+
 /// Runs the model's constraints over a just-written record (`values` + its `children`). `changed` is
 /// the set of written field names, or `None` on create (every constraint runs). A constraint runs when
 /// it is unconditional (empty `fields`), on create, or when one of its trigger `fields` was written.
-/// Returns the first violation's message, which the caller maps to a typed error that rolls back the tx.
+/// Returns the first violation (message + the rule's declared fields), which the caller maps to a
+/// typed error that rolls back the tx.
 pub fn check_constraints(
     model: &str,
     changed: Option<&[String]>,
     values: &BTreeMap<String, Value>,
     children: &Children,
-) -> Result<(), String> {
+) -> Result<(), ConstraintViolation> {
     for c in inventory::iter::<ConstraintRegistration>.into_iter().filter(|c| c.model == model) {
         let runs = match changed {
             None => true, // create: the whole record is new, so every constraint is checked
@@ -51,7 +60,7 @@ pub fn check_constraints(
         };
         if runs {
             let input = ComputeInput::new(values, children);
-            (c.func)(&input)?;
+            (c.func)(&input).map_err(|message| ConstraintViolation { message, fields: c.fields })?;
         }
     }
     Ok(())
@@ -68,7 +77,7 @@ mod tests {
     inventory::submit! { ConstraintRegistration { model: "cstr.scoped", fields: &["amount"], func: always_fail } }
     inventory::submit! { ConstraintRegistration { model: "cstr.always", fields: &[], func: always_fail } }
 
-    fn run(model: &str, changed: Option<&[String]>) -> Result<(), String> {
+    fn run(model: &str, changed: Option<&[String]>) -> Result<(), ConstraintViolation> {
         check_constraints(model, changed, &BTreeMap::new(), &Children::new())
     }
 
