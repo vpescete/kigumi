@@ -27,7 +27,7 @@ use kigumi_core::{
     registered_acls, registered_rules, report_for, resolve_modules, wizard_for, Acl, Condition, Ctx,
     Domain, FieldDef, FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
 };
-use kigumi_db::{is_safe_ident, route_for, route_methods, validate_routes, CustomField, Db, DbError, RouteInput, RouteMethod, RouteOutput, ViewOverride};
+use kigumi_db::{is_safe_ident, route_for, route_methods, validate_routes, CustomField, Db, DbError, RouteInput, RouteMethod, RouteOutput, StoredEvent, ViewOverride};
 use kigumi_schema::{openapi, pg_column_type, to_ui_contract};
 use kigumi_storage::{sha256_hex, BlobStore};
 
@@ -222,6 +222,8 @@ fn apply_view_overrides(contract: &str, overrides: &[ViewOverride]) -> String {
 #[derive(Clone)]
 struct DataBackend {
     db: Arc<Db>,
+    /// Live outbox batches from the shared poller task — each SSE client subscribes here.
+    events: tokio::sync::broadcast::Sender<Arc<Vec<StoredEvent>>>,
     acls: AclState,
     rules: RuleState,
     auth: Arc<Authenticator>,
@@ -444,6 +446,9 @@ fn build_data_router(
     if let Err(e) = validate_routes() {
         panic!("kigumi-server: {e}");
     }
+    let db = Arc::new(db);
+    let (events, _) = tokio::sync::broadcast::channel::<Arc<Vec<StoredEvent>>>(64);
+    spawn_event_poller(db.clone(), events.clone());
     base_router()
         .route("/auth/login", post(login_handler))
         .route("/auth/refresh", post(refresh_handler))
@@ -469,6 +474,8 @@ fn build_data_router(
         .route("/api/:name/:id/service/:service", post(service_handler))
         // Read-only ledger reports (trial balance, general ledger, aged balance): GET /api/reports/:report.
         .route("/api/reports/:report", get(ledger_report_handler))
+        // The live record stream: gap-safe outbox events, visibility-filtered per caller (SSE).
+        .route("/api/events/stream", get(events_stream_handler))
         // Module HTTP routes (register_route!): bespoke module endpoints — inbound webhook receivers,
         // custom reads — dispatched by name with zero module literals here. x = extension.
         .nest(
@@ -503,7 +510,8 @@ fn build_data_router(
             custom_fields,
             view_overrides,
             data: Some(DataBackend {
-                db: Arc::new(db),
+                db,
+                events,
                 acls,
                 rules,
                 auth: Arc::new(Authenticator::new(auth_secret)),
@@ -512,6 +520,50 @@ fn build_data_router(
             }),
         })
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
+}
+
+/// The SHARED outbox poller: one task per data router, broadcasting gap-safe event batches to every
+/// SSE subscriber. While idle (zero subscribers) it only ADVANCES its cursor to the outbox head
+/// (one index-only MAX per tick — no row reads), so on wake the backlog is at most one tick and
+/// NOTHING a subscriber is entitled to can be skipped: a client's own cutoff (`id > last`, set at
+/// connect) drops the pre-connect remainder, and any event after a connect has an id above the
+/// idle cursor, so the first active tick reads it. Resumes are exact regardless of poller state
+/// (each handler runs its own Last-Event-ID catch-up query).
+fn spawn_event_poller(db: Arc<Db>, tx: tokio::sync::broadcast::Sender<Arc<Vec<StoredEvent>>>) {
+    const TICK_MS: u64 = 250;
+    tokio::spawn(async move {
+        let mut cursor: Option<i64> = None;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(TICK_MS)).await;
+            if tx.receiver_count() == 0 {
+                match db.latest_event_id().await {
+                    Ok(id) => cursor = Some(id),
+                    Err(e) => eprintln!("kigumi-server event poller (idle cursor) failed: {e:?}"),
+                }
+                continue;
+            }
+            let from = match cursor {
+                Some(c) => c,
+                None => match db.latest_event_id().await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        eprintln!("kigumi-server event poller (cursor) failed: {e:?}");
+                        continue;
+                    }
+                },
+            };
+            match db.events_after(from, 200).await {
+                Ok(events) if events.is_empty() => {
+                    cursor = Some(from);
+                }
+                Ok(events) => {
+                    cursor = Some(events.last().map(|e| e.id).unwrap_or(from));
+                    let _ = tx.send(Arc::new(events)); // no receivers = fine
+                }
+                Err(e) => eprintln!("kigumi-server event poller failed: {e:?}"),
+            }
+        }
+    });
 }
 
 /// Verifies the request's bearer token into a trusted `Ctx`, or a 401 response. This is real
@@ -1405,6 +1457,119 @@ async fn service_handler(
         Ok(json) => json_response(json.to_string()),
         Err(e) => write_error("service", e),
     }
+}
+
+/// The live record stream: `GET /api/events/stream?models=a,b` (Server-Sent Events). Authenticated;
+/// each event is visibility-filtered for THIS caller by the exact read path (Read ACL + record
+/// rules + company scope, batched per model), with restricted field names stripped from the change
+/// summary (D6). Events carry their outbox id as the SSE id, so a reconnecting client resumes
+/// exactly via the standard Last-Event-ID header (a fresh client streams from "now"). Delivery is
+/// at-least-once from connect; the payload is a change HINT (type/model/record_id/changes) — the
+/// client refetches the record through the normal secured reads for content.
+async fn events_stream_handler(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let models: Vec<String> = params
+        .get("models")
+        .map(|m| m.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect())
+        .unwrap_or_default();
+    // Resume point: the standard Last-Event-ID header, else "now".
+    let resume = headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<i64>().ok());
+    let mut rx = backend.events.subscribe();
+    let db = backend.db.clone();
+    let acls = backend.acls();
+    let rules = backend.rules();
+
+    let stream = async_stream::stream! {
+        let mut last: i64 = match resume {
+            Some(id) => id,
+            None => match db.latest_event_id().await {
+                Ok(id) => id,
+                Err(e) => {
+                    eprintln!("kigumi-server event stream (cursor) failed: {e:?}");
+                    return;
+                }
+            },
+        };
+        let wanted = |ev: &StoredEvent| models.is_empty() || models.iter().any(|m| *m == ev.model);
+        // Catch-up: everything between the resume point and "now" (paged), then go live. The same
+        // loop re-runs when the broadcast reports lag (the client was slower than the buffer).
+        loop {
+            // -- catch-up pages --
+            loop {
+                let page = match db.events_after(last, 200).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("kigumi-server event stream (catch-up) failed: {e:?}");
+                        return;
+                    }
+                };
+                if page.is_empty() {
+                    break;
+                }
+                last = page.last().map(|e| e.id).unwrap_or(last);
+                let mine: Vec<StoredEvent> = page.into_iter().filter(|e| wanted(e)).collect();
+                if mine.is_empty() {
+                    continue;
+                }
+                match db.visible_events(&ctx, &acls, &rules, &mine).await {
+                    Ok(shaped) => {
+                        for ev in shaped {
+                            let id = ev["id"].as_i64().unwrap_or(0).to_string();
+                            yield Ok::<_, std::convert::Infallible>(
+                                axum::response::sse::Event::default().id(id).data(ev.to_string()),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("kigumi-server event stream (filter) failed: {e:?}");
+                        return;
+                    }
+                }
+            }
+            // -- live batches --
+            match rx.recv().await {
+                Ok(batch) => {
+                    let mine: Vec<StoredEvent> =
+                        batch.iter().filter(|e| e.id > last && wanted(e)).cloned().collect();
+                    if let Some(max) = batch.last().map(|e| e.id) {
+                        last = last.max(max);
+                    }
+                    if mine.is_empty() {
+                        continue;
+                    }
+                    match db.visible_events(&ctx, &acls, &rules, &mine).await {
+                        Ok(shaped) => {
+                            for ev in shaped {
+                                let id = ev["id"].as_i64().unwrap_or(0).to_string();
+                                yield Ok(axum::response::sse::Event::default().id(id).data(ev.to_string()));
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("kigumi-server event stream (filter) failed: {e:?}");
+                            return;
+                        }
+                    }
+                }
+                // Lagged: the broadcast buffer overtook this client — fall back to a catch-up query.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    };
+    axum::response::Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(15)))
+        .into_response()
 }
 
 /// The generic MODULE-ROUTE dispatch: `GET|POST /api/x/:route`. Resolves the module-registered

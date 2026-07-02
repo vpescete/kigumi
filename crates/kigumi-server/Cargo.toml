@@ -13,12 +13,15 @@ kigumi-db = { workspace = true }
 kigumi-auth = { workspace = true }
 kigumi-storage = { workspace = true }
 axum = "0.7"
+# The live event stream: a shared outbox poller task + a broadcast channel + the SSE generator.
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+async-stream = "0.3"
 serde_json = "1"
 rust_decimal = "1"
 genpdf = "0.2"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "rust_decimal"] }

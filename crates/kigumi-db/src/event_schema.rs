@@ -52,8 +52,14 @@ impl Db {
                 company_id BIGINT, \
                 change_summary JSONB NOT NULL DEFAULT '{}'::jsonb, \
                 occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(), \
-                dispatched BOOLEAN NOT NULL DEFAULT false)",
+                dispatched BOOLEAN NOT NULL DEFAULT false, \
+                tx_id xid8 DEFAULT pg_current_xact_id())",
             "CREATE INDEX IF NOT EXISTS event_outbox_undispatched ON event_outbox (id) WHERE NOT dispatched",
+            // The writer's transaction id, for GAP-SAFE cursor reads (SSE): BIGSERIAL ids are
+            // assigned at INSERT time, not commit time, so id order != commit-visibility order — a
+            // reader that saw id=6 must not permanently skip id=5 committed later. Readers guard
+            // with tx_id < pg_snapshot_xmin(pg_current_snapshot()). NULL on pre-migration rows.
+            "ALTER TABLE event_outbox ADD COLUMN IF NOT EXISTS tx_id xid8 DEFAULT pg_current_xact_id()",
             "CREATE TABLE IF NOT EXISTS webhook_subscription (\
                 id BIGSERIAL PRIMARY KEY, \
                 name TEXT NOT NULL, \
@@ -377,5 +383,126 @@ impl Db {
                 })
             })
             .collect())
+    }
+}
+
+/// One outbox row as the live event stream reads it — the SSE counterpart of the webhook envelope.
+#[derive(Clone, Debug)]
+pub struct StoredEvent {
+    pub id: i64,
+    pub event_type: String,
+    pub model: String,
+    pub record_id: i64,
+    pub author_uid: Option<i64>,
+    pub company_id: Option<i64>,
+    pub change_summary: serde_json::Value,
+    pub occurred_at: String,
+}
+
+impl Db {
+    /// The highest outbox id (0 on an empty outbox) — the "from now on" cursor for a new stream.
+    pub async fn latest_event_id(&self) -> Result<i64, DbError> {
+        let id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM event_outbox")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(id)
+    }
+
+    /// Events after `cursor`, id-ordered, GAP-SAFE: a row is returned only once every transaction
+    /// that started before it has resolved (`tx_id < pg_snapshot_xmin(pg_current_snapshot())`), so
+    /// advancing the cursor past id N can never skip an id < N whose writer commits later. The
+    /// trade-off is a small delivery lag bounded by the longest concurrent write transaction.
+    /// Pre-migration rows (tx_id NULL) are treated as long-committed.
+    pub async fn events_after(&self, cursor: i64, limit: i64) -> Result<Vec<StoredEvent>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, event_type, model, record_id, author_uid, company_id, change_summary, occurred_at::text AS occurred_at \
+             FROM event_outbox \
+             WHERE id > $1 AND (tx_id IS NULL OR tx_id < pg_snapshot_xmin(pg_current_snapshot())) \
+             ORDER BY id LIMIT $2",
+        )
+        .bind(cursor)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| StoredEvent {
+                id: r.get("id"),
+                event_type: r.get("event_type"),
+                model: r.get("model"),
+                record_id: r.get("record_id"),
+                author_uid: r.try_get("author_uid").ok(),
+                company_id: r.try_get("company_id").ok(),
+                change_summary: r.try_get("change_summary").unwrap_or(serde_json::Value::Null),
+                occurred_at: r.try_get("occurred_at").unwrap_or_default(),
+            })
+            .collect())
+    }
+
+    /// Filters a batch of events down to what `ctx` may SEE, and shapes each into the stream JSON.
+    /// Read ACL first (in memory); then each live-record event re-reads its row through
+    /// `find_one_secured` — THE visibility path every read uses (record rules + company scope) —
+    /// memoized per (model, record) within the batch. (`id` is not domain-addressable today, so a
+    /// batched id-IN secured query is not expressible; batches are small — one poll tick.)
+    /// `model.deleted` events cannot re-read the row, so they gate on the Read ACL plus the event's
+    /// company against the caller's scope (NULL = shared = visible; default-deny otherwise, like
+    /// `company_filter`). `changed_fields` names are filtered per field ACL (D6) so a caller with
+    /// record visibility but restricted fields does not learn which restricted fields changed.
+    pub async fn visible_events(
+        &self,
+        ctx: &kigumi_core::Ctx,
+        acls: &[kigumi_core::Acl],
+        rules: &[kigumi_core::RecordRule],
+        events: &[StoredEvent],
+    ) -> Result<Vec<serde_json::Value>, DbError> {
+        use kigumi_core::{check_access, field_accessible, resolve_registered, Operation};
+        use std::collections::BTreeMap;
+
+        let mut memo: BTreeMap<(String, i64), bool> = BTreeMap::new();
+        let mut out = Vec::new();
+        for ev in events {
+            let seen = if ev.event_type == "model.deleted" {
+                check_access(Operation::Read, &ev.model, ctx, acls)
+                    && (ctx.is_su() || ev.company_id.is_none_or(|c| ctx.allowed_company_ids.contains(&c)))
+            } else {
+                let key = (ev.model.clone(), ev.record_id);
+                match memo.get(&key) {
+                    Some(v) => *v,
+                    None => {
+                        let v = if check_access(Operation::Read, &ev.model, ctx, acls) {
+                            match resolve_registered(&ev.model) {
+                                Ok(model) => {
+                                    self.find_one_secured(&model, ctx, acls, rules, ev.record_id).await?.is_some()
+                                }
+                                Err(_) => false,
+                            }
+                        } else {
+                            false
+                        };
+                        memo.insert(key, v);
+                        v
+                    }
+                }
+            };
+            if !seen {
+                continue;
+            }
+            // D6: drop restricted field NAMES from the change summary for this caller.
+            let mut changes = ev.change_summary.clone();
+            if let Some(fields) = changes.get_mut("changed_fields").and_then(|v| v.as_array_mut()) {
+                fields.retain(|f| f.as_str().is_some_and(|name| field_accessible(&ev.model, name, ctx)));
+            }
+            out.push(serde_json::json!({
+                "id": ev.id,
+                "type": ev.event_type,
+                "model": ev.model,
+                "record_id": ev.record_id,
+                "actor": { "uid": ev.author_uid },
+                "company_id": ev.company_id,
+                "occurred_at": ev.occurred_at,
+                "changes": changes,
+            }));
+        }
+        Ok(out)
     }
 }

@@ -5,6 +5,7 @@ import * as api from '../api'
 import type { Column } from '../ui'
 import { Button, cx, DataTable, ErrorState, focusRing, PageHeader, SkeletonTable } from '../ui'
 import { buildResolver, displayValue, modelTitle, relLabel, type Resolver } from '../format'
+import { useEventStream } from '../useEventStream'
 
 const noResolve: Resolver = () => undefined
 
@@ -20,6 +21,9 @@ export function ModelList() {
   const [page, setPage] = useState<api.Page | null>(null)
   const [resolve, setResolve] = useState<Resolver>(() => noResolve)
   const [error, setError] = useState<string | null>(null)
+  // Live refresh: any visible change to this model (SSE hint) bumps the tick -> reload below.
+  const [liveTick, setLiveTick] = useState(0)
+  useEventStream(model || undefined, () => setLiveTick((t) => t + 1))
 
   useEffect(() => {
     let active = true
@@ -62,7 +66,7 @@ export function ModelList() {
     return () => {
       active = false
     }
-  }, [model, domainParam])
+  }, [model, domainParam, liveTick])
 
   if (error) return <ErrorState message={error} />
 

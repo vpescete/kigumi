@@ -35,6 +35,65 @@ export class ApiError extends Error {
   }
 }
 
+// ---- Live record stream (SSE over fetch: EventSource cannot send the bearer header) ----
+
+export interface StreamEvent {
+  id: number
+  type: string
+  model: string
+  record_id: number
+  changes?: { changed_fields?: string[] } & Record<string, unknown>
+}
+
+/** Subscribes to the live record stream for `models` (empty = all visible). Reconnects with
+ *  exponential-ish patience and resumes exactly via Last-Event-ID. Returns an unsubscribe fn. */
+export function streamEvents(models: string[], onEvent: (ev: StreamEvent) => void): () => void {
+  const ctrl = new AbortController()
+  void (async () => {
+    let lastId: string | null = null
+    while (!ctrl.signal.aborted) {
+      try {
+        const tokens = loadTokens()
+        const headers = new Headers({ accept: 'text/event-stream' })
+        if (tokens) headers.set('authorization', `Bearer ${tokens.access}`)
+        if (lastId) headers.set('last-event-id', lastId)
+        const qs = models.length ? `?models=${models.join(',')}` : ''
+        const res = await fetch(`/api/events/stream${qs}`, { headers, signal: ctrl.signal })
+        if (!res.ok || !res.body) throw new Error(String(res.status))
+        const reader = res.body.getReader()
+        const dec = new TextDecoder()
+        let buf = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          let i: number
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const frame = buf.slice(0, i)
+            buf = buf.slice(i + 2)
+            let data = ''
+            for (const line of frame.split('\n')) {
+              if (line.startsWith('data:')) data += line.slice(5).trim()
+              else if (line.startsWith('id:')) lastId = line.slice(3).trim()
+            }
+            if (data) {
+              try {
+                onEvent(JSON.parse(data) as StreamEvent)
+              } catch {
+                /* not JSON — skip */
+              }
+            }
+          }
+        }
+      } catch {
+        /* transient: server restart, network blip */
+      }
+      if (!ctrl.signal.aborted) await new Promise((r) => setTimeout(r, 2000))
+    }
+  })()
+  return () => ctrl.abort()
+}
+
 /** Builds an ApiError from a failed response: parses the structured envelope
  *  ({"error":{code,message,fields}}), falling back to the raw text body. */
 async function toApiError(res: Response, fallback: string): Promise<ApiError> {

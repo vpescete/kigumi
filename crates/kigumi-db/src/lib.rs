@@ -24,7 +24,7 @@ pub use custom_field::{is_safe_ident, CustomField};
 pub use view_override::ViewOverride;
 pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
-pub use event_schema::{OutboxEvent, WebhookDelivery};
+pub use event_schema::{OutboxEvent, StoredEvent, WebhookDelivery};
 pub use jobs::{job_for, JobFn, JobRegistration};
 pub use service::{
     ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
