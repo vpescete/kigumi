@@ -1,0 +1,16 @@
+[package]
+name = "kigumi-runtime"
+description = "Reusable migrate/serve wiring for Kigumi adopter binaries: the ensure chain, module install, admin bootstrap, background workers, and the static-catalog server in a few calls"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kigumi-core = { workspace = true }
+kigumi-db = { workspace = true }
+kigumi-auth = { workspace = true }
+kigumi-server = { workspace = true }
+kigumi-storage = { workspace = true }
+axum = "0.7"
+tokio = { version = "1", features = ["rt", "net", "time", "macros"] }

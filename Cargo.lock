@@ -1535,6 +1535,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kigumi-runtime"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "kigumi-auth",
+ "kigumi-core",
+ "kigumi-db",
+ "kigumi-server",
+ "kigumi-storage",
+ "tokio",
+]
+
+[[package]]
 name = "kigumi-schema"
 version = "0.1.0"
 dependencies = [
