@@ -171,6 +171,7 @@ export function ModelForm() {
     skipGuardRef.current = false // re-arm the nav guard for the freshly loaded record
     setContract(null)
     setRecord(null)
+    setFieldErrors({})
     void load()
   }, [load])
 
@@ -220,6 +221,12 @@ export function ModelForm() {
 
   function setField(name: string, value: unknown): void {
     setValues((prev) => ({ ...prev, [name]: value }))
+    // Editing a field retires its inline validation message (it reflects the PREVIOUS submission).
+    setFieldErrors((prev) => {
+      if (!(name in prev)) return prev
+      const { [name]: _removed, ...rest } = prev
+      return rest
+    })
   }
 
   async function save(): Promise<void> {

@@ -25,9 +25,10 @@ pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 pub use event_schema::{OutboxEvent, WebhookDelivery};
 pub use service::{
-    ledger_report_for, ledger_report_names, service_for, services_for, write_triggers_for, BoxServiceFut,
-    LedgerReportFn, LedgerReportRegistration, ServiceCtx, ServiceFn, ServiceInput, ServiceOutput,
-    ServiceRegistration, WriteTriggerFn, WriteTriggerRegistration,
+    ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
+    validate_routes, write_triggers_for, BoxServiceFut, LedgerReportFn, LedgerReportRegistration,
+    RouteFn, RouteInput, RouteMethod, RouteOutput, RouteRegistration, ServiceCtx, ServiceFn,
+    ServiceInput, ServiceOutput, ServiceRegistration, WriteTriggerFn, WriteTriggerRegistration,
 };
 
 /// One queued outgoing email handed to the host's SMTP transport by [`Db::flush_outgoing_mail`].
@@ -90,21 +91,10 @@ impl From<sqlx::Error> for DbError {
                 Some("23505") => return DbError::Conflict(format!("duplicate value violates unique constraint '{constraint}'")),
                 Some("23503") => return DbError::Conflict(format!("foreign-key constraint '{constraint}' violated (referenced row missing or still in use)")),
                 Some("23514") => return DbError::BadInput(format!("value violates check constraint '{constraint}'")),
-                Some("23502") => {
-                    // Postgres names the offending column on not-null violations — surface it so a
-                    // form can highlight the exact field instead of showing a generic banner.
-                    let column = db
-                        .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
-                        .and_then(|pg| pg.column())
-                        .map(str::to_string);
-                    return match column {
-                        Some(col) => DbError::Invalid {
-                            message: format!("'{col}' is required"),
-                            fields: vec![(col, "required".to_string())],
-                        },
-                        None => DbError::BadInput("a required field is missing".to_string()),
-                    };
-                }
+                // Deliberately generic: the Rust write boundary already names DECLARED required
+                // fields (DbError::Invalid); a 23502 reaching here means schema drift or an
+                // internal-table write, where surfacing the raw column name would widen exposure.
+                Some("23502") => return DbError::BadInput("a required field is missing".to_string()),
                 // Malformed date/time literal or out-of-range value (e.g. an invalid Date/Datetime).
                 Some("22007") | Some("22008") => return DbError::BadInput("invalid date/time value".to_string()),
                 _ => {}

@@ -40,8 +40,18 @@ export class ApiError extends Error {
 async function toApiError(res: Response, fallback: string): Promise<ApiError> {
   const text = (await res.text()) || fallback
   try {
-    const parsed = JSON.parse(text) as { error?: { message?: string; fields?: Record<string, string[]> } }
-    if (parsed?.error?.message) return new ApiError(res.status, parsed.error.message, parsed.error.fields ?? {})
+    const parsed = JSON.parse(text) as { error?: { message?: string; fields?: unknown } }
+    if (parsed?.error?.message) {
+      // Trust only a well-shaped fields object (a proxy/gateway JSON error page could carry
+      // anything under this key) — everything else degrades to a plain banner.
+      const fields: Record<string, string[]> = {}
+      if (parsed.error.fields && typeof parsed.error.fields === 'object' && !Array.isArray(parsed.error.fields)) {
+        for (const [k, v] of Object.entries(parsed.error.fields as Record<string, unknown>)) {
+          if (Array.isArray(v) && v.every((x) => typeof x === 'string')) fields[k] = v as string[]
+        }
+      }
+      return new ApiError(res.status, parsed.error.message, fields)
+    }
   } catch {
     /* plain-text body (auth/404 paths) */
   }
