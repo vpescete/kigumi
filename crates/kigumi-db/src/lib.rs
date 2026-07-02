@@ -170,18 +170,8 @@ impl Db {
     /// and the targets' tables must already exist (the migration runs this AFTER all model tables);
     /// each junction has FKs to both with ON DELETE CASCADE so membership rows clean up automatically.
     pub async fn create_m2m_relations(&self, model: &ResolvedModel) -> Result<(), DbError> {
-        for f in &model.fields {
-            if let FieldKind::Many2many { target, relation, column, target_column } = f.kind {
-                let target_table = target.replace('.', "_");
-                let ddl = format!(
-                    "CREATE TABLE IF NOT EXISTS {rel} (\
-                     {col} bigint NOT NULL REFERENCES {this}(id) ON DELETE CASCADE, \
-                     {tc} bigint NOT NULL REFERENCES {tgt}(id) ON DELETE CASCADE, \
-                     PRIMARY KEY ({col}, {tc}))",
-                    rel = relation, col = column, this = model.table, tc = target_column, tgt = target_table
-                );
-                sqlx::query(&ddl).execute(&self.pool).await?;
-            }
+        for ddl in m2m_junction_ddl(model) {
+            sqlx::query(&ddl).execute(&self.pool).await?;
         }
         Ok(())
     }
@@ -2183,6 +2173,26 @@ async fn recompute_columns_on(
 /// into `f64` without a decimal dependency. Identifiers come from the model, never user input.
 /// Registered models that have a One2many field targeting `child_model_name`, paired with the
 /// inverse FK column — i.e. the aggregate parents to recompute when such a child changes.
+/// The exact junction-table DDL for a model's Many2many fields — the single source shared by
+/// [`Db::create_m2m_relations`] and by kigumi-test's schema fingerprint (a template change here must
+/// change the fingerprint verbatim, or a stale junction would survive an IF NOT EXISTS re-run).
+pub fn m2m_junction_ddl(model: &ResolvedModel) -> Vec<String> {
+    let mut out = Vec::new();
+    for f in &model.fields {
+        if let FieldKind::Many2many { target, relation, column, target_column } = f.kind {
+            let target_table = target.replace('.', "_");
+            out.push(format!(
+                "CREATE TABLE IF NOT EXISTS {rel} (\
+                 {col} bigint NOT NULL REFERENCES {this}(id) ON DELETE CASCADE, \
+                 {tc} bigint NOT NULL REFERENCES {tgt}(id) ON DELETE CASCADE, \
+                 PRIMARY KEY ({col}, {tc}))",
+                rel = relation, col = column, this = model.table, tc = target_column, tgt = target_table
+            ));
+        }
+    }
+    out
+}
+
 fn parents_of(child_model_name: &str) -> Vec<(ResolvedModel, &'static str)> {
     let mut out = Vec::new();
     if let Ok(models) = resolve_all_registered() {

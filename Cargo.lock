@@ -1557,6 +1557,7 @@ dependencies = [
  "kigumi-schema",
  "serde_json",
  "sqlx",
+ "tokio",
 ]
 
 [[package]]

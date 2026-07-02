@@ -23,7 +23,7 @@ kigumi-mod-base = { path = "../base", version = "1.0.0" }
 kigumi-mod-mail = { path = "../mail", version = "1.0.0" }
 
 [dev-dependencies]
-kigumi-test = { workspace = true }
+kigumi-test = { path = "../../crates/kigumi-test" }
 # Quote-to-order integration test exercises the models against a real database.
 kigumi-db = { workspace = true }
 # Named in the test's link anchor so mail's inventory (manifest) is present in the test binary.

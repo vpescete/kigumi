@@ -22,7 +22,7 @@ kigumi-mod-sales = { path = "../sales", version = "1.0.0" }
 kigumi-mod-mail = { path = "../mail", version = "1.0.0" }
 
 [dev-dependencies]
-kigumi-test = { workspace = true }
+kigumi-test = { path = "../../crates/kigumi-test" }
 kigumi-db = { workspace = true }
 kigumi-mod-sales = { path = "../sales", version = "1.0.0" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

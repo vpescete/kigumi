@@ -91,5 +91,4 @@ async fn orders_create_transfers_that_move_stock() {
     // -- A confirmed order with no goods lines cannot create a transfer --
     let empty = ins(&so, json!({ "partner_id": acme, "company_id": comp, "currency_id": cur, "state": "sale" })).await;
     assert!(db.run_service(&so, &su, &[], &[], empty, "create_delivery", serde_json::Map::new()).await.is_err(), "an order with no lines has nothing to deliver");
-
 }

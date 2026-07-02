@@ -23,12 +23,14 @@
 //! different module sets still rebuild when they alternate — the win is the dev loop (re-running
 //! one binary) and consecutive binaries sharing a module set.
 
-use kigumi_core::{migration_plan, Ctx, FieldKind, ResolvedModel};
+use kigumi_core::{migration_plan, Ctx, ResolvedModel};
 use kigumi_db::{Db, DbError};
 use sqlx::{Connection, PgConnection, Row};
 
-/// Bump when a framework `ensure_*` DDL change cannot self-apply on the TRUNCATE path (destructive
-/// shape changes only; `CREATE/ADD ... IF NOT EXISTS` additions do not need a bump).
+/// Bump when a framework DDL change guarded by `IF NOT EXISTS` cannot self-apply on the TRUNCATE
+/// path (destructive shape changes to `ensure_*` tables; junction-template changes are fingerprinted
+/// verbatim via `m2m_junction_ddl` and self-detect). Additive `CREATE/ADD ... IF NOT EXISTS` changes
+/// do not need a bump.
 pub const KIT_SCHEMA_VERSION: u32 = 1;
 
 /// One fixed advisory-lock key for the whole kit ("kigumi-test", spelled in hex).
@@ -55,6 +57,9 @@ impl TestDb {
     /// ```
     ///
     /// Real failures (bad URL, SQL errors) panic — a broken test database should fail loudly.
+    ///
+    /// ONE `TestDb` per test, never nested: the advisory lock is per-session and a second `new()`
+    /// inside the same test would wait forever on the first one's lock.
     pub async fn new() -> Option<TestDb> {
         let url = match std::env::var("DATABASE_URL") {
             Ok(u) => u,
@@ -66,11 +71,19 @@ impl TestDb {
         // The lock connection is dedicated (NOT from the pool): a session advisory lock is released
         // when its session ends, and a pooled connection outlives the guard by design.
         let mut lock = PgConnection::connect(&url).await.expect("kigumi-test: connect (lock)");
-        sqlx::query("SELECT pg_advisory_lock($1)")
-            .bind(LOCK_KEY)
-            .execute(&mut lock)
-            .await
-            .expect("kigumi-test: advisory lock");
+        // try-lock loop so a contended (or wedged) lock is attributable instead of a silent hang.
+        loop {
+            let got: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock($1)")
+                .bind(LOCK_KEY)
+                .fetch_one(&mut lock)
+                .await
+                .expect("kigumi-test: advisory lock");
+            if got {
+                break;
+            }
+            eprintln!("kigumi-test: waiting for the kit lock (another test binary is resetting)…");
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
         let db = Db::connect(&url).await.expect("kigumi-test: connect");
         prepare(&db).await.expect("kigumi-test: prepare schema");
         Some(TestDb { db, _lock: lock })
@@ -91,9 +104,15 @@ pub async fn ins(db: &Db, model: &ResolvedModel, ctx: &Ctx, v: serde_json::Value
 }
 
 /// Resets the database for this binary's registered model set (see the module doc for the
-/// fingerprint strategy). Public so a bespoke harness can drive it without [`TestDb`].
+/// fingerprint strategy). Public so a bespoke harness can drive it without [`TestDb`] — such a
+/// caller MUST hold the kit advisory lock ([`TestDb::new`] does) for the duration, or concurrent
+/// binaries can interleave with the whole-schema TRUNCATE/DROP below.
 pub async fn prepare(db: &Db) -> Result<(), DbError> {
     let plan = migration_plan().map_err(DbError::Migration)?;
+    assert!(
+        plan.iter().all(|t| t.model.table != META),
+        "kigumi-test: a model table is named '{META}', which collides with the kit's meta table"
+    );
 
     sqlx::query(&format!(
         "CREATE TABLE IF NOT EXISTS {META} (id INT PRIMARY KEY DEFAULT 1, code_fp TEXT NOT NULL, schema_snap TEXT NOT NULL)"
@@ -106,6 +125,19 @@ pub async fn prepare(db: &Db) -> Result<(), DbError> {
         .fetch_optional(db.pool())
         .await?
         .map(|r| (r.get(0), r.get(1)));
+    // First contact with a database the kit has never built: the reset below wipes EVERY public
+    // table, which is only safe on a dedicated test database. Require one explicit opt-in.
+    if stored.is_none() {
+        let existing = public_tables(db, false).await?;
+        if !existing.is_empty() && std::env::var("KIGUMI_TEST_ALLOW_RESET").is_err() {
+            panic!(
+                "kigumi-test: DATABASE_URL points at a non-empty database the kit has never reset \
+                 ({} tables). If this IS your dedicated test database, set KIGUMI_TEST_ALLOW_RESET=1 \
+                 once; the kit then tracks it via its {META} table.",
+                existing.len()
+            );
+        }
+    }
     let snap_now = schema_snapshot(db).await?;
 
     match stored {
@@ -176,10 +208,12 @@ async fn code_fingerprint(db: &Db, plan: &[kigumi_core::MigrationTarget]) -> Res
     for t in &targets {
         blob.push_str(&kigumi_schema::to_ddl(&t.model));
         blob.push('\n');
-        for f in &t.model.fields {
-            if let FieldKind::Many2many { target, relation, column, target_column } = f.kind {
-                blob.push_str(&format!("m2m:{relation}({column},{target_column})->{target}\n"));
-            }
+        // Junction DDL verbatim from the SAME function the migration executes — a template change
+        // (FK action, extra column) must change the fingerprint, or IF NOT EXISTS would keep a
+        // stale junction alive through the fast path.
+        for ddl in kigumi_db::m2m_junction_ddl(&t.model) {
+            blob.push_str(&ddl);
+            blob.push('\n');
         }
     }
     let fp: String = sqlx::query_scalar("SELECT md5($1)").bind(&blob).fetch_one(db.pool()).await?;
@@ -197,6 +231,10 @@ async fn schema_snapshot(db: &Db) -> Result<String, DbError> {
            UNION ALL \
              SELECT indexname || '=' || indexdef FROM pg_indexes \
              WHERE schemaname = 'public' AND tablename <> '{META}' \
+           UNION ALL \
+             SELECT conrelid::regclass::text || '#' || conname || ':' || pg_get_constraintdef(oid) \
+             FROM pg_constraint \
+             WHERE connamespace = 'public'::regnamespace AND conrelid::regclass::text <> '{META}' \
          ) s"
     ))
     .fetch_one(db.pool())
@@ -204,11 +242,19 @@ async fn schema_snapshot(db: &Db) -> Result<String, DbError> {
     Ok(snap)
 }
 
-/// Every table in the public schema except the kit's meta table.
+/// Every table in the public schema except the kit's meta table and extension-owned relations
+/// (e.g. PostGIS's spatial_ref_sys — truncating extension data breaks the extension, and dropping
+/// it errors outright).
 async fn public_tables(db: &Db, include_meta: bool) -> Result<Vec<String>, DbError> {
-    let rows = sqlx::query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
-        .fetch_all(db.pool())
-        .await?;
+    let rows = sqlx::query(
+        "SELECT t.tablename FROM pg_tables t \
+         WHERE t.schemaname = 'public' AND NOT EXISTS ( \
+             SELECT 1 FROM pg_depend d \
+             JOIN pg_class c ON c.oid = d.objid \
+             WHERE d.deptype = 'e' AND c.relname = t.tablename AND c.relnamespace = 'public'::regnamespace)",
+    )
+    .fetch_all(db.pool())
+    .await?;
     Ok(rows
         .iter()
         .map(|r| r.get::<String, _>(0))
@@ -223,7 +269,7 @@ async fn truncate_all(db: &Db) -> Result<(), DbError> {
     if tables.is_empty() {
         return Ok(());
     }
-    let list = tables.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ");
+    let list = tables.iter().map(|t| quoted(t)).collect::<Vec<_>>().join(", ");
     sqlx::query(&format!("TRUNCATE {list} RESTART IDENTITY CASCADE")).execute(db.pool()).await?;
     Ok(())
 }
@@ -234,7 +280,13 @@ async fn drop_all(db: &Db) -> Result<(), DbError> {
     if tables.is_empty() {
         return Ok(());
     }
-    let list = tables.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ");
+    let list = tables.iter().map(|t| quoted(t)).collect::<Vec<_>>().join(", ");
     sqlx::query(&format!("DROP TABLE IF EXISTS {list} CASCADE")).execute(db.pool()).await?;
     Ok(())
+}
+
+/// Quotes a catalog identifier, doubling embedded quotes (robustness — the framework never
+/// generates such names, but the catalog could hold one).
+fn quoted(ident: &str) -> String {
+    format!("\"{}\"", ident.replace('"', "\"\""))
 }

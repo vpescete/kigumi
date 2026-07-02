@@ -81,5 +81,4 @@ async fn invoice_posts_one_tax_line_per_group() {
     assert_eq!(tax_lines.len(), 2, "one GL tax line per group");
     assert!(tax_lines.iter().any(|l| money(l, "credit") == 22.0 && l["name"] == "VAT"));
     assert!(tax_lines.iter().any(|l| money(l, "credit") == 5.0 && l["name"] == "Eco"));
-
 }
