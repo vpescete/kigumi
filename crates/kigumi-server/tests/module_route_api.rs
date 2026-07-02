@@ -15,7 +15,7 @@ use kigumi_core::{resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, Model
 use kigumi_db::{BoxServiceFut, Db, DbError, RouteInput, RouteMethod, RouteOutput, RouteRegistration};
 use kigumi_server::router_with_data;
 use serde_json::json;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use tower::ServiceExt;
 
 const SECRET: &str = "module-route-secret";
@@ -27,11 +27,15 @@ fn bearer(groups: &str) -> String {
     format!("Bearer {token}")
 }
 
+/// A REAL HMAC-SHA256 (what providers actually send) — the receiver verifies it in constant time
+/// via RouteInput::verify_hmac_sha256. Never a plain hash of secret+body (length-extension
+/// forgeable) and never a `==` comparison (timing oracle).
 fn sign(body: &[u8]) -> String {
-    let mut h = Sha256::new();
-    h.update(HOOK_SECRET.as_bytes());
-    h.update(body);
-    format!("{:x}", h.finalize())
+    use hmac::Mac;
+    let mut mac = hmac::Hmac::<Sha256>::new_from_slice(HOOK_SECRET.as_bytes()).unwrap();
+    mac.update(body);
+    let out = mac.finalize().into_bytes();
+    out.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 const fn txt(name: &'static str, required: bool) -> FieldDef {
@@ -41,16 +45,17 @@ static DOC: ModelDescriptor = ModelDescriptor { name: "hook.doc", table: "hook_d
 fn f_doc() -> &'static ModelDescriptor { &DOC }
 kigumi_core::inventory::submit! { ModelRegistration { name: "hook.doc", module: "test", descriptor: f_doc } }
 
-// No ACL grants at all: hook.doc is writable only via sudo — proving the guest ctx is default-deny
-// and the receiver's post-verification elevation is what does the write.
-static ACLS: &[Acl] = &[];
+// hook.doc IS writable — by the "ops" group. The guest-denial assertion below is therefore
+// meaningful: the dispatcher hands the body a group-less non-su ctx, which the ACL engine denies
+// even though a grant exists.
+static ACLS: &[Acl] = &[Acl { model: "hook.doc", group: "ops", read: true, write: true, create: true, delete: true }];
 
 /// POST /api/x/test-hook — the webhook receiver: verify the signature over the RAW bytes, then (and
 /// only then) elevate and record the delivery.
 fn hook_post<'a>(db: &'a Db, input: RouteInput) -> BoxServiceFut<'a, Result<RouteOutput, DbError>> {
     Box::pin(async move {
         let claimed = input.header("x-test-signature").unwrap_or("");
-        if claimed != sign(&input.raw_body) {
+        if !input.verify_hmac_sha256(HOOK_SECRET.as_bytes(), claimed) {
             return Err(DbError::AccessDenied { model: "route:test-hook".to_string(), operation: "signature" });
         }
         // Sanity: the guest context is default-deny — a secured write BEFORE elevation must fail.
@@ -71,12 +76,11 @@ kigumi_core::inventory::submit! {
 }
 
 /// GET /api/x/test-hook — the provider's verification handshake: echo the challenge as PLAIN text.
-fn hook_challenge<'a>(_db: &'a Db, input: RouteInput) -> BoxServiceFut<'a, Result<RouteOutput, DbError>> {
-    Box::pin(async move { Ok(RouteOutput::Text(input.query_str("challenge").to_string())) })
+/// Registered through the facade macro, so its expansion is compiled and exercised here.
+async fn hook_challenge(_db: &Db, input: RouteInput) -> Result<RouteOutput, DbError> {
+    Ok(RouteOutput::Text(input.query_str("challenge").to_string()))
 }
-kigumi_core::inventory::submit! {
-    RouteRegistration { name: "test-hook", method: RouteMethod::Get, auth: false, groups: &[], func: hook_challenge }
-}
+kigumi::register_route!("test-hook", Get, false, &[], hook_challenge);
 
 /// GET /api/x/ops-ping — an authenticated, group-gated bespoke endpoint.
 fn ops_ping<'a>(_db: &'a Db, input: RouteInput) -> BoxServiceFut<'a, Result<RouteOutput, DbError>> {

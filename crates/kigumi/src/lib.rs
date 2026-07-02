@@ -33,10 +33,12 @@ pub mod prelude {
     pub use kigumi_db::{
         ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
         validate_routes, write_triggers_for, BoxServiceFut, DbError, LedgerReportFn,
-        LedgerReportRegistration, RouteFn, RouteInput, RouteMethod, RouteOutput, RouteRegistration,
-        ServiceCtx, ServiceFn, ServiceInput, ServiceOutput, ServiceRegistration, WriteTriggerFn,
-        WriteTriggerRegistration,
+        LedgerReportRegistration, RouteFn, RouteInput, RouteMethod, RouteOutput,
+        RouteRegistration, ServiceCtx, ServiceFn, ServiceInput, ServiceOutput, ServiceRegistration,
+        WriteTriggerFn, WriteTriggerRegistration,
     };
+    // The full DB handle — what a route/job body receives (services get the richer ServiceCtx).
+    pub use kigumi_db::Db;
 }
 
 /// Marks a field as a `related` field (Odoo `related=`): a non-stored, read-only mirror of the value
@@ -190,7 +192,9 @@ macro_rules! register_ledger_report {
 /// endpoints (an inbound-webhook receiver, a custom search) without the module ever depending on the
 /// server crate or axum. `method` is a RouteMethod variant name (Get|Post); `auth: false` runs the
 /// body under the GUEST context (uid −1, no groups — the default-deny ACL blocks every secured call,
-/// so verify the sender yourself, e.g. an HMAC over raw_body, then elevate via `.sudo()`).
+/// so verify the sender yourself — use `RouteInput::verify_hmac_sha256` or your provider's exact
+/// scheme with a CONSTANT-TIME comparison, never a hand-rolled hash + `==` — then elevate via
+/// `.sudo()`. Query/body/header values are anonymous input: bind them in SQL, never interpolate).
 /// `kigumi::register_route!("stripe-hook", Post, false, &[], stripe_hook);`
 #[macro_export]
 macro_rules! register_route {

@@ -77,8 +77,9 @@ pub struct Ctx {
     su: bool,
     /// The active company (used to default `company_id` on create).
     pub company_id: Option<i64>,
-    /// Companies the caller may access. EMPTY means "unrestricted" (the M2 stub, until res.users
-    /// assigns per-user companies in M6); a non-empty set activates same-company data isolation.
+    /// Companies the caller may access. EMPTY means shared (NULL-company) rows ONLY — every
+    /// non-superuser is company-scoped, default-deny (see `company_scoped`); only `sudo` is
+    /// unrestricted. A non-empty set widens visibility to those companies' rows.
     pub allowed_company_ids: Vec<i64>,
 }
 

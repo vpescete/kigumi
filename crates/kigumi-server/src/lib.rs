@@ -47,6 +47,9 @@ const REFRESH_TTL: u64 = 2_592_000; // 30 days
 /// Maximum request body, bounding an upload (and any JSON write) in memory. Explicit so it is neither
 /// axum's restrictive 2 MB default nor unbounded. Config-driven sizing is a later enhancement.
 const MAX_BODY_BYTES: usize = 25 * 1024 * 1024;
+/// Module routes (webhook receivers) take small payloads; a dedicated cap avoids anonymous 25MB
+/// bodies being buffered before any signature check.
+const MODULE_ROUTE_BODY_BYTES: usize = 2 * 1024 * 1024;
 
 /// The effective access policy, swappable at runtime. Held as an `Arc` snapshot behind an `RwLock`:
 /// a request clones the current snapshot (cheap refcount bump) and reads it without holding the lock
@@ -468,7 +471,12 @@ fn build_data_router(
         .route("/api/reports/:report", get(ledger_report_handler))
         // Module HTTP routes (register_route!): bespoke module endpoints — inbound webhook receivers,
         // custom reads — dispatched by name with zero module literals here. x = extension.
-        .route("/api/x/:route", get(module_route_get).post(module_route_post))
+        .nest(
+            "/api/x",
+            Router::new()
+                .route("/:route", get(module_route_get).post(module_route_post))
+                .layer(axum::extract::DefaultBodyLimit::max(MODULE_ROUTE_BODY_BYTES)),
+        )
         // Open a wizard (transient model): seed it via default_get and return the scratchpad record.
         .route("/api/:name/open", post(open_wizard_handler))
         // Render a record's report as HTML (secured entirely by read access to the record).
@@ -1413,10 +1421,19 @@ async fn module_route_handler(
     query: HashMap<String, String>,
     raw_body: Bytes,
 ) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
     let Some(reg) = route_for(&route, method) else {
         let others = route_methods(&route);
         if others.is_empty() {
             return (StatusCode::NOT_FOUND, format!("unknown route: {route}")).into_response();
+        }
+        // The name exists under other methods. If every registration under it requires auth, an
+        // anonymous probe gets a uniform 401 (matching /api/reports) instead of a method map.
+        let all_auth = others.iter().all(|m| route_for(&route, *m).map(|r| r.auth).unwrap_or(true));
+        if all_auth {
+            if let Err(r) = authenticate(backend, &headers) {
+                return r;
+            }
         }
         let allow = others
             .iter()
@@ -1428,7 +1445,6 @@ async fn module_route_handler(
             .join(", ");
         return (StatusCode::METHOD_NOT_ALLOWED, [("allow", allow)], "method not allowed").into_response();
     };
-    let backend = state.data.as_ref().expect("data backend present on data routes");
     let ctx = if reg.auth {
         match authenticate(backend, &headers) {
             Ok(c) => c,
@@ -1466,8 +1482,17 @@ async fn module_route_handler(
         headers: hdrs,
     };
     match backend.db.run_route(reg, input).await {
-        Ok(RouteOutput::Json(json)) => json_response(json.to_string()),
-        Ok(RouteOutput::Text(text)) => (StatusCode::OK, [("content-type", "text/plain; charset=utf-8")], text).into_response(),
+        Ok(RouteOutput::Json(json)) => (
+            [("content-type", "application/json"), ("x-content-type-options", "nosniff")],
+            json.to_string(),
+        )
+            .into_response(),
+        Ok(RouteOutput::Text(text)) => (
+            StatusCode::OK,
+            [("content-type", "text/plain; charset=utf-8"), ("x-content-type-options", "nosniff")],
+            text,
+        )
+            .into_response(),
         Err(e) => write_error("route", e),
     }
 }

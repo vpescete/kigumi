@@ -1408,12 +1408,14 @@ name = "kigumi-db"
 version = "0.1.0"
 dependencies = [
  "ammonia",
+ "hmac",
  "kigumi-core",
  "kigumi-schema",
  "kigumi-test",
  "rust_decimal",
  "semver 1.0.28",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
 ]
@@ -1523,7 +1525,9 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "genpdf",
+ "hmac",
  "http-body-util",
+ "kigumi",
  "kigumi-auth",
  "kigumi-core",
  "kigumi-db",

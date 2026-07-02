@@ -150,6 +150,28 @@ impl RouteInput {
     pub fn query_str(&self, key: &str) -> &str {
         self.query.get(key).and_then(|v| v.as_str()).unwrap_or("")
     }
+    /// Verifies a hex-encoded HMAC-SHA256 of `raw_body` in CONSTANT TIME — the safe default for a
+    /// webhook receiver. Use THIS (or your provider's exact scheme) rather than hand-rolling: a
+    /// plain hash of secret+body is length-extension forgeable, and a `==` comparison is a timing
+    /// oracle. Returns false on any malformed input.
+    pub fn verify_hmac_sha256(&self, secret: &[u8], signature_hex: &str) -> bool {
+        use hmac::Mac;
+        let Ok(mut mac) = hmac::Hmac::<sha2::Sha256>::new_from_slice(secret) else { return false };
+        mac.update(&self.raw_body);
+        let Some(sig) = decode_hex(signature_hex) else { return false };
+        mac.verify_slice(&sig).is_ok()
+    }
+}
+
+/// Strict hex decode (lowercase/uppercase accepted), None on any malformation.
+fn decode_hex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
+        .collect()
 }
 
 /// What a module route returns: JSON (the normal case) or PLAIN TEXT — some webhook providers'
@@ -163,6 +185,10 @@ pub enum RouteOutput {
 /// A registered module route body: bespoke logic over the full `Db` handle. Same trust class as a
 /// service body (`ServiceCtx::pool` already hands services the raw pool past the gate): module code
 /// is trusted first-party code once it compiles; AUTHORIZATION is the dispatcher's job.
+///
+/// SECURITY: `query`, `body` and `headers` are RAW CALLER INPUT — on an `auth: false` route,
+/// anonymous internet input. When a body runs bespoke SQL via the pool, these values must only ever
+/// reach it as BOUND parameters, never interpolated into the SQL string.
 pub type RouteFn = for<'a> fn(&'a Db, RouteInput) -> BoxServiceFut<'a, Result<RouteOutput, DbError>>;
 
 /// Registration of a module HTTP route, emitted by `register_route!`. Keyed by (name, method) — a
@@ -208,6 +234,12 @@ pub fn validate_routes() -> Result<(), String> {
         }
         if !seen.insert((r.name, r.method)) {
             return Err(format!("duplicate module route registration: {} {:?}", r.name, r.method));
+        }
+        if !r.auth && !r.groups.is_empty() {
+            return Err(format!(
+                "module route '{}' is auth: false with a group gate — the guest context has no groups, so it could never succeed",
+                r.name
+            ));
         }
     }
     Ok(())

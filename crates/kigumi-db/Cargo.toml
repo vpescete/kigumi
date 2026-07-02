@@ -16,6 +16,10 @@ rust_decimal = "1"
 # Battle-tested allowlist HTML sanitizer (strips scripts / handlers / javascript: URLs) for Html fields.
 ammonia = "4"
 
+# RouteInput::verify_hmac_sha256 — the safe default for webhook receivers (constant-time verify).
+hmac = "0.12"
+sha2 = "0.10"
+
 [dev-dependencies]
 kigumi-test = { path = "../kigumi-test" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

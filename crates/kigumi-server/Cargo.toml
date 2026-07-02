@@ -23,5 +23,8 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "rust_decimal"] }
 tempfile = "3"
-# The module-route test verifies a sha256 signature over the raw body.
+# The module-route test generates a real HMAC-SHA256 signature over the raw body and registers a
+# route through the facade macro (exercising its expansion).
 sha2 = "0.10"
+hmac = "0.12"
+kigumi = { workspace = true }
