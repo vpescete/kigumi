@@ -68,13 +68,13 @@ pub async fn migrate(db: &Db) -> Result<(), DbError> {
 /// and scoped to every existing company, exactly like kigumi-cli. Returns false when an admin
 /// already exists (never touches it).
 pub async fn bootstrap_admin(db: &Db, password: &str) -> Result<bool, DbError> {
+    if db.find_user("admin").await?.is_some() {
+        return Ok(false);
+    }
     // The CLI's guard, kept here too (review must-fix): an empty password — the classic
     // unwrap_or_default() on an unset env var — must never become an authenticable superuser.
     if password.is_empty() {
         return Err(DbError::BadInput("refusing to bootstrap admin with an empty password".to_string()));
-    }
-    if db.find_user("admin").await?.is_some() {
-        return Ok(false);
     }
     let hash = kigumi_auth::hash_password(password).map_err(migration_err)?;
     let mut groups = registered_group_names();
