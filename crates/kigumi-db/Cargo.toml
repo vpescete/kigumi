@@ -19,6 +19,8 @@ ammonia = "4"
 # RouteInput::verify_hmac_sha256 — the safe default for webhook receivers (constant-time verify).
 hmac = "0.12"
 sha2 = "0.10"
+# catch_unwind on job bodies: a panicking module job is a failure, not a dead runner task.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 kigumi-test = { path = "../kigumi-test" }

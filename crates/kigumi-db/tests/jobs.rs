@@ -1,8 +1,9 @@
-//! The background-job queue: enqueue → claim (SKIP LOCKED, no double-run) → run; failure retries
-//! with exponential backoff and dead-letters at the registration's max_attempts; the in-tx enqueue
-//! rolls back with the caller's transaction (a job exists iff the business write committed); an
-//! unregistered name fails fast at enqueue; a stale row for a removed job dead-letters cleanly.
-//! Requires DATABASE_URL.
+//! The background-job queue: enqueue → claim (SKIP LOCKED, only names registered in THIS binary,
+//! no double-run) → run (panic-safe); failure retries with exponential backoff and dead-letters at
+//! the registration's max_attempts; the in-tx enqueue rolls back with the caller's transaction (a
+//! job exists iff the business write committed); an expired lease is reaped without burning an
+//! attempt; an unregistered name fails fast at enqueue, and a row for a job kind this binary does
+//! not register stays claimable for a capable worker. Requires DATABASE_URL.
 
 use kigumi_db::{Db, DbError, JobRegistration};
 use serde_json::{json, Value as Json};
@@ -44,6 +45,12 @@ fn doomed_job(_db: &Db, _payload: Json) -> Fut<'_> {
     Box::pin(async move { Err(DbError::BadInput("always fails".to_string())) })
 }
 kigumi_core::inventory::submit! { JobRegistration { name: "doomed", max_attempts: 2, func: doomed_job } }
+
+/// PANICS — a module author's stray unwrap must be a job failure, never a dead runner task.
+fn panicky_job(_db: &Db, _payload: Json) -> Fut<'_> {
+    Box::pin(async move { panic!("stray unwrap in a module job") })
+}
+kigumi_core::inventory::submit! { JobRegistration { name: "panicky", max_attempts: 1, func: panicky_job } }
 
 async fn job_row(db: &Db, id: i64) -> (String, i32, Option<String>) {
     use sqlx::Row;
@@ -123,18 +130,47 @@ async fn jobs_run_retry_deadletter_and_enqueue_transactionally() {
     assert_eq!((state.as_str(), attempts), ("dead", 2));
     assert!(err.unwrap().contains("always fails"));
 
-    // Transactional enqueue: rolled back with the tx → no row; committed → visible and runnable.
+    // Transactional enqueue THROUGH THE API: rolled back with the tx → no row; committed →
+    // visible and runnable (the exactly-with-the-business-write guarantee).
     let mut tx = db.pool().begin().await.unwrap();
-    sqlx::query("INSERT INTO kigumi_job (name, payload) VALUES ('probe', '{}')")
-        .execute(&mut *tx)
-        .await
-        .unwrap();
+    db.enqueue_job_in_tx(&mut tx, "probe", json!({ "note": "never" })).await.unwrap();
     drop(tx); // rollback
     let pending: i64 = sqlx::query_scalar("SELECT count(*) FROM kigumi_job WHERE state = 'pending'")
         .fetch_one(db.pool())
         .await
         .unwrap();
     assert_eq!(pending, 0, "a rolled-back enqueue leaves no job");
+    let mut tx = db.pool().begin().await.unwrap();
+    let cid = db.enqueue_job_in_tx(&mut tx, "probe", json!({ "note": "committed" })).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(db.run_due_jobs().await.unwrap(), 1, "a committed in-tx enqueue is runnable");
+    let (state, _, _) = job_row(db, cid).await;
+    assert_eq!(state, "done");
+
+    // Reap: a claimed job whose lease expired goes back to pending WITHOUT burning an attempt, and
+    // the stale claimant's late outcome is discarded by the state guard.
+    let rid = db.enqueue_job("probe", json!({ "note": "reaped" })).await.unwrap();
+    sqlx::query("UPDATE kigumi_job SET state = 'running', lease_until = now() - interval '1 minute' WHERE id = $1")
+        .bind(rid)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(db.reap_stuck_jobs().await.unwrap(), 1);
+    let (state, attempts, _) = job_row(db, rid).await;
+    assert_eq!((state.as_str(), attempts), ("pending", 0), "reap requeues without burning an attempt");
+    assert_eq!(db.run_due_jobs().await.unwrap(), 1, "the reaped job re-runs");
+
+    // A PANICKING body is recorded as a failure (here max_attempts=1 → dead) — and the runner
+    // survives to run the next job.
+    let pid = db.enqueue_job("panicky", json!({})).await.unwrap();
+    db.run_due_jobs().await.unwrap();
+    let (state, _, err) = job_row(db, pid).await;
+    assert_eq!(state, "dead");
+    assert!(err.unwrap().contains("panicked"), "the panic is recorded as the error");
+    let nid = db.enqueue_job("probe", json!({ "note": "after-panic" })).await.unwrap();
+    assert_eq!(db.run_due_jobs().await.unwrap(), 1, "the runner survives a panicking body");
+    let (state, _, _) = job_row(db, nid).await;
+    assert_eq!(state, "done");
 
     // Concurrency: one pending job, two workers racing — SKIP LOCKED gives it to exactly one.
     PROBE_RUNS.store(0, Ordering::SeqCst);
@@ -143,13 +179,13 @@ async fn jobs_run_retry_deadletter_and_enqueue_transactionally() {
     assert_eq!(a.unwrap() + b.unwrap(), 1, "exactly one worker claimed the job");
     assert_eq!(PROBE_RUNS.load(Ordering::SeqCst), 1, "the body ran exactly once");
 
-    // Stale row for a job kind this binary does not register → dead with a clear error.
-    let sid: i64 = sqlx::query_scalar("INSERT INTO kigumi_job (name) VALUES ('removed_job') RETURNING id")
+    // A row for a job kind this binary does NOT register is never claimed (a capable worker in a
+    // mixed fleet — rolling deploy, optional module — must be able to take it later).
+    let sid: i64 = sqlx::query_scalar("INSERT INTO kigumi_job (name) VALUES ('foreign_job') RETURNING id")
         .fetch_one(db.pool())
         .await
         .unwrap();
     db.run_due_jobs().await.unwrap();
-    let (state, _, err) = job_row(db, sid).await;
-    assert_eq!(state, "dead");
-    assert!(err.unwrap().contains("no registered job"));
+    let (state, attempts, _) = job_row(db, sid).await;
+    assert_eq!((state.as_str(), attempts), ("pending", 0), "foreign jobs stay claimable, untouched");
 }

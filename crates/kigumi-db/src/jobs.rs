@@ -31,13 +31,14 @@ pub fn job_for(name: &str) -> Option<&'static JobRegistration> {
     kigumi_core::inventory::iter::<JobRegistration>.into_iter().find(|j| j.name == name)
 }
 
-/// Retry shape — identical to webhook delivery: 30s · 2^attempts, capped at 6 hours.
+/// Retry shape — webhook parity: 30s · 2^attempts (first retry 30s), capped at 6 hours.
 const JOB_BACKOFF_BASE_SECS: i64 = 30;
 const JOB_BACKOFF_CAP_SECS: i64 = 21_600;
-/// How long a claimed job may run before a reaper re-queues it (crashed worker recovery).
+/// How long ONE body may run before the reaper may re-queue it; re-stamped before every body in a
+/// batch, so a slow predecessor cannot eat a successor's lease.
 const JOB_LEASE_MINUTES: i32 = 5;
-/// Claim batch size per tick.
-const JOB_BATCH: i64 = 50;
+/// Claim batch size per tick — small, because bodies run sequentially and are arbitrary user code.
+const JOB_BATCH: i64 = 10;
 
 const ENSURE_JOB: &str = "CREATE TABLE IF NOT EXISTS kigumi_job (\
     id BIGSERIAL PRIMARY KEY, \
@@ -83,7 +84,7 @@ impl Db {
 
     /// The in-tx twin: the job row commits (or rolls back) WITH the caller's transaction — used by
     /// `ServiceCtx::enqueue_job` so a service schedules follow-on work atomically with its writes.
-    pub(crate) async fn enqueue_job_in_tx(
+    pub async fn enqueue_job_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         name: &str,
@@ -105,17 +106,26 @@ impl Db {
     /// exponential backoff, or `dead` at the registration's `max_attempts`; an UNREGISTERED name
     /// (a stale row from a removed job) → `dead` with a clear error. Returns how many ran.
     pub async fn run_due_jobs(&self) -> Result<u64, DbError> {
+        // Claim only job kinds REGISTERED IN THIS BINARY: in a mixed fleet (rolling deploy, a worker
+        // built without an optional module) a foreign job must stay claimable by a capable worker,
+        // not be consumed here.
+        let registered: Vec<String> =
+            kigumi_core::inventory::iter::<JobRegistration>.into_iter().map(|j| j.name.to_string()).collect();
+        if registered.is_empty() {
+            return Ok(0);
+        }
         let claimed = sqlx::query(
             "UPDATE kigumi_job SET state = 'running', lease_until = now() + make_interval(mins => $1) \
              WHERE id IN (\
                  SELECT id FROM kigumi_job \
-                 WHERE state = 'pending' AND next_attempt_at <= now() \
+                 WHERE state = 'pending' AND next_attempt_at <= now() AND name = ANY($3) \
                  ORDER BY next_attempt_at LIMIT $2 \
                  FOR UPDATE SKIP LOCKED) \
              RETURNING id, name, payload, attempts",
         )
         .bind(JOB_LEASE_MINUTES)
         .bind(JOB_BATCH)
+        .bind(&registered)
         .fetch_all(&self.pool)
         .await?;
 
@@ -127,40 +137,71 @@ impl Db {
             let payload: Json = row.get("payload");
             let attempts: i32 = row.get("attempts");
 
-            let Some(reg) = job_for(&name) else {
-                sqlx::query("UPDATE kigumi_job SET state = 'dead', last_error = $2 WHERE id = $1")
+            // Defensive only: the claim already filters to registered names.
+            let Some(reg) = job_for(&name) else { continue };
+            // Re-stamp the lease NOW (bodies run sequentially — a slow predecessor must not eat this
+            // job's window). Zero rows = the reaper already took the claim back: skip, don't run.
+            let held = sqlx::query(
+                "UPDATE kigumi_job SET lease_until = now() + make_interval(mins => $2) \
+                 WHERE id = $1 AND state = 'running'",
+            )
+            .bind(id)
+            .bind(JOB_LEASE_MINUTES)
+            .execute(&self.pool)
+            .await?;
+            if held.rows_affected() == 0 {
+                continue;
+            }
+            // Panic-safe: a panicking module body is a job FAILURE (retry/dead-letter), never the
+            // death of the runner task.
+            use futures_util::FutureExt;
+            let outcome = std::panic::AssertUnwindSafe((reg.func)(self, payload)).catch_unwind().await;
+            let outcome: Result<(), String> = match outcome {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(format!("{e}")),
+                Err(panic) => Err(match panic.downcast_ref::<&str>() {
+                    Some(m) => format!("job panicked: {m}"),
+                    None => "job panicked".to_string(),
+                }),
+            };
+            // Every outcome write is guarded by state='running': if the lease expired mid-body and
+            // another worker took over, THIS claimant lost — its outcome is discarded, never able to
+            // resurrect a done job or double-record a failure.
+            match outcome {
+                Ok(()) => {
+                    let n = sqlx::query(
+                        "UPDATE kigumi_job SET state = 'done', last_error = NULL, lease_until = NULL \
+                         WHERE id = $1 AND state = 'running'",
+                    )
                     .bind(id)
-                    .bind(format!("no registered job named '{name}' in this binary"))
                     .execute(&self.pool)
                     .await?;
-                continue;
-            };
-            match (reg.func)(self, payload).await {
-                Ok(()) => {
-                    sqlx::query("UPDATE kigumi_job SET state = 'done', last_error = NULL WHERE id = $1")
-                        .bind(id)
-                        .execute(&self.pool)
-                        .await?;
-                    ran += 1;
+                    if n.rows_affected() == 1 {
+                        ran += 1;
+                    }
                 }
                 Err(e) => {
                     let next_attempts = attempts + 1;
                     if next_attempts >= reg.max_attempts {
-                        sqlx::query("UPDATE kigumi_job SET state = 'dead', attempts = $2, last_error = $3 WHERE id = $1")
-                            .bind(id)
-                            .bind(next_attempts)
-                            .bind(format!("{e}"))
-                            .execute(&self.pool)
-                            .await?;
-                    } else {
-                        let backoff = (JOB_BACKOFF_BASE_SECS << next_attempts.min(30)).min(JOB_BACKOFF_CAP_SECS);
                         sqlx::query(
-                            "UPDATE kigumi_job SET state = 'pending', attempts = $2, last_error = $3, \
-                             next_attempt_at = now() + make_interval(secs => $4) WHERE id = $1",
+                            "UPDATE kigumi_job SET state = 'dead', attempts = $2, last_error = $3, lease_until = NULL \
+                             WHERE id = $1 AND state = 'running'",
                         )
                         .bind(id)
                         .bind(next_attempts)
-                        .bind(format!("{e}"))
+                        .bind(&e)
+                        .execute(&self.pool)
+                        .await?;
+                    } else {
+                        // Webhook parity: 30s · 2^attempts — the FIRST retry waits 30s.
+                        let backoff = (JOB_BACKOFF_BASE_SECS << attempts.min(30)).min(JOB_BACKOFF_CAP_SECS);
+                        sqlx::query(
+                            "UPDATE kigumi_job SET state = 'pending', attempts = $2, last_error = $3, lease_until = NULL, \
+                             next_attempt_at = now() + make_interval(secs => $4) WHERE id = $1 AND state = 'running'",
+                        )
+                        .bind(id)
+                        .bind(next_attempts)
+                        .bind(&e)
                         .bind(backoff as f64)
                         .execute(&self.pool)
                         .await?;
@@ -171,8 +212,10 @@ impl Db {
         Ok(ran)
     }
 
-    /// Re-queues `running` jobs whose lease expired (a crashed worker never recorded an outcome).
-    /// The attempt was never counted, so the re-run doesn't burn one — bodies must be idempotent.
+    /// Re-queues `running` jobs whose lease expired — a crashed worker, OR a live one slower than
+    /// its (re-stamped, per-body) lease; the state-guarded outcome writes make the slow claimant's
+    /// late result harmless. The attempt was never counted, so the re-run doesn't burn one — bodies
+    /// must be idempotent.
     pub async fn reap_stuck_jobs(&self) -> Result<u64, DbError> {
         let n = sqlx::query("UPDATE kigumi_job SET state = 'pending', lease_until = NULL WHERE state = 'running' AND lease_until < now()")
             .execute(&self.pool)
