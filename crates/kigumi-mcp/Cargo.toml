@@ -1,0 +1,22 @@
+[package]
+name = "kigumi-mcp"
+description = "MCP server generated from the Kigumi catalog: every app built on Kigumi is AI-operable over the Model Context Protocol, with the impersonated user's ACLs, record rules and field groups enforced on every tool by the data layer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kigumi-core = { workspace = true }
+kigumi-db = { workspace = true }
+kigumi-schema = { workspace = true }
+rmcp = { version = "2", features = ["server", "transport-io"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[dev-dependencies]
+kigumi = { workspace = true }
+kigumi-test = { path = "../kigumi-test" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -116,6 +116,8 @@ DATABASE_URL=postgres://localhost/__APP__ KIGUMI_JWT_SECRET=... cargo run -p app
 `migrate` is idempotent — run it after every model change and on every deploy. It creates
 tables additively, ensures sequences, applies pending data migrations, runs seeds.
 `serve` binds 127.0.0.1:8600 (override with `KIGUMI_BIND`).
+`cargo run -p app -- mcp <login>` serves this app over MCP (stdio): an AI agent operates it AS
+that user, with ACLs and record rules enforced on every tool.
 
 ## The seams — one macro each, declared next to the model they serve
 
@@ -283,6 +285,7 @@ description = "__APP__ server binary on kigumi-runtime"
 [dependencies]
 __KIGUMI_DEP__
 __RUNTIME_DEP__
+__MCP_DEP__
 __BASE_DEP__
 __MAIL_DEP__
 __EXTRA_DEPS__
@@ -333,7 +336,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             )
             .await
         }
-        _ => Err("usage: app <migrate|serve>".into()),
+        // MCP over stdio: an AI agent operates this app AS the given user - ACLs and record
+        // rules enforced on every tool by the data layer.
+        Some("mcp") => {
+            let login = std::env::args().nth(2).ok_or("usage: app mcp <login>")?;
+            let server = kigumi_mcp::KigumiMcp::for_login(db, &login).await?;
+            server.serve_stdio().await
+        }
+        _ => Err("usage: app <migrate|serve|mcp <login>>".into()),
     }
 }
 "#;
@@ -391,9 +401,10 @@ The server binary (`app/src/main.rs`) is four runtime calls; it should rarely ch
 "#;
 
 fn render(template: &str, opts: &ScaffoldOptions) -> String {
-    let (kigumi_dep, runtime_dep, base_dep, mail_dep) = (
+    let (kigumi_dep, runtime_dep, mcp_dep, base_dep, mail_dep) = (
         dep(&opts.framework, "kigumi", "crates/kigumi"),
         dep(&opts.framework, "kigumi-runtime", "crates/kigumi-runtime"),
+        dep(&opts.framework, "kigumi-mcp", "crates/kigumi-mcp"),
         dep(&opts.framework, "kigumi-mod-base", "modules/base"),
         dep(&opts.framework, "kigumi-mod-mail", "modules/mail"),
     );
@@ -417,6 +428,7 @@ fn render(template: &str, opts: &ScaffoldOptions) -> String {
         .replace("__APP__", &opts.name)
         .replace("__KIGUMI_DEP__", &kigumi_dep)
         .replace("__RUNTIME_DEP__", &runtime_dep)
+        .replace("__MCP_DEP__", &mcp_dep)
         .replace("__BASE_DEP__", &base_dep)
         .replace("__MAIL_DEP__", &mail_dep)
         .replace("__EXTRA_DEPS__", extra_deps.trim_end())

@@ -17,6 +17,7 @@ kigumi-db = { workspace = true }
 kigumi-server = { workspace = true }
 kigumi-auth = { workspace = true }
 kigumi-storage = { workspace = true }
+kigumi-mcp = { workspace = true }
 # The ERP modules are OPTIONAL: the framework is first, the ERP is a layer you opt into at build time via
 # the features below. Each is linked only when its feature is on, so their models/ACLs/rules/services
 # self-register into the catalog (inventory) only then. `--no-default-features` builds a bare framework

@@ -91,6 +91,12 @@ enum Cmd {
     },
     /// Print the framework version and the linked modules.
     Version,
+    /// Serve this instance over the Model Context Protocol (stdio), impersonating a user: every
+    /// tool call runs under that user's ACLs and record rules.
+    Mcp {
+        /// Login of the user the MCP client acts as.
+        user: String,
+    },
     /// Scaffold a new Kigumi application workspace (module crate + server binary on kigumi-runtime).
     New {
         /// Name of the new app (also the directory and module crate name).
@@ -237,6 +243,13 @@ async fn run(cli: Cli) -> Fallible {
     link_modules();
     let path = config_path(&cli);
     match cli.cmd {
+        Cmd::Mcp { user } => {
+            let s = Settings::load(Some(&path))?;
+            let db = Db::connect(&s.secrets.database_url).await?;
+            let server = kigumi_mcp::KigumiMcp::for_login(db, &user).await?;
+            server.serve_stdio().await.map_err(|e| e.to_string())?;
+            Ok(())
+        }
         Cmd::New { name, modules, framework_path, yes } => {
             let ident = scaffold::sanitize_name(&name);
             if ident.is_empty() || ident.chars().all(|c| c == '_') {
