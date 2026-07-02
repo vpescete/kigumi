@@ -59,6 +59,7 @@ export function streamEvents(models: string[], onEvent: (ev: StreamEvent) => voi
         if (lastId) headers.set('last-event-id', lastId)
         const qs = models.length ? `?models=${models.join(',')}` : ''
         const res = await fetch(`/api/events/stream${qs}`, { headers, signal: ctrl.signal })
+        if (res.status === 401) await tryRefresh() // expired access token: refresh before the retry
         if (!res.ok || !res.body) throw new Error(String(res.status))
         const reader = res.body.getReader()
         const dec = new TextDecoder()

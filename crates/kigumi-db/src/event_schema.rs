@@ -60,6 +60,7 @@ impl Db {
             // reader that saw id=6 must not permanently skip id=5 committed later. Readers guard
             // with tx_id < pg_snapshot_xmin(pg_current_snapshot()). NULL on pre-migration rows.
             "ALTER TABLE event_outbox ADD COLUMN IF NOT EXISTS tx_id xid8 DEFAULT pg_current_xact_id()",
+            "CREATE INDEX IF NOT EXISTS event_outbox_stream ON event_outbox ((COALESCE(tx_id::text::bigint, 0)), id)",
             "CREATE TABLE IF NOT EXISTS webhook_subscription (\
                 id BIGSERIAL PRIMARY KEY, \
                 name TEXT NOT NULL, \
@@ -390,6 +391,11 @@ impl Db {
 #[derive(Clone, Debug)]
 pub struct StoredEvent {
     pub id: i64,
+    /// The writer transaction's xid8 as a number (0 for pre-migration rows) — the FIRST component
+    /// of the stream cursor: rows below the running-xid horizon form a set that only grows in
+    /// (txn, id) order, so a (txn, id) cursor can never skip (an id-only cursor CAN: a long tx has
+    /// a low xid but late, high ids).
+    pub txn: i64,
     pub event_type: String,
     pub model: String,
     pub record_id: i64,
@@ -400,27 +406,38 @@ pub struct StoredEvent {
 }
 
 impl Db {
-    /// The highest outbox id (0 on an empty outbox) — the "from now on" cursor for a new stream.
-    pub async fn latest_event_id(&self) -> Result<i64, DbError> {
-        let id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM event_outbox")
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(id)
+    /// The highest DELIVERABLE (txn, id) cursor — the "from now on" point for a new stream. Applies
+    /// the SAME running-xid guard as [`Db::events_after`]: a row whose writer is still uncommitted
+    /// must stay ABOVE the cursor, or it would be skipped forever once that writer commits.
+    pub async fn latest_event_cursor(&self) -> Result<(i64, i64), DbError> {
+        let row = sqlx::query(
+            "SELECT COALESCE(tx_id::text::bigint, 0) AS txn, id FROM event_outbox \
+             WHERE tx_id IS NULL OR tx_id < pg_snapshot_xmin(pg_current_snapshot()) \
+             ORDER BY COALESCE(tx_id::text::bigint, 0) DESC, id DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| (r.get::<i64, _>("txn"), r.get::<i64, _>("id"))).unwrap_or((0, 0)))
     }
 
-    /// Events after `cursor`, id-ordered, GAP-SAFE: a row is returned only once every transaction
-    /// that started before it has resolved (`tx_id < pg_snapshot_xmin(pg_current_snapshot())`), so
-    /// advancing the cursor past id N can never skip an id < N whose writer commits later. The
-    /// trade-off is a small delivery lag bounded by the longest concurrent write transaction.
-    /// Pre-migration rows (tx_id NULL) are treated as long-committed.
-    pub async fn events_after(&self, cursor: i64, limit: i64) -> Result<Vec<StoredEvent>, DbError> {
+    /// Events after the `(txn, id)` cursor, GAP-SAFE. Two properties compose: (1) only rows whose
+    /// writer transaction is below every RUNNING transaction are eligible (`tx_id <
+    /// pg_snapshot_xmin(pg_current_snapshot())`) — the eligible set is stable and only ever grows;
+    /// (2) it grows in (txn, id) order, so a (txn, id) cursor can never skip. An id-only cursor is
+    /// NOT safe: a long transaction carries the xid of its FIRST write but inserts events late with
+    /// HIGH ids — an overlapping younger writer's lower id would fall behind the cursor forever.
+    /// The trade-off is delivery lag bounded by the longest concurrent write transaction.
+    /// Pre-migration rows (tx_id NULL) read as txn 0 — a legacy prefix.
+    pub async fn events_after(&self, cursor: (i64, i64), limit: i64) -> Result<Vec<StoredEvent>, DbError> {
         let rows = sqlx::query(
-            "SELECT id, event_type, model, record_id, author_uid, company_id, change_summary, occurred_at::text AS occurred_at \
+            "SELECT id, COALESCE(tx_id::text::bigint, 0) AS txn, event_type, model, record_id, author_uid, company_id, change_summary, occurred_at::text AS occurred_at \
              FROM event_outbox \
-             WHERE id > $1 AND (tx_id IS NULL OR tx_id < pg_snapshot_xmin(pg_current_snapshot())) \
-             ORDER BY id LIMIT $2",
+             WHERE (COALESCE(tx_id::text::bigint, 0), id) > ($1, $2) \
+               AND (tx_id IS NULL OR tx_id < pg_snapshot_xmin(pg_current_snapshot())) \
+             ORDER BY COALESCE(tx_id::text::bigint, 0), id LIMIT $3",
         )
-        .bind(cursor)
+        .bind(cursor.0)
+        .bind(cursor.1)
         .bind(limit)
         .fetch_all(&self.pool)
         .await?;
@@ -428,6 +445,7 @@ impl Db {
             .iter()
             .map(|r| StoredEvent {
                 id: r.get("id"),
+                txn: r.get("txn"),
                 event_type: r.get("event_type"),
                 model: r.get("model"),
                 record_id: r.get("record_id"),
@@ -444,10 +462,15 @@ impl Db {
     /// `find_one_secured` — THE visibility path every read uses (record rules + company scope) —
     /// memoized per (model, record) within the batch. (`id` is not domain-addressable today, so a
     /// batched id-IN secured query is not expressible; batches are small — one poll tick.)
-    /// `model.deleted` events cannot re-read the row, so they gate on the Read ACL plus the event's
+    /// `model.deleted` events cannot re-read the row, so they gate on the Read ACL, the event's
     /// company against the caller's scope (NULL = shared = visible; default-deny otherwise, like
-    /// `company_filter`). `changed_fields` names are filtered per field ACL (D6) so a caller with
-    /// record visibility but restricted fields does not learn which restricted fields changed.
+    /// `company_filter`) — AND are suppressed entirely when a Read record rule applies to this
+    /// caller on the model (the rule cannot be evaluated against a gone row; default-deny, matching
+    /// the posture everywhere else). `changed_fields` names are filtered per field ACL (D6), and a
+    /// `model.state_changed` whose `state` field is D6-restricted for this caller has its
+    /// field/from/to values blanked — record visibility must not leak restricted VALUES. Custom
+    /// service events (`ServiceCtx::emit_event`) pass their summary through: it is visible to every
+    /// caller who can see the record (documented on emit_event).
     pub async fn visible_events(
         &self,
         ctx: &kigumi_core::Ctx,
@@ -463,6 +486,7 @@ impl Db {
         for ev in events {
             let seen = if ev.event_type == "model.deleted" {
                 check_access(Operation::Read, &ev.model, ctx, acls)
+                    && kigumi_core::record_rule_domain(Operation::Read, &ev.model, ctx, rules).is_none()
                     && (ctx.is_su() || ev.company_id.is_none_or(|c| ctx.allowed_company_ids.contains(&c)))
             } else {
                 let key = (ev.model.clone(), ev.record_id);
@@ -487,13 +511,19 @@ impl Db {
             if !seen {
                 continue;
             }
-            // D6: drop restricted field NAMES from the change summary for this caller.
+            // D6: drop restricted field NAMES from the change summary for this caller — and for a
+            // state transition on a D6-restricted `state`, blank the VALUES too (record visibility
+            // must not leak from/to of a field the caller cannot read).
             let mut changes = ev.change_summary.clone();
             if let Some(fields) = changes.get_mut("changed_fields").and_then(|v| v.as_array_mut()) {
                 fields.retain(|f| f.as_str().is_some_and(|name| field_accessible(&ev.model, name, ctx)));
             }
+            if ev.event_type == "model.state_changed" && !field_accessible(&ev.model, "state", ctx) {
+                changes = serde_json::json!({});
+            }
             out.push(serde_json::json!({
                 "id": ev.id,
+                "txn": ev.txn,
                 "type": ev.event_type,
                 "model": ev.model,
                 "record_id": ev.record_id,

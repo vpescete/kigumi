@@ -529,23 +529,33 @@ fn build_data_router(
 /// connect) drops the pre-connect remainder, and any event after a connect has an id above the
 /// idle cursor, so the first active tick reads it. Resumes are exact regardless of poller state
 /// (each handler runs its own Last-Event-ID catch-up query).
+/// The SSE event id: the full `(txn, id)` stream cursor, so Last-Event-ID resumes are exact.
+fn sse_id(ev: &serde_json::Value) -> String {
+    format!("{}:{}", ev["txn"].as_i64().unwrap_or(0), ev["id"].as_i64().unwrap_or(0))
+}
+
+/// A fresh snapshot from a live ACL/rule state (cheap Arc clone under a read lock).
+fn snapshot<T: ?Sized>(state: &Arc<RwLock<Arc<T>>>) -> Arc<T> {
+    state.read().expect("access state poisoned").clone()
+}
+
 fn spawn_event_poller(db: Arc<Db>, tx: tokio::sync::broadcast::Sender<Arc<Vec<StoredEvent>>>) {
     const TICK_MS: u64 = 250;
     tokio::spawn(async move {
-        let mut cursor: Option<i64> = None;
+        let mut cursor: Option<(i64, i64)> = None;
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(TICK_MS)).await;
             if tx.receiver_count() == 0 {
-                match db.latest_event_id().await {
-                    Ok(id) => cursor = Some(id),
+                match db.latest_event_cursor().await {
+                    Ok(c) => cursor = Some(c),
                     Err(e) => eprintln!("kigumi-server event poller (idle cursor) failed: {e:?}"),
                 }
                 continue;
             }
             let from = match cursor {
                 Some(c) => c,
-                None => match db.latest_event_id().await {
-                    Ok(id) => id,
+                None => match db.latest_event_cursor().await {
+                    Ok(c) => c,
                     Err(e) => {
                         eprintln!("kigumi-server event poller (cursor) failed: {e:?}");
                         continue;
@@ -557,7 +567,7 @@ fn spawn_event_poller(db: Arc<Db>, tx: tokio::sync::broadcast::Sender<Arc<Vec<St
                     cursor = Some(from);
                 }
                 Ok(events) => {
-                    cursor = Some(events.last().map(|e| e.id).unwrap_or(from));
+                    cursor = Some(events.last().map(|e| (e.txn, e.id)).unwrap_or(from));
                     let _ = tx.send(Arc::new(events)); // no receivers = fine
                 }
                 Err(e) => eprintln!("kigumi-server event poller failed: {e:?}"),
@@ -1461,11 +1471,13 @@ async fn service_handler(
 
 /// The live record stream: `GET /api/events/stream?models=a,b` (Server-Sent Events). Authenticated;
 /// each event is visibility-filtered for THIS caller by the exact read path (Read ACL + record
-/// rules + company scope, batched per model), with restricted field names stripped from the change
-/// summary (D6). Events carry their outbox id as the SSE id, so a reconnecting client resumes
-/// exactly via the standard Last-Event-ID header (a fresh client streams from "now"). Delivery is
-/// at-least-once from connect; the payload is a change HINT (type/model/record_id/changes) — the
-/// client refetches the record through the normal secured reads for content.
+/// rules + company scope), against a FRESH ACL/rule snapshot per batch (a revoked grant applies to
+/// the next batch, not the next reconnect). The stream itself is BOUNDED to the access-token TTL:
+/// it closes after ACCESS_TTL and the client transparently reconnects with a fresh bearer — an
+/// open stream can never outlive its credential by more than one TTL, matching the rest of the
+/// system's revocation bound. Events carry a `txn:id` cursor as the SSE id for exact Last-Event-ID
+/// resume (a fresh client streams from "now"); delivery is at-least-once from connect and the
+/// payload is a change HINT — the client refetches records through the normal secured reads.
 async fn events_stream_handler(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -1480,21 +1492,25 @@ async fn events_stream_handler(
         .get("models")
         .map(|m| m.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect())
         .unwrap_or_default();
-    // Resume point: the standard Last-Event-ID header, else "now".
-    let resume = headers
-        .get("last-event-id")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<i64>().ok());
+    // Resume point: the standard Last-Event-ID header ("txn:id"; a bare integer reads as txn 0,
+    // replaying the legacy prefix), else "now".
+    let resume: Option<(i64, i64)> = headers.get("last-event-id").and_then(|v| v.to_str().ok()).and_then(|v| {
+        match v.split_once(':') {
+            Some((t, i)) => Some((t.parse().ok()?, i.parse().ok()?)),
+            None => Some((0, v.parse().ok()?)),
+        }
+    });
     let mut rx = backend.events.subscribe();
     let db = backend.db.clone();
-    let acls = backend.acls();
-    let rules = backend.rules();
+    let acl_state = backend.acls.clone();
+    let rule_state = backend.rules.clone();
 
     let stream = async_stream::stream! {
-        let mut last: i64 = match resume {
-            Some(id) => id,
-            None => match db.latest_event_id().await {
-                Ok(id) => id,
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(ACCESS_TTL);
+        let mut last: (i64, i64) = match resume {
+            Some(c) => c,
+            None => match db.latest_event_cursor().await {
+                Ok(c) => c,
                 Err(e) => {
                     eprintln!("kigumi-server event stream (cursor) failed: {e:?}");
                     return;
@@ -1517,53 +1533,57 @@ async fn events_stream_handler(
                 if page.is_empty() {
                     break;
                 }
-                last = page.last().map(|e| e.id).unwrap_or(last);
+                last = page.last().map(|e| (e.txn, e.id)).unwrap_or(last);
                 let mine: Vec<StoredEvent> = page.into_iter().filter(|e| wanted(e)).collect();
                 if mine.is_empty() {
                     continue;
                 }
+                // Fresh snapshots per batch: a revoked ACL/rule applies to the NEXT batch.
+                let (acls, rules) = (snapshot(&acl_state), snapshot(&rule_state));
                 match db.visible_events(&ctx, &acls, &rules, &mine).await {
                     Ok(shaped) => {
                         for ev in shaped {
-                            let id = ev["id"].as_i64().unwrap_or(0).to_string();
                             yield Ok::<_, std::convert::Infallible>(
-                                axum::response::sse::Event::default().id(id).data(ev.to_string()),
+                                axum::response::sse::Event::default().id(sse_id(&ev)).data(ev.to_string()),
                             );
                         }
                     }
-                    Err(e) => {
-                        eprintln!("kigumi-server event stream (filter) failed: {e:?}");
-                        return;
-                    }
+                    // Transient filter failure: skip this page (events are hints), don't kill the stream.
+                    Err(e) => eprintln!("kigumi-server event stream (filter) failed: {e:?}"),
                 }
             }
-            // -- live batches --
-            match rx.recv().await {
-                Ok(batch) => {
-                    let mine: Vec<StoredEvent> =
-                        batch.iter().filter(|e| e.id > last && wanted(e)).cloned().collect();
-                    if let Some(max) = batch.last().map(|e| e.id) {
+            // -- live batches (bounded by the token TTL: on expiry the client reconnects fresh) --
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return;
+            }
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Err(_) => return, // TTL reached on a quiet stream
+                Ok(Ok(batch)) => {
+                    let mine: Vec<StoredEvent> = batch
+                        .iter()
+                        .filter(|e| (e.txn, e.id) > last && wanted(e))
+                        .cloned()
+                        .collect();
+                    if let Some(max) = batch.last().map(|e| (e.txn, e.id)) {
                         last = last.max(max);
                     }
                     if mine.is_empty() {
                         continue;
                     }
+                    let (acls, rules) = (snapshot(&acl_state), snapshot(&rule_state));
                     match db.visible_events(&ctx, &acls, &rules, &mine).await {
                         Ok(shaped) => {
                             for ev in shaped {
-                                let id = ev["id"].as_i64().unwrap_or(0).to_string();
-                                yield Ok(axum::response::sse::Event::default().id(id).data(ev.to_string()));
+                                yield Ok(axum::response::sse::Event::default().id(sse_id(&ev)).data(ev.to_string()));
                             }
                         }
-                        Err(e) => {
-                            eprintln!("kigumi-server event stream (filter) failed: {e:?}");
-                            return;
-                        }
+                        Err(e) => eprintln!("kigumi-server event stream (filter) failed: {e:?}"),
                     }
                 }
                 // Lagged: the broadcast buffer overtook this client — fall back to a catch-up query.
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => return,
             }
         }
     };

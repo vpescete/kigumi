@@ -311,6 +311,10 @@ impl<'a, 't> ServiceCtx<'a, 't> {
     /// Emits a domain event on the SERVICE transaction — atomic with the body's writes (a rolled-back
     /// service emits nothing). For a tx-bound service whose event is part of its atomic effect, e.g.
     /// `stock.picking.done` when a transfer is validated. author_uid is the caller.
+    ///
+    /// VISIBILITY: the change summary is delivered (webhooks, the live event stream) to every caller
+    /// who can SEE the record — put metadata in it (ids, counts, a document number), never values of
+    /// D6-restricted fields.
     pub async fn emit_event(&mut self, event_type: &str, model: &str, record_id: i64, company_id: Option<i64>, changes: Json) -> Result<(), DbError> {
         let uid = self.caller.uid;
         self.db
