@@ -17,4 +17,5 @@ rust_decimal = "1"
 ammonia = "4"
 
 [dev-dependencies]
+kigumi-test = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

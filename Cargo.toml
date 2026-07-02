@@ -20,5 +20,6 @@ kigumi-config = { path = "crates/kigumi-config", version = "0.1.0" }
 kigumi-server = { path = "crates/kigumi-server", version = "0.1.0" }
 kigumi-macros = { path = "crates/kigumi-macros", version = "0.1.0" }
 kigumi-storage = { path = "crates/kigumi-storage", version = "0.1.0" }
+kigumi-test = { path = "crates/kigumi-test", version = "0.1.0" }
 kigumi = { path = "crates/kigumi", version = "0.1.0" }
 semver = "1"

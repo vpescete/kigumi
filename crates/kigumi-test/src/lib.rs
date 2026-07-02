@@ -1,0 +1,240 @@
+//! Integration-test kit: a FAST, correct database reset plus the fixtures every test used to
+//! copy-paste (the DATABASE_URL skip, the superuser Ctx, the insert helper).
+//!
+//! The reset is fingerprinted. A full drop/create of the whole migration plan costs ~minutes per
+//! binary; most runs don't change the schema at all. So [`TestDb::new`]:
+//!
+//! 1. takes a global advisory lock on a DEDICATED connection (concurrent test binaries sharing one
+//!    DATABASE_URL serialize instead of clobbering each other; the lock lives until the connection
+//!    drops at the end of the test),
+//! 2. computes a CODE fingerprint (the DDL projection of every registered model + the M2M junction
+//!    shapes + [`KIT_SCHEMA_VERSION`]) and a DATABASE snapshot (columns + indexes from the catalog),
+//! 3. if both match what the last full build recorded → `TRUNCATE <everything> RESTART IDENTITY
+//!    CASCADE` (milliseconds) and re-run the idempotent `ensure_*` framework DDL (an additive
+//!    framework change self-applies here and the stored snapshot is refreshed),
+//! 4. otherwise → full drop/create of every table in the schema, then record the new fingerprints.
+//!
+//! The DB snapshot check also catches schema "dirt" left by DDL-exercising tests (e.g. runtime
+//! custom fields ALTERing a table): the snapshot no longer matches, so the next reset rebuilds.
+//! Residual manual knob: a DESTRUCTIVE change to framework `ensure_*` DDL (a column retyped in
+//! place — additive `IF NOT EXISTS` changes self-apply) needs a [`KIT_SCHEMA_VERSION`] bump.
+//!
+//! The fingerprint is per test BINARY (it hashes the models linked into it): binaries linking
+//! different module sets still rebuild when they alternate — the win is the dev loop (re-running
+//! one binary) and consecutive binaries sharing a module set.
+
+use kigumi_core::{migration_plan, Ctx, FieldKind, ResolvedModel};
+use kigumi_db::{Db, DbError};
+use sqlx::{Connection, PgConnection, Row};
+
+/// Bump when a framework `ensure_*` DDL change cannot self-apply on the TRUNCATE path (destructive
+/// shape changes only; `CREATE/ADD ... IF NOT EXISTS` additions do not need a bump).
+pub const KIT_SCHEMA_VERSION: u32 = 1;
+
+/// One fixed advisory-lock key for the whole kit ("kigumi-test", spelled in hex).
+const LOCK_KEY: i64 = 0x6b69_6775_6d69;
+
+/// The meta table the kit records its fingerprints in (excluded from snapshots and truncation).
+const META: &str = "kigumi_test_meta";
+
+/// A connected, reset test database. Holds the advisory lock for the lifetime of the value — drop
+/// it (end of test) and the dedicated lock connection closes, releasing the lock server-side.
+pub struct TestDb {
+    pub db: Db,
+    _lock: PgConnection,
+}
+
+impl TestDb {
+    /// Connects to `DATABASE_URL` and hands back a database reset to a pristine schema. Returns
+    /// `None` (after printing the conventional skip line) when the variable is unset, so tests keep
+    /// the established "skip without a database" behavior:
+    ///
+    /// ```ignore
+    /// let Some(t) = kigumi_test::TestDb::new().await else { return };
+    /// let db = &t.db;
+    /// ```
+    ///
+    /// Real failures (bad URL, SQL errors) panic — a broken test database should fail loudly.
+    pub async fn new() -> Option<TestDb> {
+        let url = match std::env::var("DATABASE_URL") {
+            Ok(u) => u,
+            Err(_) => {
+                eprintln!("skipping: DATABASE_URL not set");
+                return None;
+            }
+        };
+        // The lock connection is dedicated (NOT from the pool): a session advisory lock is released
+        // when its session ends, and a pooled connection outlives the guard by design.
+        let mut lock = PgConnection::connect(&url).await.expect("kigumi-test: connect (lock)");
+        sqlx::query("SELECT pg_advisory_lock($1)")
+            .bind(LOCK_KEY)
+            .execute(&mut lock)
+            .await
+            .expect("kigumi-test: advisory lock");
+        let db = Db::connect(&url).await.expect("kigumi-test: connect");
+        prepare(&db).await.expect("kigumi-test: prepare schema");
+        Some(TestDb { db, _lock: lock })
+    }
+}
+
+/// The superuser context every test seeds with.
+pub fn su() -> Ctx {
+    Ctx::new(0, vec![]).sudo()
+}
+
+/// The shared insert fixture (the `ins` closure every test used to define): a secured insert as
+/// `ctx` with no ACL/rule overlays, unwrapped. Panics on failure — it's a fixture, not the subject.
+pub async fn ins(db: &Db, model: &ResolvedModel, ctx: &Ctx, v: serde_json::Value) -> i64 {
+    db.insert_secured(model, ctx, &[], &[], v.as_object().expect("ins: JSON object"))
+        .await
+        .expect("ins: insert_secured")
+}
+
+/// Resets the database for this binary's registered model set (see the module doc for the
+/// fingerprint strategy). Public so a bespoke harness can drive it without [`TestDb`].
+pub async fn prepare(db: &Db) -> Result<(), DbError> {
+    let plan = migration_plan().map_err(DbError::Migration)?;
+
+    sqlx::query(&format!(
+        "CREATE TABLE IF NOT EXISTS {META} (id INT PRIMARY KEY DEFAULT 1, code_fp TEXT NOT NULL, schema_snap TEXT NOT NULL)"
+    ))
+    .execute(db.pool())
+    .await?;
+
+    let code_fp = code_fingerprint(db, &plan).await?;
+    let stored: Option<(String, String)> = sqlx::query(&format!("SELECT code_fp, schema_snap FROM {META} WHERE id = 1"))
+        .fetch_optional(db.pool())
+        .await?
+        .map(|r| (r.get(0), r.get(1)));
+    let snap_now = schema_snapshot(db).await?;
+
+    match stored {
+        Some((fp, snap)) if fp == code_fp && snap == snap_now => {
+            truncate_all(db).await?;
+            ensure_all(db).await?;
+            // An additive framework DDL change self-applies through ensure_*; refresh the record.
+            let snap_after = schema_snapshot(db).await?;
+            if snap_after != snap_now {
+                sqlx::query(&format!("UPDATE {META} SET schema_snap = $1 WHERE id = 1"))
+                    .bind(&snap_after)
+                    .execute(db.pool())
+                    .await?;
+            }
+        }
+        _ => {
+            drop_all(db).await?; // meta included — recreated below
+            for t in &plan {
+                db.create_table(&t.model).await?;
+            }
+            for t in &plan {
+                db.create_m2m_relations(&t.model).await?;
+            }
+            ensure_all(db).await?;
+            let snap_after = schema_snapshot(db).await?;
+            sqlx::query(&format!(
+                "CREATE TABLE IF NOT EXISTS {META} (id INT PRIMARY KEY DEFAULT 1, code_fp TEXT NOT NULL, schema_snap TEXT NOT NULL)"
+            ))
+            .execute(db.pool())
+            .await?;
+            sqlx::query(&format!(
+                "INSERT INTO {META} (id, code_fp, schema_snap) VALUES (1, $1, $2) \
+                 ON CONFLICT (id) DO UPDATE SET code_fp = EXCLUDED.code_fp, schema_snap = EXCLUDED.schema_snap"
+            ))
+            .bind(&code_fp)
+            .bind(&snap_after)
+            .execute(db.pool())
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Every idempotent framework `ensure_*` (schemas + indexes + seeded registries). The index helpers
+/// tolerate absent module tables, so the bundle is safe for any linked-module set.
+async fn ensure_all(db: &Db) -> Result<(), DbError> {
+    db.ensure_sequence_schema().await?;
+    db.ensure_event_schema().await?;
+    db.ensure_access_schema().await?;
+    db.ensure_auth_schema().await?;
+    db.ensure_module_schema().await?;
+    db.ensure_setting_schema().await?;
+    db.ensure_view_schema().await?;
+    db.ensure_custom_field_schema().await?;
+    db.ensure_crons().await?;
+    db.ensure_transient_defaults().await?;
+    db.ensure_mail_indexes().await?;
+    db.ensure_stock_indexes().await?;
+    Ok(())
+}
+
+/// The code side of the fingerprint: the DDL of every registered model (name-sorted for stability)
+/// plus each Many2many junction shape, hashed server-side (md5 — stable, no extra dependency).
+async fn code_fingerprint(db: &Db, plan: &[kigumi_core::MigrationTarget]) -> Result<String, DbError> {
+    let mut targets: Vec<&kigumi_core::MigrationTarget> = plan.iter().collect();
+    targets.sort_by(|a, b| a.model.name.cmp(b.model.name));
+    let mut blob = format!("kit:v{KIT_SCHEMA_VERSION}\n");
+    for t in &targets {
+        blob.push_str(&kigumi_schema::to_ddl(&t.model));
+        blob.push('\n');
+        for f in &t.model.fields {
+            if let FieldKind::Many2many { target, relation, column, target_column } = f.kind {
+                blob.push_str(&format!("m2m:{relation}({column},{target_column})->{target}\n"));
+            }
+        }
+    }
+    let fp: String = sqlx::query_scalar("SELECT md5($1)").bind(&blob).fetch_one(db.pool()).await?;
+    Ok(fp)
+}
+
+/// The database side of the fingerprint: every column and index in the public schema (minus the
+/// kit's own meta table), hashed in one round trip. Catches schema dirt (runtime-DDL tests) and
+/// verifies a TRUNCATE-only reset is landing on the schema the last full build produced.
+async fn schema_snapshot(db: &Db) -> Result<String, DbError> {
+    let snap: String = sqlx::query_scalar(&format!(
+        "SELECT md5(COALESCE(string_agg(x, '|' ORDER BY x), '')) FROM ( \
+             SELECT table_name || '.' || column_name || ':' || data_type || ':' || is_nullable || ':' || COALESCE(column_default, '') AS x \
+             FROM information_schema.columns WHERE table_schema = 'public' AND table_name <> '{META}' \
+           UNION ALL \
+             SELECT indexname || '=' || indexdef FROM pg_indexes \
+             WHERE schemaname = 'public' AND tablename <> '{META}' \
+         ) s"
+    ))
+    .fetch_one(db.pool())
+    .await?;
+    Ok(snap)
+}
+
+/// Every table in the public schema except the kit's meta table.
+async fn public_tables(db: &Db, include_meta: bool) -> Result<Vec<String>, DbError> {
+    let rows = sqlx::query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+        .fetch_all(db.pool())
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| r.get::<String, _>(0))
+        .filter(|t| include_meta || t != META)
+        .collect())
+}
+
+/// One `TRUNCATE t1, t2, … RESTART IDENTITY CASCADE` over the whole schema: BIGSERIAL counters
+/// restart (tests assert concrete ids and sequence numbers) and FK order is irrelevant.
+async fn truncate_all(db: &Db) -> Result<(), DbError> {
+    let tables = public_tables(db, false).await?;
+    if tables.is_empty() {
+        return Ok(());
+    }
+    let list = tables.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ");
+    sqlx::query(&format!("TRUNCATE {list} RESTART IDENTITY CASCADE")).execute(db.pool()).await?;
+    Ok(())
+}
+
+/// Drops every table in the public schema (meta included) — the full-rebuild path.
+async fn drop_all(db: &Db) -> Result<(), DbError> {
+    let tables = public_tables(db, true).await?;
+    if tables.is_empty() {
+        return Ok(());
+    }
+    let list = tables.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ");
+    sqlx::query(&format!("DROP TABLE IF EXISTS {list} CASCADE")).execute(db.pool()).await?;
+    Ok(())
+}

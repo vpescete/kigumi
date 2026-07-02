@@ -1,0 +1,15 @@
+[package]
+name = "kigumi-test"
+description = "Kigumi integration-test kit: fast fingerprinted database reset + shared fixtures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kigumi-core = { workspace = true }
+kigumi-schema = { workspace = true }
+kigumi-db = { workspace = true }
+serde_json = "1"
+# Matches kigumi-db's sqlx configuration (the kit issues raw catalog/TRUNCATE statements).
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "rust_decimal"] }

@@ -1410,6 +1410,7 @@ dependencies = [
  "ammonia",
  "kigumi-core",
  "kigumi-schema",
+ "kigumi-test",
  "rust_decimal",
  "semver 1.0.28",
  "serde_json",
@@ -1472,6 +1473,7 @@ dependencies = [
  "kigumi-mod-account",
  "kigumi-mod-base",
  "kigumi-mod-mail",
+ "kigumi-test",
  "rust_decimal",
  "serde_json",
  "sqlx",
@@ -1487,6 +1489,7 @@ dependencies = [
  "kigumi-mod-base",
  "kigumi-mod-mail",
  "kigumi-mod-sales",
+ "kigumi-test",
  "rust_decimal",
  "serde_json",
  "sqlx",
@@ -1543,6 +1546,17 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "kigumi-test"
+version = "0.1.0"
+dependencies = [
+ "kigumi-core",
+ "kigumi-db",
+ "kigumi-schema",
+ "serde_json",
+ "sqlx",
 ]
 
 [[package]]

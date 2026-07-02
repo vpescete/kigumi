@@ -3,7 +3,6 @@
 //! still balances (receivable = untaxed + Σ per-group tax). Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -22,18 +21,9 @@ fn money(v: &serde_json::Value, field: &str) -> f64 {
 #[tokio::test]
 async fn invoice_posts_one_tax_line_per_group() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
     db.ensure_sequence("SO", "SO/", "", 5).await.unwrap();
 
     let (currency, partner, product, order, line, mv, account, journal, tax, group) = (
@@ -92,5 +82,4 @@ async fn invoice_posts_one_tax_line_per_group() {
     assert!(tax_lines.iter().any(|l| money(l, "credit") == 22.0 && l["name"] == "VAT"));
     assert!(tax_lines.iter().any(|l| money(l, "credit") == 5.0 && l["name"] == "Eco"));
 
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

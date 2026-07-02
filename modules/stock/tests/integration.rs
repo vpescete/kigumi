@@ -24,19 +24,9 @@ async fn on_hand(db: &Db, su: &Ctx, product: &ResolvedModel, id: i64) -> f64 {
 #[tokio::test]
 async fn orders_create_transfers_that_move_stock() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_stock_indexes().await.unwrap();
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(kit) = kigumi_test::TestDb::new().await else { return };
+    let db = &kit.db;
+    let su = kigumi_test::su();
 
     let m = |n: &str| resolve_registered(n).unwrap();
     let (currency, company, partner, product, location, picking, mv) =
@@ -75,7 +65,7 @@ async fn orders_create_transfers_that_move_stock() {
     assert_eq!(rmoves[0]["product_uom_qty"].as_str().and_then(|s| s.parse::<f64>().ok()), Some(9.0));
 
     db.run_service(&picking, &su, &[], &[], receipt, "validate", serde_json::Map::new()).await.unwrap();
-    assert_eq!(on_hand(&db, &su, &product, prod).await, 9.0, "receipt raises on-hand to 9");
+    assert_eq!(on_hand(db, &su, &product, prod).await, 9.0, "receipt raises on-hand to 9");
 
     // -- Sale → delivery (Stock → Customers), 4 units --
     let sorder = ins(&so, json!({ "partner_id": acme, "company_id": comp, "currency_id": cur, "state": "sale" })).await;
@@ -91,7 +81,7 @@ async fn orders_create_transfers_that_move_stock() {
     assert_eq!(dmoves[0]["product_uom_qty"].as_str().and_then(|s| s.parse::<f64>().ok()), Some(4.0));
 
     db.run_service(&picking, &su, &[], &[], delivery, "validate", serde_json::Map::new()).await.unwrap();
-    assert_eq!(on_hand(&db, &su, &product, prod).await, 5.0, "delivery lowers on-hand to 5");
+    assert_eq!(on_hand(db, &su, &product, prod).await, 5.0, "delivery lowers on-hand to 5");
 
     // -- A draft (unconfirmed) order cannot create a transfer --
     let draft = ins(&so, json!({ "partner_id": acme, "company_id": comp, "currency_id": cur, "state": "draft" })).await;
@@ -102,5 +92,4 @@ async fn orders_create_transfers_that_move_stock() {
     let empty = ins(&so, json!({ "partner_id": acme, "company_id": comp, "currency_id": cur, "state": "sale" })).await;
     assert!(db.run_service(&so, &su, &[], &[], empty, "create_delivery", serde_json::Map::new()).await.is_err(), "an order with no lines has nothing to deliver");
 
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

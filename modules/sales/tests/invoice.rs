@@ -3,7 +3,6 @@
 //! move elevated — proving the cross-module invoicing seam end to end. Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 /// Link base + mail + sales + account so every referenced model is registered in this test binary.
@@ -23,18 +22,9 @@ fn money(v: &serde_json::Value, field: &str) -> f64 {
 #[tokio::test]
 async fn confirmed_order_generates_a_posted_balanced_invoice() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
     db.ensure_sequence("SO", "SO/", "", 5).await.unwrap();
 
     let (currency, partner, product, order, mv, account, journal) = (
@@ -104,6 +94,4 @@ async fn confirmed_order_generates_a_posted_balanced_invoice() {
         "to_invoice",
         "the refused order keeps its to_invoice status (no orphan claim)"
     );
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }
