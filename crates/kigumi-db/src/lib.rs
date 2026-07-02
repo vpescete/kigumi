@@ -14,6 +14,7 @@ mod event_schema;
 mod migration;
 mod module_store;
 mod sequence;
+mod jobs;
 mod service;
 mod settings;
 mod view_override;
@@ -24,6 +25,7 @@ pub use view_override::ViewOverride;
 pub use cron::{registered_crons, CronFn, CronRegistration};
 pub use migration::{Migration, MigrationOutcome};
 pub use event_schema::{OutboxEvent, WebhookDelivery};
+pub use jobs::{job_for, JobFn, JobRegistration};
 pub use service::{
     ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
     validate_routes, write_triggers_for, BoxServiceFut, LedgerReportFn, LedgerReportRegistration,

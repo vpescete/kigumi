@@ -327,6 +327,12 @@ impl<'a, 't> ServiceCtx<'a, 't> {
             )
             .await
     }
+    /// Enqueues a background job ON the service transaction: the job exists if and only if this
+    /// service's writes commit — the transactional-enqueue guarantee an external queue cannot give.
+    /// The name must be registered via register_job! (a typo fails here, not as a dead letter).
+    pub async fn enqueue_job(&mut self, name: &str, payload: Json) -> Result<i64, DbError> {
+        self.db.enqueue_job_in_tx(self.tx, name, payload).await
+    }
     /// Queues a secured insert to run AFTER the body's tx commits (each on its own transaction, in order).
     /// For a follow-on record whose failure must NOT roll back the main effect — e.g. a stock backorder:
     /// the validation stays durable even if the backorder can't be created (documented non-atomicity).

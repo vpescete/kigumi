@@ -23,6 +23,9 @@ type Fallible = Result<(), Box<dyn std::error::Error>>;
 
 /// How often the scheduler checks for due cron jobs (each job's own interval lives in the DB).
 const CRON_TICK_SECS: u64 = 60;
+/// Ad-hoc jobs deserve a tighter observation bound than crons (a queued job should start in
+/// seconds, not up to a minute) — the claim itself stays SKIP LOCKED so multiple workers are safe.
+const JOB_TICK_SECS: u64 = 5;
 /// How often a running server re-reads the install ledger to pick up out-of-band module changes.
 const MODULE_REFRESH_SECS: u64 = 8;
 
@@ -289,6 +292,7 @@ async fn run(cli: Cli) -> Fallible {
 /// install rather than installing everything available.
 async fn migrate(db: &Db) -> Fallible {
     db.ensure_auth_schema().await?;
+    db.ensure_job_schema().await?;
     db.ensure_sequence_schema().await?;
     db.ensure_setting_schema().await?;
     db.ensure_access_schema().await?;
@@ -694,6 +698,7 @@ async fn serve(s: Settings) -> Fallible {
     // effect without a restart: the poll loop below reloads on change, the endpoints reload at once.
     db.ensure_access_schema().await?;
     db.ensure_event_schema().await?;
+    db.ensure_job_schema().await?;
     let acls: kigumi_server::AclState =
         std::sync::Arc::new(std::sync::RwLock::new(std::sync::Arc::from(registered_acls())));
     let rules: kigumi_server::RuleState =
@@ -708,6 +713,19 @@ async fn serve(s: Settings) -> Fallible {
             tokio::time::sleep(std::time::Duration::from_secs(CRON_TICK_SECS)).await;
             if let Err(e) = cron_db.run_due_crons().await {
                 eprintln!("kigumi cron tick failed: {e:?}");
+            }
+        }
+    });
+    // Ad-hoc job runner: reap expired leases (crashed-worker recovery), then claim + run due jobs.
+    let job_db = db.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(JOB_TICK_SECS)).await;
+            if let Err(e) = job_db.reap_stuck_jobs().await {
+                eprintln!("kigumi job reap failed: {e:?}");
+            }
+            if let Err(e) = job_db.run_due_jobs().await {
+                eprintln!("kigumi job tick failed: {e:?}");
             }
         }
     });

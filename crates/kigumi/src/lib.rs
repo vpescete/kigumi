@@ -31,9 +31,9 @@ pub mod prelude {
     // The cross-record service seam (DB-typed, defined in kigumi-db) — registered via register_service!.
     // `DbError` is the service result's error type, so a module needs no direct kigumi-db dependency.
     pub use kigumi_db::{
-        ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
+        job_for, ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
         validate_routes, write_triggers_for, BoxServiceFut, DbError, LedgerReportFn,
-        LedgerReportRegistration, RouteFn, RouteInput, RouteMethod, RouteOutput,
+        LedgerReportRegistration, JobFn, JobRegistration, RouteFn, RouteInput, RouteMethod, RouteOutput,
         RouteRegistration, ServiceCtx, ServiceFn, ServiceInput, ServiceOutput, ServiceRegistration,
         WriteTriggerFn, WriteTriggerRegistration,
     };
@@ -183,6 +183,24 @@ macro_rules! register_ledger_report {
                 read_model: $read_model,
                 func: |pool, params| ::std::boxed::Box::pin($func(pool, params)),
                 groups: $groups,
+            }
+        }
+    };
+}
+
+/// Registers a BACKGROUND JOB kind, runnable ad hoc with retries: enqueue with
+/// `Db::enqueue_job(name, payload)` or — transactionally, inside a service — with
+/// `ServiceCtx::enqueue_job`. `func` is an `async fn(&Db, Json) -> Result<(), DbError>`; a returned
+/// Err retries with exponential backoff up to `max_attempts` (then dead-letters). Bodies MUST be
+/// idempotent (at-least-once execution). `kigumi::register_job!("send_invoice_mail", 8, send_mail);`
+#[macro_export]
+macro_rules! register_job {
+    ($name:expr, $max_attempts:expr, $func:path) => {
+        $crate::inventory::submit! {
+            $crate::prelude::JobRegistration {
+                name: $name,
+                max_attempts: $max_attempts,
+                func: |db, payload| ::std::boxed::Box::pin($func(db, payload)),
             }
         }
     };
