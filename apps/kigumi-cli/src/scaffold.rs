@@ -91,6 +91,91 @@ members = ["__APP__", "app"]
 
 const GITIGNORE: &str = "/target\n/blobs\n";
 
+// Emitted as AGENTS.md (the cross-tool convention: Codex, Cursor, ...) with CLAUDE.md importing
+// it, so every scaffolded app is born agent-ready: the coding agent learns the seams, the DSL,
+// the idioms and the failure modes without spelunking the framework source.
+const AGENTS_MD: &str = r#"# __APP__ — agent guide
+
+This workspace is a [Kigumi](https://github.com/vpescete/kigumi) application: a headless,
+schema-driven business app in Rust. One declarative model generates schema, REST API, UI
+contract and security; modules compose at compile time — if it builds, it fits.
+
+- `__APP__/` — the application module: ALL business declarations live in `__APP__/src/lib.rs`
+  (split into submodules when it grows). This is where you work.
+- `app/` — the server binary on `kigumi-runtime`: four calls, it should almost never change.
+
+## Commands
+
+```sh
+cargo build                       # the compile check IS the composition check
+cargo test -p __APP__             # module tests
+DATABASE_URL=postgres://localhost/__APP__ KIGUMI_ADMIN_PASSWORD=... cargo run -p app -- migrate
+DATABASE_URL=postgres://localhost/__APP__ KIGUMI_JWT_SECRET=... cargo run -p app -- serve
+```
+
+`migrate` is idempotent — run it after every model change and on every deploy. It creates
+tables additively, ensures sequences, applies pending data migrations, runs seeds.
+`serve` binds 127.0.0.1:8600 (override with `KIGUMI_BIND`).
+
+## The seams — one macro each, declared next to the model they serve
+
+| Macro | Use for | Body signature |
+|---|---|---|
+| `#[model(name, table)]` | a business model; fields via `#[field(...)]` | struct DSL, not real types |
+| `register_acls!(&ACLS)` | access (default-deny without it) | `static ACLS: [Acl; N]` |
+| `register_action!(model, name, fn, groups)` | state transitions + numbering | `fn(&ActionInput) -> Result<ActionOutcome, String>` |
+| `register_sequence!(module, code, prefix, suffix, pad)` | document numbering used by `assign_sequence` | declarative |
+| `register_compute!(name, fn)` | stored computed fields (`compute=`/`depends=`) | `fn(&ComputeInput) -> Value` |
+| `register_constraint!(model, fields, fn)` | validation → structured 400 with per-field errors | `fn(&ComputeInput) -> Result<(), String>` |
+| `register_service!(model, name, fn, write_gate, groups)` | cross-record work, ONE transaction | `async fn(&mut ServiceCtx, ServiceInput) -> Result<ServiceOutput, DbError>` |
+| `register_job!(name, max_attempts, fn)` | background work, retries + backoff | `async fn(&Db, Json) -> Result<(), DbError>` |
+| `register_route!(name, Get\|Post, auth, groups, fn)` | bespoke HTTP under `/api/x/<name>` (webhooks) | `async fn(&Db, RouteInput) -> Result<RouteOutput, DbError>` |
+| `register_seed!(module, fn)` | reference data at migrate, idempotent | `async fn(&Db) -> Result<(), DbError>` |
+| `register_migration!(module, to_version, fn)` | data migrations between module versions | `async fn(&Db) -> Result<(), DbError>` |
+| `register_mailed!(model)` | chatter thread on the model | declarative |
+
+## Model DSL quick reference
+
+Field kinds: `Text`, `Html`, `Integer`, `Float`, `Decimal`, `Bool`, `Date`, `Datetime`,
+`Selection`, `Many2one` (`target=`), `One2many` (`target=`, `inverse=`), `Many2many`, `Image`.
+Common attrs: `label` (required), `required`, `unique`, `default="..."`,
+`selection="k:Label,k2:Label2"`, `compute="fn_name"` + `depends="a,b"` + `store`, `tracked`,
+`groups="group"` (field-level visibility), `check="sql_expr"`, `related="path.field"`.
+
+## Idioms this framework expects
+
+- Every elevation is explicit and greppable: gate permissions first, then `let elevated = ctx.sudo();`.
+- Seeds and migration bodies are IDEMPOTENT (at-least-once): guard inserts with exists-checks.
+- Ship data changes as `register_migration!` steps and bump `MANIFEST.version` in the same change;
+  migrate applies pending steps in order and resumes after failures.
+- Jobs are idempotent; enqueue from services with `cx.enqueue_job(...)` (transactional: the job
+  exists iff the business write commits).
+- Webhook routes verify signatures with `RouteInput::verify_hmac_sha256` (constant-time) —
+  never a hand-rolled hash compare — then elevate.
+- Namespace globals with the module name: computes (`__APP___total`), jobs, sequence codes.
+
+## API quick reference (for curl checks)
+
+- Auth: `POST /auth/login {"login","password"}` → `access_token`. NOT under `/api/`.
+- CRUD: `GET|POST /api/:model`, `GET|PATCH|DELETE /api/:model/:id` (Bearer token).
+- Actions: `POST /api/:model/:id/action/:name`. Services: `POST /api/:model/:id/service/:name`.
+- Module routes: `GET|POST /api/x/:route`. Chatter: `POST /api/:model/:id/message`.
+- Live events: `GET /api/events/stream` (SSE, `Last-Event-ID` resume).
+- Machine-readable: `GET /openapi.json`, `GET /api/:model/view` (UI contract), `GET /api/models`.
+- Errors: `{"error":{"code","message","fields"}}` — `fields` maps field → messages on validation.
+
+## Common failures
+
+- `unknown sequence code 'X'` → declare `kigumi::register_sequence!("__APP__", "X", ...)`, re-run migrate.
+- `405` with `Allow` header on `/api/auth/login` → auth lives at `/auth/login`.
+- A `auth:false` route can't read/write → expected (guest is default-deny): verify the sender, then `.sudo()`.
+- `downgrades are not supported` at migrate → the DB ledger is ahead of the linked crate version.
+- New model 404s → re-run migrate (the model's table and install ledger entry are created there).
+"#;
+
+const CLAUDE_MD: &str = r#"@AGENTS.md
+"#;
+
 const MODULE_TOML: &str = r#"[package]
 name = "__APP__"
 version = "1.0.0"
@@ -349,10 +434,12 @@ pub fn scaffold(dest: &Path, opts: &ScaffoldOptions) -> Result<(), String> {
     if dest.as_os_str().is_empty() || dest.exists() {
         return Err(format!("'{}' already exists — refusing to write into it", dest.display()));
     }
-    let files: [(&str, &str); 6] = [
+    let files: [(&str, &str); 8] = [
         ("Cargo.toml", WORKSPACE_TOML),
         (".gitignore", GITIGNORE),
         ("README.md", README_MD),
+        ("AGENTS.md", AGENTS_MD),
+        ("CLAUDE.md", CLAUDE_MD),
         ("__MOD__/Cargo.toml", MODULE_TOML),
         ("__MOD__/src/lib.rs", MODULE_LIB_RS),
         ("app/Cargo.toml", APP_TOML),
@@ -431,6 +518,8 @@ mod tests {
             "Cargo.toml",
             ".gitignore",
             "README.md",
+            "AGENTS.md",
+            "CLAUDE.md",
             "demoapp/Cargo.toml",
             "demoapp/src/lib.rs",
             "app/Cargo.toml",
