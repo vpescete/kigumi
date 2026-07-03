@@ -2550,7 +2550,7 @@ mod tests {
         let m = resolve(&M, &[]).unwrap();
         assert!(matches!(
             validate_write_values(&m, &obj(json!({ "name": null })), false),
-            Err(DbError::BadInput(_))
+            Err(DbError::Invalid { .. })
         ));
     }
 
@@ -2559,7 +2559,7 @@ mod tests {
         let m = resolve(&M, &[]).unwrap();
         assert!(matches!(
             validate_write_values(&m, &obj(json!({ "note": "x" })), true),
-            Err(DbError::BadInput(_))
+            Err(DbError::Invalid { .. })
         ));
     }
 
