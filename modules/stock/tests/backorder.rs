@@ -26,19 +26,9 @@ async fn quant_at(db: &Db, su: &Ctx, quant: &ResolvedModel, product: i64, locati
 #[tokio::test]
 async fn partial_validate_backorders_the_remainder_and_never_goes_negative() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_stock_indexes().await.unwrap();
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (currency, company, product, location, picking, mv, quant) = (
         resolve_registered("res.currency").unwrap(),
@@ -88,6 +78,4 @@ async fn partial_validate_backorders_the_remainder_and_never_goes_negative() {
     assert_eq!(dbo.len(), 1);
     let dbo_moves = db.find_secured(&mv, &su, &[], &[], Some(&Domain::field("picking_id").eq(dbo[0]["id"].as_i64().unwrap()))).await.unwrap();
     assert_eq!(dbo_moves[0]["product_uom_qty"].as_str().unwrap().parse::<f64>().unwrap(), 7.0, "the un-shippable 7 backordered");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

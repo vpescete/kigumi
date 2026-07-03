@@ -6,7 +6,6 @@ use kigumi_core::{
     resolve, Acl, Ctx, Domain, FieldDef, FieldGroupRegistration, FieldKind, ModelDescriptor,
     ModelRegistration, ResolvedModel,
 };
-use kigumi_db::Db;
 use serde_json::json;
 
 static DOC: ModelDescriptor = ModelDescriptor {
@@ -30,11 +29,8 @@ fn model() -> ResolvedModel {
     resolve(&DOC, &[]).unwrap()
 }
 
-/// Both tests touch the shared `fa_doc` table; serialize them on one async lock.
-fn serial() -> &'static tokio::sync::Mutex<()> {
-    static L: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
-    L.get_or_init(|| tokio::sync::Mutex::new(()))
-}
+// Both tests touch the shared `fa_doc` table; the kit's advisory lock (held by each TestDb for the
+// test's lifetime) serializes them.
 
 // --- Models for the two audit-found holes: a restricted One2many, and a relation to fa.doc. ---
 static PAR: ModelDescriptor = ModelDescriptor {
@@ -79,22 +75,13 @@ static ACLS2: &[Acl] = &[
 
 #[tokio::test]
 async fn field_groups_gate_read_and_write() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let _serial = serial().lock().await;
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = model();
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
     let clerk = Ctx::new(1, vec!["u".to_string()]); // not a manager
     let mgr = Ctx::new(2, vec!["u".to_string(), "mgr".to_string()]);
 
-    db.drop_table(&m).await.unwrap();
-    db.create_table(&m).await.unwrap();
     let id = db.insert_secured(&m, &su, ACLS, &[], json!({ "title": "t", "secret": "s" }).as_object().unwrap()).await.unwrap();
 
     // READ: clerk sees title but NOT secret; manager and su see secret.
@@ -130,33 +117,17 @@ async fn field_groups_gate_read_and_write() {
         db.list_secured(&m, &clerk, ACLS, &[], None, &[("secret".to_string(), false)], 10, 0).await.is_err(),
         "non-member cannot order by a restricted field"
     );
-
-    db.drop_table(&m).await.unwrap();
 }
 
 #[tokio::test]
 async fn restricted_relation_and_dotted_filter_are_blocked() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let _serial = serial().lock().await;
-    let db = Db::connect(&url).await.unwrap();
-    let (par, lin, refm, doc) =
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let (par, _lin, refm, doc) =
         (resolve(&PAR, &[]).unwrap(), resolve(&LIN, &[]).unwrap(), resolve(&REFM, &[]).unwrap(), resolve(&DOC, &[]).unwrap());
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
     let clerk = Ctx::new(1, vec!["u".to_string()]);
     let mgr = Ctx::new(2, vec!["u".to_string(), "mgr".to_string()]);
-
-    for t in [&refm, &lin, &par, &doc] {
-        db.drop_table(t).await.unwrap();
-    }
-    for t in [&doc, &par, &lin, &refm] {
-        db.create_table(t).await.unwrap();
-    }
 
     let did = db.insert_secured(&doc, &su, ACLS2, &[], json!({ "title": "t", "secret": "s" }).as_object().unwrap()).await.unwrap();
     let pid = db.insert_secured(&par, &su, ACLS2, &[], json!({ "name": "p", "lines": [{ "note": "n" }] }).as_object().unwrap()).await.unwrap();
@@ -175,8 +146,4 @@ async fn restricted_relation_and_dotted_filter_are_blocked() {
     // ...but an UNrestricted dotted path is fine for the non-member.
     let ok_probe = Domain::field("doc_id.title").eq("t");
     assert!(db.find_secured(&refm, &clerk, ACLS2, &[], Some(&ok_probe)).await.is_ok(), "unrestricted relational filter allowed");
-
-    for t in [&refm, &lin, &par, &doc] {
-        db.drop_table(t).await.unwrap();
-    }
 }

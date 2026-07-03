@@ -11,7 +11,7 @@ use axum::http::{Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use kigumi_auth::Authenticator;
-use kigumi_core::{resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
+use kigumi_core::{resolve, Acl, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
 use kigumi_db::{BoxServiceFut, Db, DbError, RouteInput, RouteMethod, RouteOutput, RouteRegistration};
 use kigumi_server::router_with_data;
 use serde_json::json;
@@ -109,25 +109,20 @@ async fn send(app: Router, method: &str, uri: &str, auth: Option<&str>, sig: Opt
 
 #[tokio::test]
 async fn module_routes_dispatch_gate_and_verify() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let seed = Db::connect(&url).await.unwrap();
+    // hook.doc is REGISTERED — the kit's reset already created its table.
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let seed = &t.db;
     let doc = m(&DOC);
-    seed.drop_table(&doc).await.unwrap();
-    seed.create_table(&doc).await.unwrap();
 
-    let app_db = Db::connect(&url).await.unwrap();
     let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
-    let app = router_with_data(vec![m(&DOC)], app_db, ACLS, &[], SECRET, blobs);
+    let app = router_with_data(vec![m(&DOC)], t.db.clone(), ACLS, &[], SECRET, blobs);
 
     // Unauthenticated receiver, VALID signature over the exact raw bytes → 200 and the write landed.
     let payload = r#"{"event":"payment","amount":42}"#;
     let (st, body, _) = send(app.clone(), "POST", "/api/x/test-hook?event=payment", None, Some(&sign(payload.as_bytes())), payload).await;
     assert_eq!(st, StatusCode::OK, "valid signature accepted: {body}");
     let stored = serde_json::from_str::<serde_json::Value>(&body).unwrap()["stored"].as_i64().unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
     let row = seed.find_one_secured(&doc, &su, &[], &[], stored).await.unwrap().unwrap();
     assert_eq!(row["name"], "payment", "the verified delivery was recorded elevated");
 
@@ -155,6 +150,4 @@ async fn module_routes_dispatch_gate_and_verify() {
     assert_eq!(allow.as_deref(), Some("GET"));
     let (st, _, _) = send(app.clone(), "GET", "/api/x/nope", None, None, "").await;
     assert_eq!(st, StatusCode::NOT_FOUND);
-
-    seed.drop_table(&doc).await.unwrap();
 }

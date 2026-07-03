@@ -4,7 +4,6 @@
 //! even when per-part rounding would otherwise diverge by a cent. Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -23,18 +22,9 @@ fn money(v: &serde_json::Value, field: &str) -> f64 {
 #[tokio::test]
 async fn foreign_invoice_posts_company_currency_lines_that_balance() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
     db.ensure_sequence("SO", "SO/", "", 5).await.unwrap();
 
     let (currency, rate, company, partner, product, order, mv, account, journal) = (
@@ -90,6 +80,4 @@ async fn foreign_invoice_posts_company_currency_lines_that_balance() {
     assert!(lines.iter().any(|l| l["account_id"].as_i64() == Some(inc) && money(l, "credit") == 3.33 && money(l, "amount_currency") == -10.0), "income 3.33 EUR / -10 USD");
     assert!(lines.iter().any(|l| l["account_id"].as_i64() == Some(taxacc) && money(l, "credit") == 3.33 && money(l, "amount_currency") == -10.0), "tax 3.33 EUR / -10 USD");
     assert!(lines.iter().any(|l| money(l, "debit") == 6.66 && money(l, "amount_currency") == 20.0), "receivable 6.66 EUR / +20 USD (sum of parts, not 6.67)");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

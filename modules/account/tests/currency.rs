@@ -2,7 +2,6 @@
 //! the base currency (no rate rows) is 1.0; an unknown historical rate errors. Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -12,18 +11,10 @@ fn link() {
 #[tokio::test]
 async fn convert_amount_uses_the_dated_rate() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let pool = sqlx::PgPool::connect(&url).await.unwrap(); // ServiceCtx::pool() analogue for the relocated FX helper
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let pool = db.pool().clone(); // ServiceCtx::pool() analogue for the relocated FX helper
+    let su = kigumi_test::su();
 
     let (currency, rate) = (resolve_registered("res.currency").unwrap(), resolve_registered("res.currency.rate").unwrap());
     let eur = db.insert_secured(&currency, &su, &[], &[], json!({ "name": "Euro", "code": "EUR", "symbol": "E", "decimal_places": 2, "rounding": 0.01, "position": "after", "active": true }).as_object().unwrap()).await.unwrap();
@@ -44,6 +35,4 @@ async fn convert_amount_uses_the_dated_rate() {
     assert_eq!(f(kigumi_mod_account::services::convert_amount(&pool, "50".parse().unwrap(), eur, eur, "2099-01-01").await.unwrap()), 50.0);
     // GBP has rates but none on or before 2020 → error (never silently 1.0).
     assert!(kigumi_mod_account::services::convert_amount(&pool, "100".parse().unwrap(), gbp, eur, "2020-06-01").await.is_err(), "unknown historical rate errors");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

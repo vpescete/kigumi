@@ -2,10 +2,10 @@
 //! resolves a sequence assignment (gapless numbering). Live Postgres.
 
 use kigumi_core::{
-    resolve, ActionInput, ActionOutcome, Ctx, FieldDef, FieldKind, ModelDescriptor,
+    resolve, ActionInput, ActionOutcome, FieldDef, FieldKind, ModelDescriptor,
     ModelRegistration, ResolvedModel, Value,
 };
-use kigumi_db::{Db, DbError};
+use kigumi_db::DbError;
 
 static ORDER: ModelDescriptor = ModelDescriptor {
     name: "act.order",
@@ -37,20 +37,11 @@ fn model() -> ResolvedModel {
 
 #[tokio::test]
 async fn confirm_action_transitions_and_numbers() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = model();
-    let su = Ctx::new(0, vec![]).sudo();
-    db.ensure_sequence_schema().await.unwrap();
+    let su = kigumi_test::su();
     db.ensure_sequence("ACT", "ACT/", "", 4).await.unwrap();
-    db.drop_table(&m).await.unwrap();
-    db.create_table(&m).await.unwrap();
 
     // Create → state defaults to draft.
     let id = db.insert_secured(&m, &su, &[], &[], serde_json::json!({ "name": "draft-x" }).as_object().unwrap()).await.unwrap();
@@ -67,6 +58,4 @@ async fn confirm_action_transitions_and_numbers() {
 
     // An unknown action is a bad request.
     assert!(db.run_action(&m, &su, &[], &[], id, "nope").await.is_err(), "unknown action rejected");
-
-    db.drop_table(&m).await.unwrap();
 }

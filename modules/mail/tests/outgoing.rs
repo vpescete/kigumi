@@ -3,7 +3,7 @@
 //! DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::{Db, OutgoingMail};
+use kigumi_db::OutgoingMail;
 use serde_json::json;
 use std::sync::Mutex;
 
@@ -14,17 +14,9 @@ fn link() {
 #[tokio::test]
 async fn flush_sends_queued_mail_and_records_outcomes() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let mail = resolve_registered("mail.mail").unwrap();
     let m1 = db.insert_secured(&mail, &su, &[], &[], json!({
@@ -61,6 +53,4 @@ async fn flush_sends_queued_mail_and_records_outcomes() {
     let failed = db.find_one_secured(&mail, &su, &[], &[], m2).await.unwrap().unwrap();
     assert_eq!(failed["state"], "exception");
     assert_eq!(failed["error_message"], "smtp 550 rejected", "the error is recorded");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

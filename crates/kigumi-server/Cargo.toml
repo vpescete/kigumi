@@ -31,3 +31,4 @@ tempfile = "3"
 sha2 = "0.10"
 hmac = "0.12"
 kigumi = { workspace = true }
+kigumi-test = { path = "../kigumi-test" }

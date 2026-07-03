@@ -5,7 +5,6 @@
 //! independently, plus that create is denied to a group without the create ACL. Live Postgres.
 
 use kigumi_core::{resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
-use kigumi_db::Db;
 use serde_json::json;
 
 static TAG: ModelDescriptor = ModelDescriptor {
@@ -54,26 +53,10 @@ fn ids(v: &serde_json::Value, field: &str) -> Vec<i64> {
 
 #[tokio::test]
 async fn two_many2many_on_one_model_are_independent_and_acl_gated() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let (tag, cat, item) = (m(&TAG), m(&CAT), m(&ITEM));
-    let su = Ctx::new(0, vec![]).sudo();
-
-    sqlx::query("DROP TABLE IF EXISTS va_item_tag_rel").execute(db.pool()).await.unwrap();
-    sqlx::query("DROP TABLE IF EXISTS va_item_cat_rel").execute(db.pool()).await.unwrap();
-    db.drop_table(&item).await.unwrap();
-    db.drop_table(&tag).await.unwrap();
-    db.drop_table(&cat).await.unwrap();
-    db.create_table(&tag).await.unwrap();
-    db.create_table(&cat).await.unwrap();
-    db.create_table(&item).await.unwrap();
-    db.create_m2m_relations(&item).await.unwrap(); // both junctions, both tables exist
+    let su = kigumi_test::su();
 
     let t1 = db.insert_secured(&tag, &su, ACLS, &[], json!({ "name": "t1" }).as_object().unwrap()).await.unwrap();
     let t2 = db.insert_secured(&tag, &su, ACLS, &[], json!({ "name": "t2" }).as_object().unwrap()).await.unwrap();
@@ -98,10 +81,4 @@ async fn two_many2many_on_one_model_are_independent_and_acl_gated() {
         db.insert_secured(&item, &reader, ACLS, &[], json!({ "name": "nope" }).as_object().unwrap()).await.is_err(),
         "create denied without the create ACL"
     );
-
-    sqlx::query("DROP TABLE IF EXISTS va_item_tag_rel").execute(db.pool()).await.unwrap();
-    sqlx::query("DROP TABLE IF EXISTS va_item_cat_rel").execute(db.pool()).await.unwrap();
-    db.drop_table(&item).await.unwrap();
-    db.drop_table(&tag).await.unwrap();
-    db.drop_table(&cat).await.unwrap();
 }

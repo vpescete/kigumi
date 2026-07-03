@@ -4,7 +4,6 @@
 //! the `confirm` action and check the state transition + SO numbering.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 /// Force the module crates to link so their `inventory` registrations are present (sales depends on
@@ -21,28 +20,9 @@ fn money(v: &serde_json::Value, field: &str) -> f64 {
 #[tokio::test]
 async fn quote_to_order_rolls_up_and_confirms() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    // Migrate the full catalog: drop children-first, create parents-first (FK-topological plan).
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() {
-        db.drop_table(&t.model).await.unwrap();
-    }
-    for t in &plan {
-        db.create_table(&t.model).await.unwrap();
-    }
-    for t in &plan {
-        db.create_m2m_relations(&t.model).await.unwrap(); // Many2many junctions (e.g. product tags)
-    }
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
     db.ensure_sequence("SO", "SO/", "", 5).await.unwrap();
 
     let (currency, company, partner, product, order) = (
@@ -96,8 +76,4 @@ async fn quote_to_order_rolls_up_and_confirms() {
     db.run_action(&order, &su, &[], &[], oid, "done").await.unwrap();
     assert_eq!(db.count_secured(&line, &clerk, acls, rules, None).await.unwrap(), 0, "done order's lines hidden from the clerk");
     assert_eq!(db.count_secured(&line, &su, &[], &[], None).await.unwrap(), 2, "su still sees them");
-
-    for t in plan.iter().rev() {
-        db.drop_table(&t.model).await.unwrap();
-    }
 }

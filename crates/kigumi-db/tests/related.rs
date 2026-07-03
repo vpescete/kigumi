@@ -3,10 +3,9 @@
 //! always fresh (reflects a change to the target without rewriting the record). Live Postgres.
 
 use kigumi_core::{
-    resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, RelatedRegistration,
+    resolve, Acl, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, RelatedRegistration,
     ResolvedModel,
 };
-use kigumi_db::Db;
 use serde_json::json;
 
 static PARENT: ModelDescriptor = ModelDescriptor {
@@ -46,21 +45,10 @@ fn m(d: &'static ModelDescriptor) -> ResolvedModel {
 
 #[tokio::test]
 async fn related_fields_mirror_the_path_and_stay_fresh() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let (parent, child) = (m(&PARENT), m(&CHILD));
-    let su = Ctx::new(0, vec![]).sudo();
-
-    db.drop_table(&child).await.unwrap();
-    db.drop_table(&parent).await.unwrap();
-    db.create_table(&parent).await.unwrap();
-    db.create_table(&child).await.unwrap();
+    let su = kigumi_test::su();
 
     let pid = db.insert_secured(&parent, &su, ACLS, &[], json!({ "name": "P", "code": "ABC", "due": "2026-03-01" }).as_object().unwrap()).await.unwrap();
     let cid = db.insert_secured(&child, &su, ACLS, &[], json!({ "parent_id": pid }).as_object().unwrap()).await.unwrap();
@@ -80,7 +68,4 @@ async fn related_fields_mirror_the_path_and_stay_fresh() {
         db.update_secured(&child, &su, ACLS, &[], cid, json!({ "parent_code": "hack" }).as_object().unwrap()).await.is_err(),
         "related fields cannot be written"
     );
-
-    db.drop_table(&child).await.unwrap();
-    db.drop_table(&parent).await.unwrap();
 }

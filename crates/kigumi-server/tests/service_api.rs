@@ -11,8 +11,8 @@ use axum::http::{Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use kigumi_auth::Authenticator;
-use kigumi_core::{resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
-use kigumi_db::{BoxServiceFut, Db, DbError, ServiceCtx, ServiceInput, ServiceOutput, ServiceRegistration};
+use kigumi_core::{resolve, Acl, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
+use kigumi_db::{BoxServiceFut, DbError, ServiceCtx, ServiceInput, ServiceOutput, ServiceRegistration};
 use kigumi_server::router_with_data;
 use serde_json::json;
 use tower::ServiceExt;
@@ -63,21 +63,16 @@ async fn post(app: Router, uri: &str, groups: Option<&str>) -> (StatusCode, Stri
 
 #[tokio::test]
 async fn generic_service_route_authorization() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let seed = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
+    // svc.doc is REGISTERED — the kit's reset already created its table.
+    let Some(tdb) = kigumi_test::TestDb::new().await else { return };
+    let seed = &tdb.db;
+    let su = kigumi_test::su();
     let doc = m(&DOC);
 
-    seed.drop_table(&doc).await.unwrap();
-    seed.create_table(&doc).await.unwrap();
     let t = seed.insert_secured(&doc, &su, &[], &[], json!({ "name": "Doc" }).as_object().unwrap()).await.unwrap();
 
-    let app_db = Db::connect(&url).await.unwrap();
     let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
-    let app = router_with_data(vec![m(&DOC)], app_db, ACLS, &[], SECRET, blobs);
+    let app = router_with_data(vec![m(&DOC)], tdb.db.clone(), ACLS, &[], SECRET, blobs);
 
     let touch = format!("/api/svc.doc/{t}/service/touch");
 
@@ -102,6 +97,4 @@ async fn generic_service_route_authorization() {
     // Unknown record id → 400 (not found / not permitted — deliberately not a 404 existence oracle).
     let (st, _) = post(app.clone(), "/api/svc.doc/999999/service/touch", Some("mgr")).await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
-
-    seed.drop_table(&doc).await.unwrap();
 }

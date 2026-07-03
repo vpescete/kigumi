@@ -10,7 +10,6 @@ use kigumi_core::{
     resolve, Acl, Domain, FieldDef, FieldKind, ModelDescriptor, Operation, RecordRule, RuleDomain,
     ResolvedModel,
 };
-use kigumi_db::Db;
 use kigumi_server::router_with_data;
 use tower::ServiceExt;
 
@@ -64,15 +63,10 @@ async fn get(app: Router, uri: &str, groups: Option<&str>) -> (StatusCode, Strin
 
 #[tokio::test]
 async fn secured_data_endpoint_enforces_rules() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let seed = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let seed = &t.db;
     let m = model();
+    // The model is ad-hoc (not registered) — the kit does not know its table.
     seed.drop_table(&m).await.unwrap();
     seed.create_table(&m).await.unwrap();
     for (n, a) in [("alpha", true), ("beta", true), ("gamma", false)] {
@@ -84,9 +78,8 @@ async fn secured_data_endpoint_enforces_rules() {
             .unwrap();
     }
 
-    let app_db = Db::connect(&url).await.unwrap();
     let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
-    let app = router_with_data(vec![model()], app_db, ACLS, RULES, SECRET, blobs);
+    let app = router_with_data(vec![model()], t.db.clone(), ACLS, RULES, SECRET, blobs);
 
     // Group "u": the record rule restricts to active rows → alpha, beta only.
     let (status, body) = get(app.clone(), "/api/widget", Some("u")).await;
@@ -153,21 +146,15 @@ fn id_of(body: &str) -> i64 {
 
 #[tokio::test]
 async fn write_path_enforces_acl_and_rules() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let seed = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let seed = &t.db;
     let m = resolve(&WRITE_MODEL, &[]).unwrap();
+    // The model is ad-hoc (not registered) — the kit does not know its table.
     seed.drop_table(&m).await.unwrap();
     seed.create_table(&m).await.unwrap();
 
-    let app_db = Db::connect(&url).await.unwrap();
     let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
-    let app = router_with_data(vec![resolve(&WRITE_MODEL, &[]).unwrap()], app_db, WRITE_ACLS, WRITE_RULES, SECRET, blobs);
+    let app = router_with_data(vec![resolve(&WRITE_MODEL, &[]).unwrap()], t.db.clone(), WRITE_ACLS, WRITE_RULES, SECRET, blobs);
 
     // Create (group "u" has Create) → 201.
     let (s, body) = req(app.clone(), "POST", "/api/widget", Some("u"), Some(r#"{"name":"keep","active":true}"#)).await;

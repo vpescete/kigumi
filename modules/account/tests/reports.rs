@@ -2,7 +2,6 @@
 //! is excluded. Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -12,18 +11,9 @@ fn link() {
 #[tokio::test]
 async fn trial_balance_aggregates_posted_entries() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (account, journal, mv) = (
         resolve_registered("account.account").unwrap(),
@@ -67,6 +57,4 @@ async fn trial_balance_aggregates_posted_entries() {
     let total_debit: f64 = rows.iter().map(|r| money(r, "debit")).sum();
     let total_credit: f64 = rows.iter().map(|r| money(r, "credit")).sum();
     assert_eq!(total_debit, total_credit, "the trial balance is balanced");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

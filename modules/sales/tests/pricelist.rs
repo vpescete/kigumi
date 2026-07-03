@@ -5,7 +5,6 @@
 //! models, through the pool the way the apply_pricelist service calls it. Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use rust_decimal::Decimal;
 use serde_json::json;
 use std::str::FromStr;
@@ -21,18 +20,11 @@ fn d(s: &str) -> Decimal {
 #[tokio::test]
 async fn resolve_price_picks_the_most_specific_rule() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let pool = sqlx::PgPool::connect(&url).await.unwrap(); // ServiceCtx::pool() analogue for the helper
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    // ServiceCtx::pool() analogue for the helper: the kit's own pool.
+    let pool = db.pool().clone();
+    let su = kigumi_test::su();
 
     let (currency, category, product, pricelist, item) = (
         resolve_registered("res.currency").unwrap(),
@@ -89,6 +81,4 @@ async fn resolve_price_picks_the_most_specific_rule() {
     // No pricelist rule at all → the variant's own sales price (lst_price 1050).
     let empty = ins(pricelist.clone(), json!({ "name": "Empty", "currency_id": cur })).await;
     assert_eq!(price(empty, d("1"), today.clone()).await, d("1050"));
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

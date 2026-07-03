@@ -3,20 +3,11 @@
 //! the static set stays a floor. check_access is pure, so no table is needed. Live Postgres.
 
 use kigumi_core::{check_access, Acl, Ctx, Operation};
-use kigumi_db::Db;
 
 #[tokio::test]
 async fn db_acl_overrides_widen_access_additively() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    db.ensure_access_schema().await.unwrap();
-    db.remove_db_acl("acltest.doc", "clerk").await.unwrap(); // clean slate for re-runs
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
 
     let clerk = Ctx::new(1, vec!["clerk".to_string()]);
 

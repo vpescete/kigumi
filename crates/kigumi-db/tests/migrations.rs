@@ -1,7 +1,7 @@
 //! Versioned migration engine test against a live Postgres. Requires `DATABASE_URL`.
 
 use kigumi_core::{resolve, FieldDef, FieldKind, ModelDescriptor, ResolvedModel};
-use kigumi_db::{Db, Migration, MigrationOutcome};
+use kigumi_db::{Migration, MigrationOutcome};
 
 static MODEL: ModelDescriptor = ModelDescriptor {
     name: "thing",
@@ -25,27 +25,11 @@ static MIGRATIONS: &[Migration] = &[Migration {
 
 #[tokio::test]
 async fn versioned_migrations_apply_idempotently() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = model();
 
-    // Clean slate (install_or_upgrade creates the bookkeeping tables; pre-create so DELETE works).
-    sqlx::query("CREATE TABLE IF NOT EXISTS kigumi_module (name text PRIMARY KEY, version text NOT NULL)")
-        .execute(db.pool())
-        .await
-        .unwrap();
-    sqlx::query("CREATE TABLE IF NOT EXISTS kigumi_migration (module text NOT NULL, version text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (module, version))")
-        .execute(db.pool())
-        .await
-        .unwrap();
-    sqlx::query("DELETE FROM kigumi_module WHERE name = 'thing'").execute(db.pool()).await.unwrap();
-    sqlx::query("DELETE FROM kigumi_migration WHERE module = 'thing'").execute(db.pool()).await.unwrap();
+    // The kit's reset left a clean slate (install_or_upgrade creates its own bookkeeping tables).
     db.drop_table(&m).await.unwrap();
 
     // Fresh install at 1.0.0: table created from the model, version recorded, no migrations run.
@@ -76,6 +60,4 @@ async fn versioned_migrations_apply_idempotently() {
 
     // Cleanup.
     db.drop_table(&m).await.unwrap();
-    sqlx::query("DELETE FROM kigumi_module WHERE name = 'thing'").execute(db.pool()).await.unwrap();
-    sqlx::query("DELETE FROM kigumi_migration WHERE module = 'thing'").execute(db.pool()).await.unwrap();
 }

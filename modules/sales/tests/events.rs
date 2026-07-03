@@ -3,7 +3,6 @@
 //! event. The event_outbox is the integration foundation (webhooks fan out from it). Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -18,20 +17,9 @@ fn link() {
 #[tokio::test]
 async fn crud_seams_emit_domain_events_atomically() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_event_schema().await.unwrap();
-    // Clean the (non-model) outbox so this binary's assertions see only its own events.
-    db.clear_event_outbox().await.unwrap();
+    let Some(tdb) = kigumi_test::TestDb::new().await else { return };
+    let db = &tdb.db;
+    let su = kigumi_test::su();
 
     let (currency, partner, order, mv, account, journal) = (
         resolve_registered("res.currency").unwrap(),
@@ -83,6 +71,4 @@ async fn crud_seams_emit_domain_events_atomically() {
     db.delete_secured(&partner, &su, &[], &[], tmp).await.unwrap();
     let evs = db.events_for("res.partner", tmp).await.unwrap();
     assert!(types(&evs).contains(&"model.deleted".to_string()), "delete emits model.deleted");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

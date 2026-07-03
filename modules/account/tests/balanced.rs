@@ -3,7 +3,6 @@
 //! by the check_balanced @api.constrains and leaves nothing behind. Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -17,17 +16,9 @@ fn money(v: &serde_json::Value, field: &str) -> f64 {
 #[tokio::test]
 async fn moves_must_balance_debit_equals_credit() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (currency, company, account, journal, mv) = (
         resolve_registered("res.currency").unwrap(),
@@ -85,6 +76,4 @@ async fn moves_must_balance_debit_equals_credit() {
     }).as_object().unwrap()).await;
     assert!(cross.is_err(), "a line of another company is rejected by check_line_companies");
     assert_eq!(db.count_secured(&mv, &su, &[], &[], None).await.unwrap(), 1, "the cross-company move rolled back");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

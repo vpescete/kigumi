@@ -3,7 +3,6 @@
 //! DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -13,20 +12,9 @@ fn link() {
 #[tokio::test]
 async fn events_fan_out_to_matching_subscriptions_once() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_event_schema().await.unwrap();
-    db.clear_event_outbox().await.unwrap();
-    db.clear_webhook_subscriptions().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let partner = resolve_registered("res.partner").unwrap();
 
@@ -58,6 +46,4 @@ async fn events_fan_out_to_matching_subscriptions_once() {
     let subs = db.list_webhook_subscriptions().await.unwrap();
     assert_eq!(subs.len(), 2);
     assert!(subs.iter().all(|s| s.get("secret").is_none()), "the secret is never listed");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

@@ -1,8 +1,8 @@
 //! Fase A new field kinds: Float (double precision), Date, Datetime — create/read/update, domain
 //! filtering (incl. date casts), explicit-null writes, and a malformed date → clean BadInput. Live PG.
 
-use kigumi_core::{resolve, Acl, Ctx, Domain, FieldDef, FieldKind, ModelDescriptor, ResolvedModel};
-use kigumi_db::{Db, DbError};
+use kigumi_core::{resolve, Acl, Domain, FieldDef, FieldKind, ModelDescriptor, ResolvedModel};
+use kigumi_db::DbError;
 use serde_json::json;
 
 static DOC: ModelDescriptor = ModelDescriptor {
@@ -23,16 +23,10 @@ fn model() -> ResolvedModel {
 
 #[tokio::test]
 async fn float_date_datetime_roundtrip_and_filter() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = model();
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
     db.drop_table(&m).await.unwrap();
     db.create_table(&m).await.unwrap();
 

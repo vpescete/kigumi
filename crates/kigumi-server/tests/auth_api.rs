@@ -9,7 +9,6 @@ use kigumi_auth::hash_password;
 use kigumi_core::{
     resolve, Acl, FieldDef, FieldKind, ModelDescriptor, RecordRule, ResolvedModel,
 };
-use kigumi_db::Db;
 use kigumi_server::router_with_data;
 use tower::ServiceExt;
 
@@ -63,25 +62,17 @@ async fn get_bearer(app: Router, uri: &str, bearer: &str) -> StatusCode {
 
 #[tokio::test]
 async fn auth_lifecycle() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let setup = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let setup = &t.db;
     let m = model();
+    // The model is ad-hoc (not registered) — the kit does not know its table.
     setup.drop_table(&m).await.unwrap();
     setup.create_table(&m).await.unwrap();
     sqlx::query("INSERT INTO auth_thing_test (name) VALUES ('row')").execute(setup.pool()).await.unwrap();
-    setup.ensure_auth_schema().await.unwrap();
-    sqlx::query("DELETE FROM kigumi_user WHERE login = 'tester'").execute(setup.pool()).await.unwrap();
     setup.upsert_user("tester", &hash_password("pw").unwrap(), &["u"]).await.unwrap();
 
-    let app_db = Db::connect(&url).await.unwrap();
     let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
-    let app = router_with_data(vec![model()], app_db, ACLS, RULES, SECRET, blobs);
+    let app = router_with_data(vec![model()], t.db.clone(), ACLS, RULES, SECRET, blobs);
 
     // Wrong password and unknown user both → 401 (no user enumeration).
     assert_eq!(post(app.clone(), "/auth/login", r#"{"login":"tester","password":"nope"}"#).await.0, StatusCode::UNAUTHORIZED);
@@ -112,5 +103,4 @@ async fn auth_lifecycle() {
     assert_eq!(post(app.clone(), "/auth/refresh", &format!(r#"{{"refresh_token":"{refresh2}"}}"#)).await.0, StatusCode::UNAUTHORIZED);
 
     setup.drop_table(&m).await.unwrap();
-    sqlx::query("DELETE FROM kigumi_user WHERE login = 'tester'").execute(setup.pool()).await.unwrap();
 }

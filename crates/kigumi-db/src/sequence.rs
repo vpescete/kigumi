@@ -101,23 +101,10 @@ impl Db {
 
 #[cfg(test)]
 mod tests {
-    use crate::Db;
-
     #[tokio::test]
     async fn sequence_formats_and_advances() {
-        let url = match std::env::var("DATABASE_URL") {
-            Ok(u) => u,
-            Err(_) => {
-                eprintln!("skipping: DATABASE_URL not set");
-                return;
-            }
-        };
-        let db = Db::connect(&url).await.unwrap();
-        db.ensure_sequence_schema().await.unwrap();
-        sqlx::query("DELETE FROM kigumi_sequence WHERE code = 'TST'")
-            .execute(db.pool())
-            .await
-            .unwrap();
+        let Some(t) = kigumi_test::TestDb::new().await else { return };
+        let db = &t.db;
 
         db.ensure_sequence("TST", "SO/", "", 4).await.unwrap();
         assert_eq!(db.next_value("TST").await.unwrap(), "SO/0001");
@@ -129,10 +116,5 @@ mod tests {
         assert_eq!(db.next_value("TST").await.unwrap(), "SO/0004");
 
         assert!(db.next_value("NOPE").await.is_err(), "unknown code errors");
-
-        sqlx::query("DELETE FROM kigumi_sequence WHERE code = 'TST'")
-            .execute(db.pool())
-            .await
-            .unwrap();
     }
 }

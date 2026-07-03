@@ -2,7 +2,7 @@
 //! AUTO-UPDATES when a line is added, edited, or removed (the compute trigger). Live Postgres.
 
 use kigumi_core::{
-    resolve, Acl, ComputeInput, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration,
+    resolve, Acl, ComputeInput, FieldDef, FieldKind, ModelDescriptor, ModelRegistration,
     RecordRule, ResolvedModel, Value,
 };
 use kigumi_db::Db;
@@ -59,49 +59,35 @@ async fn total(db: &Db, order_id: i64) -> f64 {
 
 #[tokio::test]
 async fn aggregate_total_tracks_line_changes() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let order = order_model();
     let line = line_model();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    db.drop_table(&line).await.unwrap();
-    db.drop_table(&order).await.unwrap();
-    db.create_table(&order).await.unwrap();
-    db.create_table(&line).await.unwrap();
+    let su = kigumi_test::su();
 
     // New order: no lines yet → total 0.
     let oid = db.insert_secured(&order, &su, ACLS, RULES, serde_json::json!({ "name": "O1" }).as_object().unwrap()).await.unwrap();
-    assert_eq!(total(&db, oid).await, 0.0);
+    assert_eq!(total(db, oid).await, 0.0);
 
     // Add a line (price 10) → order total recomputes to 10.
     let l1 = db.insert_secured(&line, &su, ACLS, RULES, serde_json::json!({ "order_id": oid, "price": 10.0 }).as_object().unwrap()).await.unwrap();
-    assert_eq!(total(&db, oid).await, 10.0);
+    assert_eq!(total(db, oid).await, 10.0);
 
     // Add another line (price 5) → total 15.
     let l2 = db.insert_secured(&line, &su, ACLS, RULES, serde_json::json!({ "order_id": oid, "price": 5.0 }).as_object().unwrap()).await.unwrap();
-    assert_eq!(total(&db, oid).await, 15.0);
+    assert_eq!(total(db, oid).await, 15.0);
 
     // Edit the first line to 20 → total 25.
     db.update_secured(&line, &su, ACLS, RULES, l1, serde_json::json!({ "price": 20.0 }).as_object().unwrap()).await.unwrap();
-    assert_eq!(total(&db, oid).await, 25.0);
+    assert_eq!(total(db, oid).await, 25.0);
 
     // Remove the second line → total back to 20.
     db.delete_secured(&line, &su, ACLS, RULES, l2).await.unwrap();
-    assert_eq!(total(&db, oid).await, 20.0);
+    assert_eq!(total(db, oid).await, 20.0);
 
     // Re-parent the remaining line to a new order B → A drops to 0, B becomes 20 (both recomputed).
     let oid_b = db.insert_secured(&order, &su, ACLS, RULES, serde_json::json!({ "name": "O2" }).as_object().unwrap()).await.unwrap();
     db.update_secured(&line, &su, ACLS, RULES, l1, serde_json::json!({ "order_id": oid_b }).as_object().unwrap()).await.unwrap();
-    assert_eq!(total(&db, oid).await, 0.0, "old parent recomputed after re-parenting");
-    assert_eq!(total(&db, oid_b).await, 20.0, "new parent recomputed after re-parenting");
-
-    db.drop_table(&line).await.unwrap();
-    db.drop_table(&order).await.unwrap();
+    assert_eq!(total(db, oid).await, 0.0, "old parent recomputed after re-parenting");
+    assert_eq!(total(db, oid_b).await, 20.0, "new parent recomputed after re-parenting");
 }

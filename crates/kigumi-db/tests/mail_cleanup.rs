@@ -4,10 +4,9 @@
 //! A thread table that does not exist (mail module not migrated) is tolerated, not an error. Live PG.
 
 use kigumi_core::{
-    resolve, Acl, Ctx, FieldDef, FieldKind, MailedRegistration, ModelDescriptor, ModelRegistration,
+    resolve, Acl, FieldDef, FieldKind, MailedRegistration, ModelDescriptor, ModelRegistration,
     ResolvedModel,
 };
-use kigumi_db::Db;
 use serde_json::json;
 
 static DOC: ModelDescriptor = ModelDescriptor {
@@ -32,24 +31,16 @@ async fn count(pool: &sqlx::PgPool, sql_prefix: &str, id: i64) -> i64 {
 
 #[tokio::test]
 async fn deleting_mailed_record_cleans_its_thread_and_tolerates_missing_tables() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let doc: ResolvedModel = resolve(&DOC, &[]).unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
 
-    // Fresh schema: host table + minimal mail_message/mail_activity/mail_tracking (cleanup-touched
-    // columns only). mail_follower is deliberately NOT created → exercises the 42P01 tolerance too.
-    db.drop_table(&doc).await.unwrap();
-    for t in ["mail_tracking", "mail_message", "mail_activity", "mail_follower"] {
-        sqlx::query(&format!("DROP TABLE IF EXISTS {t}")).execute(db.pool()).await.unwrap();
+    // Minimal mail_message/mail_activity/mail_tracking (cleanup-touched columns only).
+    // mail_follower is deliberately NOT created → exercises the 42P01 tolerance too.
+    for probe in ["mail_tracking", "mail_message", "mail_activity", "mail_follower"] {
+        sqlx::query(&format!("DROP TABLE IF EXISTS {probe}")).execute(db.pool()).await.unwrap();
     }
-    db.create_table(&doc).await.unwrap();
     sqlx::query("CREATE TABLE mail_message (id bigserial PRIMARY KEY, res_model text NOT NULL, res_id bigint NOT NULL, body text)").execute(db.pool()).await.unwrap();
     sqlx::query("CREATE TABLE mail_activity (id bigserial PRIMARY KEY, res_model text NOT NULL, res_id bigint NOT NULL, summary text)").execute(db.pool()).await.unwrap();
     sqlx::query("CREATE TABLE mail_tracking (id bigserial PRIMARY KEY, message_id bigint NOT NULL, field text NOT NULL, old_value text, new_value text)").execute(db.pool()).await.unwrap();
@@ -93,6 +84,4 @@ async fn deleting_mailed_record_cleans_its_thread_and_tolerates_missing_tables()
 
     // Db::now() returns the DB clock (used to stamp messages).
     assert!(!db.now().await.unwrap().is_empty());
-
-    db.drop_table(&doc).await.unwrap();
 }

@@ -4,7 +4,6 @@
 //! amounts — plus the boundary check that a percent outside [0, 100] is rejected. Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 /// Link the module crates so their inventory registrations are present.
@@ -19,18 +18,9 @@ fn money(v: &serde_json::Value, field: &str) -> f64 {
 #[tokio::test]
 async fn discount_wizard_applies_to_every_line_and_rerolls_totals() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_transient_defaults().await.unwrap(); // give sale_order_discount.create_date a DEFAULT now()
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (currency, partner, product, order, line, wizard) = (
         resolve_registered("res.currency").unwrap(),
@@ -79,6 +69,4 @@ async fn discount_wizard_applies_to_every_line_and_rerolls_totals() {
     assert!(db.run_service(&wizard, &su, &[], &[], bad, "apply_discount", serde_json::Map::new()).await.is_err(), "out-of-range discount rejected");
     let still = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&still, "amount_untaxed"), 225.0, "rejected apply left the order unchanged");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

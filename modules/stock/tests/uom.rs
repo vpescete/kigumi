@@ -31,19 +31,9 @@ async fn quant_field(db: &Db, su: &Ctx, quant: &ResolvedModel, product: i64, loc
 #[tokio::test]
 async fn moves_convert_their_uom_to_the_reference_unit() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_stock_indexes().await.unwrap();
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (currency, company, product, location, picking, mv, quant, uom) = (
         resolve_registered("res.currency").unwrap(),
@@ -96,6 +86,4 @@ async fn moves_convert_their_uom_to_the_reference_unit() {
     let m3r = db.find_one_secured(&mv, &su, &[], &[], m3).await.unwrap().unwrap()["reserved_qty"].as_str().unwrap().parse::<f64>().unwrap();
     assert_eq!(m3r, 2.0, "0.5 dozen = 6 wanted, only 2 free -> reserved 2 reference units");
     assert_eq!(quant_field(&db, &su, &quant, prod, stock, "reserved_quantity").await, 2.0);
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

@@ -3,10 +3,10 @@
 //! A record's followers are cleaned up when the record is deleted. Live Postgres.
 
 use kigumi_core::{
-    resolve, Acl, Ctx, FieldDef, FieldKind, MailedRegistration, ModelDescriptor, ModelRegistration,
+    resolve, Acl, FieldDef, FieldKind, MailedRegistration, ModelDescriptor, ModelRegistration,
     ResolvedModel,
 };
-use kigumi_db::{Db, DbError};
+use kigumi_db::DbError;
 use serde_json::json;
 
 static DOC: ModelDescriptor = ModelDescriptor {
@@ -26,22 +26,14 @@ static DOCACL: &[Acl] = &[Acl { model: "fol.doc", group: "u", read: true, write:
 
 #[tokio::test]
 async fn following_is_idempotent_and_cleaned_up_on_delete() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let doc: ResolvedModel = resolve(&DOC, &[]).unwrap();
     // mail.follower as the server resolves it (the real model shape).
     let foll: ResolvedModel = resolve_registered_follower();
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
 
-    db.drop_table(&doc).await.unwrap();
     sqlx::query("DROP TABLE IF EXISTS mail_follower").execute(db.pool()).await.unwrap();
-    db.create_table(&doc).await.unwrap();
     db.create_table(&foll).await.unwrap();
     db.ensure_mail_indexes().await.unwrap(); // creates the composite UNIQUE index
 
@@ -65,7 +57,6 @@ async fn following_is_idempotent_and_cleaned_up_on_delete() {
         .bind(host).fetch_one(db.pool()).await.unwrap();
     assert_eq!(n, 0, "the deleted record's followers were cleaned up");
 
-    db.drop_table(&doc).await.unwrap();
     sqlx::query("DROP TABLE IF EXISTS mail_follower").execute(db.pool()).await.unwrap();
 }
 

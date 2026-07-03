@@ -9,8 +9,7 @@ use axum::http::{Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use kigumi_auth::Authenticator;
-use kigumi_core::{resolve, Acl, ComputeInput, ConstraintRegistration, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
-use kigumi_db::Db;
+use kigumi_core::{resolve, Acl, ComputeInput, ConstraintRegistration, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
 use kigumi_server::router_with_data;
 use tower::ServiceExt;
 
@@ -64,18 +63,10 @@ fn envelope(body: &str) -> serde_json::Value {
 
 #[tokio::test]
 async fn errors_carry_the_structured_envelope() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let seed = Db::connect(&url).await.unwrap();
-    let doc = m(&DOC);
-    seed.drop_table(&doc).await.unwrap();
-    seed.create_table(&doc).await.unwrap();
-
-    let app_db = Db::connect(&url).await.unwrap();
+    // env.doc is REGISTERED — the kit's reset already created its table.
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
     let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
-    let app = router_with_data(vec![m(&DOC)], app_db, ACLS, &[], SECRET, blobs);
+    let app = router_with_data(vec![m(&DOC)], t.db.clone(), ACLS, &[], SECRET, blobs);
 
     // A constraint violation → 400, code "invalid", the rule's message, and its declared field.
     let (st, body) = post(app.clone(), "/api/env.doc", Some("u"), r#"{"name":"x","qty":-3}"#).await;
@@ -103,6 +94,4 @@ async fn errors_carry_the_structured_envelope() {
     // The happy path is untouched: a valid create still succeeds.
     let (st, _) = post(app.clone(), "/api/env.doc", Some("u"), r#"{"name":"ok","qty":2}"#).await;
     assert_eq!(st, StatusCode::CREATED);
-
-    seed.drop_table(&doc).await.unwrap();
 }

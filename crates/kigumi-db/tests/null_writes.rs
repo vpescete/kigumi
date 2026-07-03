@@ -2,8 +2,7 @@
 //! a bound NULL was typed `text` by the driver, so `SET fk_id = $n` on a bigint column failed with
 //! Postgres 42804. Fixed by casting placeholders to the column type. Live Postgres.
 
-use kigumi_core::{resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ResolvedModel};
-use kigumi_db::Db;
+use kigumi_core::{resolve, Acl, FieldDef, FieldKind, ModelDescriptor, ResolvedModel};
 use serde_json::json;
 
 static DOC: ModelDescriptor = ModelDescriptor {
@@ -25,16 +24,10 @@ fn model() -> ResolvedModel {
 
 #[tokio::test]
 async fn explicit_null_writes_to_non_text_columns() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = model();
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
     db.drop_table(&m).await.unwrap();
     db.create_table(&m).await.unwrap();
 

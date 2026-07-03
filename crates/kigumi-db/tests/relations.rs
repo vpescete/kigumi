@@ -6,7 +6,6 @@ use kigumi_core::{
     resolve, Acl, Ctx, Domain, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, Operation,
     RecordRule, RuleDomain, ResolvedModel,
 };
-use kigumi_db::Db;
 
 static COMPANY: ModelDescriptor = ModelDescriptor {
     name: "rel.company",
@@ -49,21 +48,9 @@ fn doc_model() -> ResolvedModel {
 
 #[tokio::test]
 async fn record_rule_filters_through_a_relation() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let company = resolve(&COMPANY, &[]).unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let doc = doc_model();
-
-    db.drop_table(&doc).await.unwrap(); // child first (FK)
-    db.drop_table(&company).await.unwrap();
-    db.create_table(&company).await.unwrap();
-    db.create_table(&doc).await.unwrap();
 
     sqlx::query("INSERT INTO rel_company (name) VALUES ('Acme'), ('Globex')").execute(db.pool()).await.unwrap();
     let acme: i64 = sqlx::query_scalar("SELECT id FROM rel_company WHERE name = 'Acme'").fetch_one(db.pool()).await.unwrap();
@@ -77,9 +64,6 @@ async fn record_rule_filters_through_a_relation() {
     let rows = db.find_secured(&doc, &ctx, ACLS, RULES, None).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["title"], "acme-doc");
-
-    db.drop_table(&doc).await.unwrap();
-    db.drop_table(&company).await.unwrap();
 }
 
 // A nullable Many2one to test that negated relation rules include rows whose FK is NULL.
@@ -120,21 +104,9 @@ static P_RULES: &[RecordRule] = &[RecordRule {
 
 #[tokio::test]
 async fn negated_relation_rule_includes_null_fk_rows() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let partner = resolve(&P_PARTNER, &[]).unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let doc = resolve(&P_DOC, &[]).unwrap();
-
-    db.drop_table(&doc).await.unwrap();
-    db.drop_table(&partner).await.unwrap();
-    db.create_table(&partner).await.unwrap();
-    db.create_table(&doc).await.unwrap();
 
     sqlx::query("INSERT INTO p_partner (code) VALUES ('blocked')").execute(db.pool()).await.unwrap();
     let blocked: i64 = sqlx::query_scalar("SELECT id FROM p_partner WHERE code = 'blocked'").fetch_one(db.pool()).await.unwrap();
@@ -147,7 +119,4 @@ async fn negated_relation_rule_includes_null_fk_rows() {
     let titles: Vec<&str> = rows.iter().map(|r| r["title"].as_str().unwrap()).collect();
     assert!(titles.contains(&"no-partner"), "null-FK row must be included under a negated rule");
     assert!(!titles.contains(&"has-blocked"), "blocked partner's doc must be excluded");
-
-    db.drop_table(&doc).await.unwrap();
-    db.drop_table(&partner).await.unwrap();
 }

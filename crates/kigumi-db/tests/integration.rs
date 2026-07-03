@@ -5,7 +5,7 @@ use kigumi_core::{
     resolve, Acl, Ctx, Domain, FieldDef, FieldKind, ModelDescriptor, Operation, RecordRule, RuleDomain,
     ResolvedModel,
 };
-use kigumi_db::{Db, DbError};
+use kigumi_db::DbError;
 
 static MODEL: ModelDescriptor = ModelDescriptor {
     name: "widget",
@@ -29,14 +29,8 @@ fn model() -> ResolvedModel {
 
 #[tokio::test]
 async fn parameterized_domain_query_runs_against_postgres() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.expect("connect to postgres");
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = model();
 
     // Metamodel -> real table.
@@ -95,14 +89,8 @@ static RULES: &[RecordRule] = &[RecordRule {
 
 #[tokio::test]
 async fn security_is_enforced_on_reads() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.expect("connect");
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = resolve(&SEC_MODEL, &[]).unwrap();
     db.drop_table(&m).await.unwrap();
     db.create_table(&m).await.unwrap();

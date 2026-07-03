@@ -4,7 +4,7 @@
 //! sees it). Required delegated fields are enforced at the child create boundary. Live Postgres.
 
 use kigumi_core::{
-    resolve_registered, Acl, Ctx, FieldDef, FieldKind, InheritsRegistration, ModelDescriptor,
+    resolve_registered, Acl, FieldDef, FieldKind, InheritsRegistration, ModelDescriptor,
     ModelRegistration, ResolvedModel,
 };
 use kigumi_db::{Db, DbError};
@@ -43,29 +43,18 @@ async fn count(db: &Db, table: &str) -> i64 {
 
 #[tokio::test]
 async fn write_splits_to_parent_and_auto_creates() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let (tpl, var): (ResolvedModel, ResolvedModel) =
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let (_tpl, var): (ResolvedModel, ResolvedModel) =
         (resolve_registered("wr.tpl").unwrap(), resolve_registered("wr.var").unwrap());
-    let su = Ctx::new(0, vec![]).sudo();
-
-    db.drop_table(&var).await.unwrap();
-    db.drop_table(&tpl).await.unwrap();
-    db.create_table(&tpl).await.unwrap();
-    db.create_table(&var).await.unwrap();
+    let su = kigumi_test::su();
 
     // 1) Create a variant WITHOUT tpl_id → the parent template is auto-created with the delegated
     //    fields, atomically; the variant's via points at it.
     let v1 = db.insert_secured(&var, &su, ACLS, &[], json!({
         "default_code": "V1", "name": "Widget", "list_price": 9.99
     }).as_object().unwrap()).await.unwrap();
-    assert_eq!(count(&db, "wr_tpl").await, 1, "exactly one template auto-created");
+    assert_eq!(count(db, "wr_tpl").await, 1, "exactly one template auto-created");
     let row = db.find_one_secured(&var, &su, ACLS, &[], v1).await.unwrap().unwrap();
     assert_eq!(row["name"], json!("Widget"));
     assert_eq!(row["list_price"], json!("9.99"));
@@ -75,7 +64,7 @@ async fn write_splits_to_parent_and_auto_creates() {
     let v2 = db.insert_secured(&var, &su, ACLS, &[], json!({
         "default_code": "V2", "tpl_id": tpl_id
     }).as_object().unwrap()).await.unwrap();
-    assert_eq!(count(&db, "wr_tpl").await, 1, "no new template — shared");
+    assert_eq!(count(db, "wr_tpl").await, 1, "no new template — shared");
     assert_eq!(db.find_one_secured(&var, &su, ACLS, &[], v2).await.unwrap().unwrap()["name"], json!("Widget"));
 
     // 3) Update v1's delegated field (delegated-only write) → writes the SHARED template; v2 sees it.
@@ -89,11 +78,8 @@ async fn write_splits_to_parent_and_auto_creates() {
     assert_eq!(row["list_price"], json!("12.5"), "delegated field updated on the template");
 
     // 5) Required delegated field missing on auto-create → clean error, nothing inserted.
-    let before = count(&db, "wr_tpl").await;
+    let before = count(db, "wr_tpl").await;
     let err = db.insert_secured(&var, &su, ACLS, &[], json!({ "default_code": "V3" }).as_object().unwrap()).await;
     assert!(matches!(err, Err(DbError::Invalid { .. })), "required parent field enforced (field-level): {err:?}");
-    assert_eq!(count(&db, "wr_tpl").await, before, "failed create rolled back — no orphan template");
-
-    db.drop_table(&var).await.unwrap();
-    db.drop_table(&tpl).await.unwrap();
+    assert_eq!(count(db, "wr_tpl").await, before, "failed create rolled back — no orphan template");
 }

@@ -3,7 +3,6 @@
 //! DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -19,17 +18,9 @@ async fn partner_references_a_structured_country_and_state() {
     assert!(migrated.contains(&"res.country"), "res.country is migrated");
     assert!(migrated.contains(&"res.country.state"), "res.country.state is migrated");
 
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (country, state, partner) = (
         resolve_registered("res.country").unwrap(),
@@ -51,6 +42,4 @@ async fn partner_references_a_structured_country_and_state() {
     // The state belongs to the country (referential link holds).
     let s = db.find_one_secured(&state, &su, &[], &[], lom).await.unwrap().unwrap();
     assert_eq!(s["country_id"].as_i64(), Some(it));
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

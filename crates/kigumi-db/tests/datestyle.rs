@@ -2,18 +2,10 @@
 //! ISO (lexical order == chronological) regardless of the server/role default — the invariant the
 //! activity-state derivation, tracking diffs and the frontend's date parsing all rely on. Live PG.
 
-use kigumi_db::Db;
-
 #[tokio::test]
 async fn connection_pins_iso_datestyle() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let ds: String = sqlx::query_scalar("SHOW DateStyle").fetch_one(db.pool()).await.unwrap();
     assert!(ds.starts_with("ISO, YMD"), "expected ISO, YMD; got {ds}");
 

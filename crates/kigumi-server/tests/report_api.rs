@@ -9,10 +9,9 @@ use axum::Router;
 use http_body_util::BodyExt;
 use kigumi_auth::Authenticator;
 use kigumi_core::{
-    resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ReportRegistration,
+    resolve, Acl, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ReportRegistration,
     ResolvedModel,
 };
-use kigumi_db::Db;
 use kigumi_server::{router_with_data, router_with_data_rasterized, Rasterizer};
 use serde_json::{json, Value as Json};
 use std::sync::Arc;
@@ -57,20 +56,15 @@ async fn get(app: Router, uri: &str, groups: Option<&str>) -> (StatusCode, Strin
 
 #[tokio::test]
 async fn report_endpoint_is_secured_by_record_read() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let seed = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
+    // test.doc is REGISTERED — the kit's reset already created its table.
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let seed = &t.db;
+    let su = kigumi_test::su();
     let doc = m(&DOC);
-    seed.drop_table(&doc).await.unwrap();
-    seed.create_table(&doc).await.unwrap();
     let id = seed.insert_secured(&doc, &su, &[], &[], json!({ "name": "Hello" }).as_object().unwrap()).await.unwrap();
 
-    let app_db = Db::connect(&url).await.unwrap();
     let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
-    let app = router_with_data(vec![m(&DOC)], app_db, ACLS, &[], SECRET, blobs);
+    let app = router_with_data(vec![m(&DOC)], t.db.clone(), ACLS, &[], SECRET, blobs);
 
     let uri = format!("/api/test.doc/{id}/report/slip");
 
@@ -96,10 +90,9 @@ async fn report_endpoint_is_secured_by_record_read() {
     assert_eq!(st, StatusCode::NOT_IMPLEMENTED, "no rasterizer → 501");
 
     // Same seeded record, but a router WITH a rasterizer: ?format=pdf serves PDF bytes of the HTML.
-    let raster_db = Db::connect(&url).await.unwrap();
     let blobs2 = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
     let raster: Option<Arc<dyn Rasterizer>> = Some(Arc::new(FakeRasterizer));
-    let app_pdf = router_with_data_rasterized(vec![m(&DOC)], raster_db, ACLS, &[], SECRET, blobs2, raster);
+    let app_pdf = router_with_data_rasterized(vec![m(&DOC)], t.db.clone(), ACLS, &[], SECRET, blobs2, raster);
     let resp = app_pdf
         .oneshot(Request::builder().method("GET").uri(format!("{uri}?format=pdf")).header("authorization", bearer("u")).body(Body::empty()).unwrap())
         .await
@@ -109,8 +102,6 @@ async fn report_endpoint_is_secured_by_record_read() {
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     assert!(bytes.starts_with(b"%PDF-fake"), "served the rasterizer's bytes");
     assert!(String::from_utf8_lossy(&bytes).contains("<h1>Hello</h1>"), "rasterized the rendered HTML");
-
-    seed.drop_table(&doc).await.unwrap();
 }
 
 /// A fake rasterizer: prefixes the HTML with a recognizable marker, no real PDF engine.

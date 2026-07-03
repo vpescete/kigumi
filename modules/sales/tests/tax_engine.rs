@@ -4,7 +4,6 @@
 //! Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -23,17 +22,9 @@ fn money(v: &serde_json::Value, field: &str) -> f64 {
 #[tokio::test]
 async fn apply_taxes_materializes_a_multi_tax_breakdown() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (currency, partner, product, order, line, tax, group, fpos, fpostax, breakdown) = (
         resolve_registered("res.currency").unwrap(),
@@ -109,6 +100,4 @@ async fn apply_taxes_materializes_a_multi_tax_breakdown() {
     let dropped = db.find_one_secured(&order, &su, &[], &[], oid).await.unwrap().unwrap();
     assert_eq!(money(&dropped, "amount_tax"), 5.0, "VAT dropped, only the fixed Eco remains");
     assert_eq!(money(&dropped, "amount_total"), 105.0);
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

@@ -67,20 +67,10 @@ impl Db {
 
 #[cfg(test)]
 mod tests {
-    use crate::Db;
-
     #[tokio::test]
     async fn settings_seed_set_and_read() {
-        let url = match std::env::var("DATABASE_URL") {
-            Ok(u) => u,
-            Err(_) => {
-                eprintln!("skipping: DATABASE_URL not set");
-                return;
-            }
-        };
-        let db = Db::connect(&url).await.unwrap();
-        db.ensure_setting_schema().await.unwrap();
-        sqlx::query("DELETE FROM kigumi_setting WHERE key = 'test.k'").execute(db.pool()).await.unwrap();
+        let Some(t) = kigumi_test::TestDb::new().await else { return };
+        let db = &t.db;
 
         // seed sets the initial value...
         db.seed_setting("test.k", "first", "string").await.unwrap();
@@ -92,7 +82,5 @@ mod tests {
         db.set_setting("test.k", "third", "string").await.unwrap();
         assert_eq!(db.get_setting("test.k").await.unwrap().as_deref(), Some("third"));
         assert!(db.get_setting("missing.k").await.unwrap().is_none());
-
-        sqlx::query("DELETE FROM kigumi_setting WHERE key = 'test.k'").execute(db.pool()).await.unwrap();
     }
 }

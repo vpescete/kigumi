@@ -3,8 +3,7 @@
 //! exactly product.product.display_name (template `name` + the variant's own `default_code`). The
 //! delegated dependency must validate (it has no column) and resolve at read time. Live Postgres.
 
-use kigumi_core::{resolve_registered, Acl, ComputeInput, Ctx, FieldDef, FieldKind, InheritsRegistration, ModelDescriptor, ModelRegistration, Value};
-use kigumi_db::Db;
+use kigumi_core::{resolve_registered, Acl, ComputeInput, FieldDef, FieldKind, InheritsRegistration, ModelDescriptor, ModelRegistration, Value};
 use serde_json::json;
 
 /// display = "<label> [<code>]" — reads the delegated `label` and the child's own `code`.
@@ -41,20 +40,12 @@ static ACLS: &[Acl] = &[
 
 #[tokio::test]
 async fn on_read_compute_reads_a_delegated_field() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
     // The model resolves: the delegated `label` is an allowed dependency even though it has no column.
     let tpl = resolve_registered("ic.tpl").unwrap();
     let var = resolve_registered("ic.var").unwrap();
-
-    db.drop_table(&var).await.unwrap();
-    db.drop_table(&tpl).await.unwrap();
-    db.create_table(&tpl).await.unwrap();
-    db.create_table(&var).await.unwrap();
 
     // Create a variant; the delegated `label` in the payload auto-creates the parent template.
     let id = db.insert_secured(&var, &su, ACLS, &[], json!({ "label": "Shirt", "code": "RED-S" }).as_object().unwrap()).await.unwrap();
@@ -67,7 +58,4 @@ async fn on_read_compute_reads_a_delegated_field() {
     db.update_secured(&tpl, &su, ACLS, &[], pid, json!({ "label": "Blouse" }).as_object().unwrap()).await.unwrap();
     let row = db.find_one_secured(&var, &su, ACLS, &[], id).await.unwrap().unwrap();
     assert_eq!(row["display"].as_str(), Some("Blouse [RED-S]"), "derived from the live delegated value");
-
-    db.drop_table(&var).await.unwrap();
-    db.drop_table(&tpl).await.unwrap();
 }

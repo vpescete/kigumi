@@ -5,7 +5,6 @@ use kigumi_core::{
     resolve, Acl, Ctx, Domain, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, Operation,
     RecordRule, RuleDomain, ResolvedModel,
 };
-use kigumi_db::Db;
 
 static ITEM: ModelDescriptor = ModelDescriptor {
     name: "lst.item",
@@ -31,19 +30,11 @@ fn active_only() -> Domain {
 
 #[tokio::test]
 async fn list_secured_filters_sorts_paginates_and_totals() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = item_model();
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
 
-    db.drop_table(&m).await.unwrap();
-    db.create_table(&m).await.unwrap();
     for (n, q, a) in [("a", 1, true), ("b", 2, true), ("c", 3, false), ("d", 4, true), ("e", 5, true)] {
         let v = serde_json::json!({ "name": n, "qty": q, "active": a });
         db.insert_secured(&m, &su, &[], &[], v.as_object().unwrap()).await.unwrap();
@@ -80,6 +71,4 @@ async fn list_secured_filters_sorts_paginates_and_totals() {
 
     // An unknown order field is rejected (never reaches SQL).
     assert!(db.list_secured(&m, &su, &[], &[], None, &[("nope".into(), false)], 80, 0).await.is_err());
-
-    db.drop_table(&m).await.unwrap();
 }

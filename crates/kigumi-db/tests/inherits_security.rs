@@ -7,7 +7,7 @@ use kigumi_core::{
     resolve_registered, Acl, Ctx, FieldDef, FieldGroupRegistration, FieldKind, InheritsRegistration,
     ModelDescriptor, ModelRegistration, ResolvedModel,
 };
-use kigumi_db::{Db, DbError};
+use kigumi_db::DbError;
 use serde_json::json;
 
 static TPL: ModelDescriptor = ModelDescriptor {
@@ -43,25 +43,14 @@ static ACLS: &[Acl] = &[
 
 #[tokio::test]
 async fn inherited_field_security_is_enforced_through_the_child() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let (tpl, var): (ResolvedModel, ResolvedModel) =
         (resolve_registered("sec.tpl").unwrap(), resolve_registered("sec.var").unwrap());
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
     let user = Ctx::new(1, vec!["u".into()]); // variant write, NO template write
     let editor = Ctx::new(2, vec!["u".into(), "editor".into()]); // template write, NOT mgr
     let mgr = Ctx::new(3, vec!["u".into(), "mgr".into()]); // template write + cost access
-
-    db.drop_table(&var).await.unwrap();
-    db.drop_table(&tpl).await.unwrap();
-    db.create_table(&tpl).await.unwrap();
-    db.create_table(&var).await.unwrap();
 
     let t = db.insert_secured(&tpl, &su, ACLS, &[], json!({ "name": "T1", "cost": 7 }).as_object().unwrap()).await.unwrap();
     let v = db.insert_secured(&var, &su, ACLS, &[], json!({ "tpl_id": t, "code": "V1" }).as_object().unwrap()).await.unwrap();
@@ -92,7 +81,4 @@ async fn inherited_field_security_is_enforced_through_the_child() {
     let t2 = db.insert_secured(&tpl, &su, ACLS, &[], json!({ "name": "T2" }).as_object().unwrap()).await.unwrap();
     let e = db.update_secured(&var, &mgr, ACLS, &[], v, json!({ "tpl_id": t2, "name": "X" }).as_object().unwrap()).await;
     assert!(matches!(e, Err(DbError::BadInput(_))), "re-parent + inherited write rejected: {e:?}");
-
-    db.drop_table(&var).await.unwrap();
-    db.drop_table(&tpl).await.unwrap();
 }

@@ -6,8 +6,7 @@
 
 use axum::http::StatusCode;
 use kigumi_auth::Authenticator;
-use kigumi_core::{resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
-use kigumi_db::Db;
+use kigumi_core::{resolve, Acl, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
 use kigumi_server::router_with_data;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -58,20 +57,13 @@ async fn read_stream(addr: std::net::SocketAddr, groups: &str, last_event_id: Op
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn stream_delivers_filtered_events_and_resumes() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let seed = Db::connect(&url).await.unwrap();
-    seed.ensure_event_schema().await.unwrap();
+    // sse.doc is REGISTERED — the kit's reset created its table, the event schema, and an empty outbox.
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let seed = &t.db;
     let doc = m(&DOC);
-    seed.drop_table(&doc).await.unwrap();
-    seed.create_table(&doc).await.unwrap();
-    seed.clear_event_outbox().await.unwrap();
 
-    let app_db = Db::connect(&url).await.unwrap();
     let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
-    let app = router_with_data(vec![m(&DOC)], app_db, ACLS, &[], SECRET, blobs);
+    let app = router_with_data(vec![m(&DOC)], t.db.clone(), ACLS, &[], SECRET, blobs);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -79,7 +71,7 @@ async fn stream_delivers_filtered_events_and_resumes() {
 
     // Two live clients connect FIRST (so "from now" covers the write below): one may read sse.doc,
     // one may not. Then a superuser write lands an event.
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
     let seed2 = seed.clone();
     let writer = tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
@@ -116,6 +108,4 @@ async fn stream_delivers_filtered_events_and_resumes() {
         resumed.contains("model.created") && resumed.contains(&format!("\"record_id\":{created_id}")),
         "Last-Event-ID catch-up replays the missed event: {resumed}"
     );
-
-    seed.drop_table(&doc).await.unwrap();
 }

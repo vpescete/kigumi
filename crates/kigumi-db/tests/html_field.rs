@@ -2,8 +2,7 @@
 //! never land. Safe formatting survives; <script>, event-handler attributes and javascript: URLs are
 //! stripped before the value is stored. Live Postgres.
 
-use kigumi_core::{resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor};
-use kigumi_db::Db;
+use kigumi_core::{resolve, Acl, FieldDef, FieldKind, ModelDescriptor};
 use kigumi_schema::to_ddl;
 use serde_json::json;
 
@@ -16,16 +15,13 @@ static ACLS: &[Acl] = &[Acl { model: "html.doc", group: "u", read: true, write: 
 
 #[tokio::test]
 async fn html_is_sanitized_on_write_and_stored_as_text() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = resolve(&DOC, &[]).unwrap();
     // Html is a plain text column at the DB level.
     assert!(to_ddl(&m).contains("body text"), "Html is a text column");
 
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
     db.drop_table(&m).await.unwrap();
     db.create_table(&m).await.unwrap();
 

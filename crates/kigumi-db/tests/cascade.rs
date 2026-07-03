@@ -2,7 +2,7 @@
 //! group total (line → order → group), two levels up. Live Postgres.
 
 use kigumi_core::{
-    resolve, ComputeInput, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration,
+    resolve, ComputeInput, FieldDef, FieldKind, ModelDescriptor, ModelRegistration,
     ResolvedModel, Value,
 };
 use kigumi_db::Db;
@@ -63,45 +63,28 @@ async fn group_total_of(db: &Db, gid: i64) -> f64 {
 
 #[tokio::test]
 async fn line_change_cascades_to_group_total() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let (group, order, line) = (m(&GROUP), m(&ORDER), m(&LINE));
-    let su = Ctx::new(0, vec![]).sudo();
-
-    db.drop_table(&line).await.unwrap();
-    db.drop_table(&order).await.unwrap();
-    db.drop_table(&group).await.unwrap();
-    db.create_table(&group).await.unwrap();
-    db.create_table(&order).await.unwrap();
-    db.create_table(&line).await.unwrap();
+    let su = kigumi_test::su();
 
     let g = db.insert_secured(&group, &su, &[], &[], serde_json::json!({ "name": "G" }).as_object().unwrap()).await.unwrap();
     let o = db.insert_secured(&order, &su, &[], &[], serde_json::json!({ "group_id": g }).as_object().unwrap()).await.unwrap();
-    assert_eq!(group_total_of(&db, g).await, 0.0);
+    assert_eq!(group_total_of(db, g).await, 0.0);
 
     // Add a line (10) → order.amount = 10 → group.total cascades to 10.
     let l1 = db.insert_secured(&line, &su, &[], &[], serde_json::json!({ "order_id": o, "price": 10.0 }).as_object().unwrap()).await.unwrap();
-    assert_eq!(group_total_of(&db, g).await, 10.0, "line → order → group cascade on insert");
+    assert_eq!(group_total_of(db, g).await, 10.0, "line → order → group cascade on insert");
 
     // Add another line (5) → 15 cascades up.
     let _l2 = db.insert_secured(&line, &su, &[], &[], serde_json::json!({ "order_id": o, "price": 5.0 }).as_object().unwrap()).await.unwrap();
-    assert_eq!(group_total_of(&db, g).await, 15.0);
+    assert_eq!(group_total_of(db, g).await, 15.0);
 
     // Edit the first line → cascade on update.
     db.update_secured(&line, &su, &[], &[], l1, serde_json::json!({ "price": 20.0 }).as_object().unwrap()).await.unwrap();
-    assert_eq!(group_total_of(&db, g).await, 25.0, "cascade on update");
+    assert_eq!(group_total_of(db, g).await, 25.0, "cascade on update");
 
     // Delete a line → cascade on delete.
     db.delete_secured(&line, &su, &[], &[], l1).await.unwrap();
-    assert_eq!(group_total_of(&db, g).await, 5.0, "cascade on delete");
-
-    db.drop_table(&line).await.unwrap();
-    db.drop_table(&order).await.unwrap();
-    db.drop_table(&group).await.unwrap();
+    assert_eq!(group_total_of(db, g).await, 5.0, "cascade on delete");
 }

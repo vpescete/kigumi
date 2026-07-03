@@ -3,7 +3,6 @@
 //! partner's property_account_position_id. Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -22,18 +21,9 @@ fn money(v: &serde_json::Value, field: &str) -> f64 {
 #[tokio::test]
 async fn partner_accounting_defaults_flow_to_orders() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
     db.ensure_sequence("SO", "SO/", "", 5).await.unwrap();
 
     let (currency, partner, product, order, line, mv, account, journal, tax, term, fpos, fpostax) = (
@@ -88,6 +78,4 @@ async fn partner_accounting_defaults_flow_to_orders() {
     let mid = db.run_service(&order, &seller, acls, rules, oid, "create_invoice", serde_json::Map::new()).await.unwrap()["invoice"].as_i64().unwrap();
     let inv = db.find_one_secured(&mv, &su, &[], &[], mid).await.unwrap().unwrap();
     assert!(inv["invoice_date_due"].as_str().unwrap() > inv["date"].as_str().unwrap(), "the partner's 30-day term pushed the due date past the invoice date");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

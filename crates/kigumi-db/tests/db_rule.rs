@@ -6,7 +6,6 @@ use kigumi_core::{
     resolve, Acl, Ctx, Domain, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, Operation,
     RecordRule, RuleDomain,
 };
-use kigumi_db::Db;
 use serde_json::{json, Value};
 
 static DOC: ModelDescriptor = ModelDescriptor {
@@ -38,27 +37,12 @@ fn names(rows: &[Value]) -> Vec<String> {
 
 #[tokio::test]
 async fn db_rules_apply_additively_with_the_static_baseline() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = resolve(&DOC, &[]).unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
     let clerk = Ctx::new(1, vec!["u".to_string()]);
 
-    db.ensure_access_schema().await.unwrap();
-    // Clean any rr.doc rules left by a previous run.
-    for r in db.list_db_rules().await.unwrap() {
-        if r.model == "rr.doc" {
-            db.remove_db_rule(r.id).await.unwrap();
-        }
-    }
-    db.drop_table(&m).await.unwrap();
-    db.create_table(&m).await.unwrap();
     for (n, s) in [("a", "open"), ("b", "archived"), ("secret", "open")] {
         db.insert_secured(&m, &su, ACLS, &[], json!({ "name": n, "state": s }).as_object().unwrap()).await.unwrap();
     }
@@ -87,6 +71,4 @@ async fn db_rules_apply_additively_with_the_static_baseline() {
     let mut after = STATIC_RULES.to_vec();
     after.extend(db.load_rules_static().await.unwrap());
     assert_eq!(names(&db.find_secured(&m, &clerk, ACLS, &after, None).await.unwrap()), vec!["a", "b"]);
-
-    db.drop_table(&m).await.unwrap();
 }

@@ -57,42 +57,16 @@ async fn count_lines(db: &Db, oid: i64) -> i64 {
         .unwrap()
 }
 
-fn url_or_skip() -> Option<String> {
-    match std::env::var("DATABASE_URL") {
-        Ok(u) => Some(u),
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            None
-        }
-    }
-}
-
-async fn fresh(db: &Db, order: &ResolvedModel, line: &ResolvedModel) {
-    db.drop_table(line).await.unwrap();
-    db.drop_table(order).await.unwrap();
-    db.create_table(order).await.unwrap();
-    db.create_table(line).await.unwrap();
-}
-
-/// These tests all drop/create the SAME `nst_order`/`nst_line` tables, so they must not run
-/// concurrently — serialize them on a shared async lock.
-fn serial() -> &'static tokio::sync::Mutex<()> {
-    static L: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
-    L.get_or_init(|| tokio::sync::Mutex::new(()))
-}
+// These tests all touch the SAME `nst_order`/`nst_line` tables; the kit's advisory lock (held by
+// each TestDb for the test's lifetime) serializes them, and its reset gives each a fresh schema.
 
 #[tokio::test]
 async fn creates_a_parent_with_its_children_in_one_write() {
-    let url = match url_or_skip() {
-        Some(u) => u,
-        None => return,
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let _serial = serial().lock().await;
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let order = order_model();
-    let line = line_model();
-    let su = Ctx::new(0, vec![]).sudo();
-    fresh(&db, &order, &line).await;
+    let _line = line_model();
+    let su = kigumi_test::su();
 
     // One write creates the order AND two lines, with the inverse FK set by the parent.
     let payload = serde_json::json!({
@@ -104,30 +78,22 @@ async fn creates_a_parent_with_its_children_in_one_write() {
         .await
         .unwrap();
 
-    assert_eq!(count_lines(&db, oid).await, 2, "both lines created and linked to the order");
+    assert_eq!(count_lines(db, oid).await, 2, "both lines created and linked to the order");
     let total: f64 = sqlx::query_scalar("SELECT amount_total::float8 FROM nst_order WHERE id = $1")
         .bind(oid)
         .fetch_one(db.pool())
         .await
         .unwrap();
     assert_eq!(total, 15.0, "aggregate computed from the nested children");
-
-    db.drop_table(&line).await.unwrap();
-    db.drop_table(&order).await.unwrap();
 }
 
 #[tokio::test]
 async fn update_applies_x2many_commands() {
-    let url = match url_or_skip() {
-        Some(u) => u,
-        None => return,
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let _serial = serial().lock().await;
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let order = order_model();
-    let line = line_model();
-    let su = Ctx::new(0, vec![]).sudo();
-    fresh(&db, &order, &line).await;
+    let _line = line_model();
+    let su = kigumi_test::su();
 
     // Create an order with two lines (10 + 5 = 15).
     let oid = db
@@ -163,22 +129,14 @@ async fn update_applies_x2many_commands() {
         .update_secured(&order, &su, &[], RULES, oid, serde_json::json!({ "line_ids": [ { "op": "delete", "id": lb } ] }).as_object().unwrap())
         .await;
     assert!(cross.is_err(), "cannot delete another order's line through this order");
-
-    db.drop_table(&line).await.unwrap();
-    db.drop_table(&order).await.unwrap();
 }
 
 #[tokio::test]
 async fn child_acl_denial_rolls_back_the_parent() {
-    let url = match url_or_skip() {
-        Some(u) => u,
-        None => return,
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let _serial = serial().lock().await;
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let order = order_model();
-    let line = line_model();
-    fresh(&db, &order, &line).await;
+    let _line = line_model();
 
     // Group "u" may create orders but NOT lines (no ACL row for nst.line → Create denied).
     let acls = [Acl { model: "nst.order", group: "u", read: true, write: true, create: true, delete: true }];
@@ -195,23 +153,15 @@ async fn child_acl_denial_rolls_back_the_parent() {
         .await
         .unwrap();
     assert_eq!(orders, 0, "parent rolled back when a child write is rejected");
-
-    db.drop_table(&line).await.unwrap();
-    db.drop_table(&order).await.unwrap();
 }
 
 #[tokio::test]
 async fn reads_a_parent_with_its_children_inlined() {
-    let url = match url_or_skip() {
-        Some(u) => u,
-        None => return,
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let _serial = serial().lock().await;
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let order = order_model();
-    let line = line_model();
-    let su = Ctx::new(0, vec![]).sudo();
-    fresh(&db, &order, &line).await;
+    let _line = line_model();
+    let su = kigumi_test::su();
 
     let oid = db
         .insert_secured(
@@ -234,23 +184,15 @@ async fn reads_a_parent_with_its_children_inlined() {
     let lines = obj["line_ids"].as_array().expect("line_ids inlined as an array");
     assert_eq!(lines.len(), 2, "both children inlined");
     assert_eq!(lines[0]["order_id"].as_i64().unwrap(), oid, "child points back to the parent");
-
-    db.drop_table(&line).await.unwrap();
-    db.drop_table(&order).await.unwrap();
 }
 
 #[tokio::test]
 async fn child_model_not_readable_is_omitted_from_inline() {
-    let url = match url_or_skip() {
-        Some(u) => u,
-        None => return,
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let _serial = serial().lock().await;
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let order = order_model();
-    let line = line_model();
-    let su = Ctx::new(0, vec![]).sudo();
-    fresh(&db, &order, &line).await;
+    let _line = line_model();
+    let su = kigumi_test::su();
 
     let oid = db
         .insert_secured(
@@ -269,9 +211,6 @@ async fn child_model_not_readable_is_omitted_from_inline() {
     let got = db.find_one_secured(&order, &ctx, &acls, RULES, oid).await.unwrap().expect("order visible");
     let obj = got.as_object().unwrap();
     assert!(obj.get("line_ids").is_none(), "unreadable child model → relation omitted, parent still served");
-
-    db.drop_table(&line).await.unwrap();
-    db.drop_table(&order).await.unwrap();
 }
 
 fn line_price_min() -> Domain {
@@ -284,15 +223,10 @@ static PRICE_RULES: &[RecordRule] = &[RecordRule {
 
 #[tokio::test]
 async fn child_create_rule_violation_rolls_back_the_parent() {
-    let url = match url_or_skip() {
-        Some(u) => u,
-        None => return,
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let _serial = serial().lock().await;
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let order = order_model();
-    let line = line_model();
-    fresh(&db, &order, &line).await;
+    let _line = line_model();
 
     // Group "u" may create both, but the child Create rule requires price >= 10.
     let acls = [
@@ -315,8 +249,5 @@ async fn child_create_rule_violation_rolls_back_the_parent() {
     // A conforming line (price 10) is accepted.
     let ok = serde_json::json!({ "name": "O2", "line_ids": [ { "price": 10.0 } ] });
     let oid = db.insert_secured(&order, &ctx, &acls, PRICE_RULES, ok.as_object().unwrap()).await.unwrap();
-    assert_eq!(count_lines(&db, oid).await, 1, "conforming nested line is created");
-
-    db.drop_table(&line).await.unwrap();
-    db.drop_table(&order).await.unwrap();
+    assert_eq!(count_lines(db, oid).await, 1, "conforming nested line is created");
 }

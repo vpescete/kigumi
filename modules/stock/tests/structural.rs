@@ -2,7 +2,6 @@
 //! (product, location) and rejects a duplicate; locations and warehouses round-trip. Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -17,18 +16,9 @@ fn link() {
 #[tokio::test]
 async fn locations_and_quants_enforce_one_per_product_location() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_stock_indexes().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (currency, company, product, location, warehouse, quant) = (
         resolve_registered("res.currency").unwrap(),
@@ -56,6 +46,4 @@ async fn locations_and_quants_enforce_one_per_product_location() {
     let dup = db.insert_secured(&quant, &su, &[], &[], json!({ "product_id": prod, "location_id": stock, "quantity": "3" }).as_object().unwrap()).await;
     assert!(dup.is_err(), "duplicate (product, location) quant must be rejected");
     assert_eq!(db.count_secured(&quant, &su, &[], &[], None).await.unwrap(), 1, "only the first quant exists");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

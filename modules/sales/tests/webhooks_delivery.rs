@@ -4,7 +4,7 @@
 //! (the real one lives in the CLI). Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::{Db, WebhookDelivery};
+use kigumi_db::WebhookDelivery;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -16,20 +16,9 @@ fn link() {
 #[tokio::test]
 async fn delivery_sends_retries_and_dead_letters() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_event_schema().await.unwrap();
-    db.clear_event_outbox().await.unwrap();
-    db.clear_webhook_subscriptions().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let partner = resolve_registered("res.partner").unwrap();
     db.create_webhook_subscription("hook", "https://x.test/hook", "sec", &[], None).await.unwrap();
@@ -82,6 +71,4 @@ async fn delivery_sends_retries_and_dead_letters() {
     db.force_deliveries_due().await.unwrap();
     assert_eq!(db.flush_webhooks(&fail_send).await.unwrap(), 0);
     assert_eq!(db.deliveries_in_state("dead").await.unwrap(), 1);
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

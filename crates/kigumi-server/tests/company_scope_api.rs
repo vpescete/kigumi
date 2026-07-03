@@ -9,7 +9,6 @@ use axum::Router;
 use http_body_util::BodyExt;
 use kigumi_auth::hash_password;
 use kigumi_core::{resolve, Acl, FieldDef, FieldKind, ModelDescriptor, RecordRule, ResolvedModel};
-use kigumi_db::Db;
 use kigumi_server::router_with_data;
 use tower::ServiceExt;
 
@@ -66,17 +65,11 @@ async fn visible_rows(app: Router, bearer: &str) -> usize {
 
 #[tokio::test]
 async fn login_scopes_data_to_the_users_company() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let setup = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let setup = &t.db;
     let m = model();
 
-    // A company table for the FK + one doc in each company.
+    // A company table for the FK + one doc in each company (ad-hoc — the kit does not know them).
     setup.drop_table(&m).await.unwrap();
     sqlx::query("DROP TABLE IF EXISTS csa_company").execute(setup.pool()).await.unwrap();
     sqlx::query("CREATE TABLE csa_company (id bigserial PRIMARY KEY, name text)").execute(setup.pool()).await.unwrap();
@@ -85,8 +78,6 @@ async fn login_scopes_data_to_the_users_company() {
     setup.create_table(&m).await.unwrap();
     sqlx::query("INSERT INTO csa_doc (name, company_id) VALUES ('in-c1', $1), ('in-c2', $2)").bind(c1).bind(c2).execute(setup.pool()).await.unwrap();
 
-    setup.ensure_auth_schema().await.unwrap();
-    sqlx::query("DELETE FROM kigumi_user WHERE login IN ('scoped', 'roamer')").execute(setup.pool()).await.unwrap();
     setup.upsert_user("scoped", &hash_password("pw").unwrap(), &["u"]).await.unwrap();
     setup.set_user_companies("scoped", Some(c1), &[c1]).await.unwrap();
     setup.upsert_user("roamer", &hash_password("pw").unwrap(), &["u"]).await.unwrap(); // no assignment → unrestricted
@@ -95,7 +86,7 @@ async fn login_scopes_data_to_the_users_company() {
     assert!(setup.set_user_companies("ghost", Some(c1), &[]).await.is_err());
 
     let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
-    let app = router_with_data(vec![model()], Db::connect(&url).await.unwrap(), ACLS, RULES, SECRET, blobs);
+    let app = router_with_data(vec![model()], t.db.clone(), ACLS, RULES, SECRET, blobs);
 
     // The scoped user's login token sees only its company's row.
     let (s, tok) = post(app.clone(), "/auth/login", r#"{"login":"scoped","password":"pw"}"#).await;
@@ -117,5 +108,4 @@ async fn login_scopes_data_to_the_users_company() {
 
     setup.drop_table(&m).await.unwrap();
     sqlx::query("DROP TABLE IF EXISTS csa_company").execute(setup.pool()).await.unwrap();
-    sqlx::query("DELETE FROM kigumi_user WHERE login IN ('scoped', 'roamer')").execute(setup.pool()).await.unwrap();
 }

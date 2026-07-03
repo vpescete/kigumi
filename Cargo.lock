@@ -1563,6 +1563,7 @@ dependencies = [
  "kigumi-db",
  "kigumi-mod-base",
  "kigumi-mod-mail",
+ "kigumi-test",
  "rust_decimal",
  "serde_json",
  "sqlx",
@@ -1576,6 +1577,7 @@ dependencies = [
  "kigumi",
  "kigumi-auth",
  "kigumi-db",
+ "kigumi-test",
  "serde_json",
  "tokio",
 ]
@@ -1588,6 +1590,7 @@ dependencies = [
  "kigumi-auth",
  "kigumi-db",
  "kigumi-mod-base",
+ "kigumi-test",
  "serde_json",
  "tokio",
 ]
@@ -1673,6 +1676,7 @@ dependencies = [
  "kigumi-db",
  "kigumi-schema",
  "kigumi-storage",
+ "kigumi-test",
  "rust_decimal",
  "serde_json",
  "sha2",

@@ -4,7 +4,6 @@
 //! DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -14,18 +13,9 @@ fn link() {
 #[tokio::test]
 async fn post_numbers_then_freezes_the_entry() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (currency, account, journal, mv, line) = (
         resolve_registered("res.currency").unwrap(),
@@ -72,6 +62,4 @@ async fn post_numbers_then_freezes_the_entry() {
     assert_eq!(db.find_one_secured(&mv, &su, &[], &[], mid).await.unwrap().unwrap()["state"], "draft");
     let editable = db.update_secured(&line, &clerk, acls, rules, lid, json!({ "name": "corrected" }).as_object().unwrap()).await.unwrap();
     assert_eq!(editable, 1, "after un-posting, the line is writable again");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

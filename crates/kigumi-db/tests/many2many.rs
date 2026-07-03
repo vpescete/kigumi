@@ -2,8 +2,7 @@
 //! target ids and writes with SET semantics (the array replaces the membership). FK ON DELETE CASCADE
 //! cleans the junction when a target is removed. Live Postgres.
 
-use kigumi_core::{resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
-use kigumi_db::Db;
+use kigumi_core::{resolve, Acl, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
 use serde_json::json;
 
 static POST: ModelDescriptor = ModelDescriptor {
@@ -39,23 +38,10 @@ fn ids(v: &serde_json::Value) -> Vec<i64> {
 
 #[tokio::test]
 async fn many2many_set_read_modify_and_cascade() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let (post, tag) = (m(&POST), m(&TAG));
-    let su = Ctx::new(0, vec![]).sudo();
-
-    sqlx::query("DROP TABLE IF EXISTS mm_post_tag_rel").execute(db.pool()).await.unwrap();
-    db.drop_table(&post).await.unwrap();
-    db.drop_table(&tag).await.unwrap();
-    db.create_table(&tag).await.unwrap();
-    db.create_table(&post).await.unwrap();
-    db.create_m2m_relations(&post).await.unwrap(); // junction needs both tables to exist
+    let su = kigumi_test::su();
 
     let t1 = db.insert_secured(&tag, &su, ACLS, &[], json!({ "name": "a" }).as_object().unwrap()).await.unwrap();
     let t2 = db.insert_secured(&tag, &su, ACLS, &[], json!({ "name": "b" }).as_object().unwrap()).await.unwrap();
@@ -84,8 +70,4 @@ async fn many2many_set_read_modify_and_cascade() {
     db.update_secured(&post, &su, ACLS, &[], pid, json!({ "tag_ids": [t2, t3] }).as_object().unwrap()).await.unwrap();
     db.delete_secured(&tag, &su, ACLS, &[], t2).await.unwrap();
     assert_eq!(ids(&db.find_one_secured(&post, &su, ACLS, &[], pid).await.unwrap().unwrap()), vec![t3]);
-
-    sqlx::query("DROP TABLE IF EXISTS mm_post_tag_rel").execute(db.pool()).await.unwrap();
-    db.drop_table(&post).await.unwrap();
-    db.drop_table(&tag).await.unwrap();
 }

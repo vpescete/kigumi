@@ -2,7 +2,6 @@
 //! later entry, or an entry with no company/lock, posts freely. Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -12,18 +11,9 @@ fn link() {
 #[tokio::test]
 async fn fiscal_lock_blocks_posting_in_a_locked_period() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (currency, company, account, journal, mv) = (
         resolve_registered("res.currency").unwrap(),
@@ -61,6 +51,4 @@ async fn fiscal_lock_blocks_posting_in_a_locked_period() {
     // No company (shared) → no lock applies, even in the locked period.
     let shared = db.insert_secured(&mv, &su, &[], &[], balanced("2026-01-10", None).as_object().unwrap()).await.unwrap();
     assert!(db.run_service(&mv, &su, &[], &[], shared, "post", serde_json::Map::new()).await.is_ok(), "an entry with no company is not locked");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

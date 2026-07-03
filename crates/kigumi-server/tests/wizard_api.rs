@@ -10,10 +10,9 @@ use axum::Router;
 use http_body_util::BodyExt;
 use kigumi_auth::Authenticator;
 use kigumi_core::{
-    resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel,
+    resolve, Acl, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel,
     TransientRegistration, Value, WizardContext, WizardRegistration,
 };
-use kigumi_db::Db;
 use kigumi_server::router_with_data;
 use serde_json::json;
 use tower::ServiceExt;
@@ -80,22 +79,16 @@ async fn open(app: Router, uri: &str, groups: Option<&str>, body: serde_json::Va
 
 #[tokio::test]
 async fn open_wizard_seeds_from_context_and_is_secured() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let seed = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-    let (thing, wiz) = (m(&THING), m(&WIZ));
-    for d in [&wiz, &thing] { seed.drop_table(d).await.unwrap(); }
-    for d in [&thing, &wiz] { seed.create_table(d).await.unwrap(); }
-    seed.ensure_transient_defaults().await.unwrap();
+    // Both models are REGISTERED — the kit's reset created their tables and the transient defaults.
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let seed = &t.db;
+    let su = kigumi_test::su();
+    let thing = m(&THING);
 
     let thing_id = seed.insert_secured(&thing, &su, &[], &[], json!({ "name": "Target" }).as_object().unwrap()).await.unwrap();
 
-    let app_db = Db::connect(&url).await.unwrap();
     let blobs = std::sync::Arc::new(kigumi_server::FsBlobStore::new(std::env::temp_dir().join("kigumi_test_blobs")));
-    let app = router_with_data(vec![m(&THING), m(&WIZ)], app_db, ACLS, &[], SECRET, blobs);
+    let app = router_with_data(vec![m(&THING), m(&WIZ)], t.db.clone(), ACLS, &[], SECRET, blobs);
 
     // No token → 401.
     let (st, _) = open(app.clone(), "/api/test.wiz/open", None, json!({ "active_id": thing_id })).await;
@@ -116,6 +109,4 @@ async fn open_wizard_seeds_from_context_and_is_secured() {
     // No active record → empty seed → the required thing_id can't be satisfied → 400.
     let (st, _) = open(app.clone(), "/api/test.wiz/open", Some("u"), json!({})).await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "missing required seed is a bad request");
-
-    for d in [&wiz, &thing] { seed.drop_table(d).await.unwrap(); }
 }

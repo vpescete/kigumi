@@ -2,8 +2,7 @@
 //! on every read (Odoo `compute=` without `store=True`). It must appear in the projection with the
 //! computed value, never be a column, and reject writes (it is computed, not stored). Live Postgres.
 
-use kigumi_core::{resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, Value};
-use kigumi_db::Db;
+use kigumi_core::{resolve, Acl, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, Value};
 use serde_json::json;
 
 // `qty_doubled` reads the record's own `qty`; `label` builds a string from it. Both on-read.
@@ -33,16 +32,10 @@ static ACLS: &[Acl] = &[Acl { model: "orc.item", group: "u", read: true, write: 
 
 #[tokio::test]
 async fn non_stored_compute_is_derived_on_read_only() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = resolve(&ITEM, &[]).unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    db.drop_table(&m).await.unwrap();
-    db.create_table(&m).await.unwrap();
+    let su = kigumi_test::su();
 
     // The on-read fields are NOT columns: a raw select of qty_doubled fails (column does not exist).
     let raw = sqlx::query("SELECT qty_doubled FROM orc_item").fetch_all(db.pool()).await;
@@ -66,6 +59,4 @@ async fn non_stored_compute_is_derived_on_read_only() {
         db.update_secured(&m, &su, ACLS, &[], id, json!({ "qty_doubled": 999 }).as_object().unwrap()).await.is_err(),
         "cannot write a computed field"
     );
-
-    db.drop_table(&m).await.unwrap();
 }

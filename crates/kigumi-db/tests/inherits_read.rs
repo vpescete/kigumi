@@ -4,10 +4,9 @@
 //! column for them on the child table. Live Postgres.
 
 use kigumi_core::{
-    resolve_registered, Acl, Ctx, FieldDef, FieldKind, InheritsRegistration, ModelDescriptor,
+    resolve_registered, Acl, FieldDef, FieldKind, InheritsRegistration, ModelDescriptor,
     ModelRegistration, ResolvedModel,
 };
-use kigumi_db::Db;
 use serde_json::json;
 
 static TPL: ModelDescriptor = ModelDescriptor {
@@ -39,22 +38,11 @@ static ACLS: &[Acl] = &[
 
 #[tokio::test]
 async fn child_read_exposes_parent_fields_through_via() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let (tpl, var): (ResolvedModel, ResolvedModel) =
         (resolve_registered("rd.tpl").unwrap(), resolve_registered("rd.var").unwrap());
-    let su = Ctx::new(0, vec![]).sudo();
-
-    db.drop_table(&var).await.unwrap();
-    db.drop_table(&tpl).await.unwrap();
-    db.create_table(&tpl).await.unwrap();
-    db.create_table(&var).await.unwrap();
+    let su = kigumi_test::su();
 
     // A template + a variant pointing at it (the variant has only its own fields + the via FK).
     let t = db.insert_secured(&tpl, &su, ACLS, &[], json!({ "name": "Widget", "list_price": 19.99 }).as_object().unwrap()).await.unwrap();
@@ -71,7 +59,4 @@ async fn child_read_exposes_parent_fields_through_via() {
     db.update_secured(&tpl, &su, ACLS, &[], t, json!({ "name": "Widget Pro" }).as_object().unwrap()).await.unwrap();
     let row = db.find_one_secured(&var, &su, ACLS, &[], v).await.unwrap().unwrap();
     assert_eq!(row["name"], json!("Widget Pro"), "delegated read follows the parent");
-
-    db.drop_table(&var).await.unwrap();
-    db.drop_table(&tpl).await.unwrap();
 }

@@ -4,7 +4,6 @@
 //! paid via register_payment (in_invoice -> payable). Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -23,18 +22,9 @@ fn money(v: &serde_json::Value, field: &str) -> f64 {
 #[tokio::test]
 async fn confirmed_purchase_generates_a_posted_balanced_bill() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
     db.ensure_sequence("PO", "PO/", "", 5).await.unwrap();
 
     let (currency, partner, product, order, mv, account, journal) = (
@@ -98,6 +88,4 @@ async fn confirmed_purchase_generates_a_posted_balanced_bill() {
     let paid = db.find_one_secured(&mv, &su, &[], &[], move_id).await.unwrap().unwrap();
     assert_eq!(money(&paid, "amount_residual"), 0.0, "the bill is settled");
     assert_eq!(paid["payment_state"], "paid");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

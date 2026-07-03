@@ -2,20 +2,10 @@
 //! installed_module; uninstall keeps the row's absence non-destructive (tables untouched here, since
 //! this test only exercises the registry, not migration). Live Postgres.
 
-use kigumi_db::Db;
-
 #[tokio::test]
 async fn installed_module_registry_roundtrip() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    db.ensure_module_schema().await.unwrap();
-    db.mark_module_uninstalled("mtest").await.unwrap(); // clean slate for re-runs
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
 
     assert!(!db.is_module_installed("mtest").await.unwrap(), "absent by default");
 

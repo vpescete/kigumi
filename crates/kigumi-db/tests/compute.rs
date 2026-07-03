@@ -2,7 +2,7 @@
 //! update, against a live Postgres. Requires `DATABASE_URL`; skipped otherwise.
 
 use kigumi_core::{
-    resolve, Acl, ComputeInput, Ctx, FieldDef, FieldKind, ModelDescriptor, RecordRule, ResolvedModel,
+    resolve, Acl, ComputeInput, FieldDef, FieldKind, ModelDescriptor, RecordRule, ResolvedModel,
     Value,
 };
 use kigumi_db::Db;
@@ -40,28 +40,22 @@ async fn subtotal(db: &Db, id: i64) -> f64 {
 
 #[tokio::test]
 async fn compute_runs_on_insert_and_update() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = model();
     db.drop_table(&m).await.unwrap();
     db.create_table(&m).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
+    let su = kigumi_test::su();
 
     // Insert qty=2, price=5 → subtotal is COMPUTED to 10 (not provided by the caller).
     let v = serde_json::json!({ "qty": 2.0, "price": 5.0 });
     let id = db.insert_secured(&m, &su, ACLS, RULES, v.as_object().unwrap()).await.unwrap();
-    assert_eq!(subtotal(&db, id).await, 10.0);
+    assert_eq!(subtotal(db, id).await, 10.0);
 
     // Update qty=3 → subtotal is RECOMPUTED to 15 from the merged record.
     let upd = serde_json::json!({ "qty": 3.0 });
     assert_eq!(db.update_secured(&m, &su, ACLS, RULES, id, upd.as_object().unwrap()).await.unwrap(), 1);
-    assert_eq!(subtotal(&db, id).await, 15.0);
+    assert_eq!(subtotal(db, id).await, 15.0);
 
     db.drop_table(&m).await.unwrap();
 }

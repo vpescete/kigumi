@@ -8,8 +8,7 @@ use axum::http::{Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use kigumi_auth::Authenticator;
-use kigumi_core::{resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
-use kigumi_db::Db;
+use kigumi_core::{resolve, Acl, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel};
 use kigumi_server::{router_with_data, FsBlobStore};
 use serde_json::json;
 use tower::ServiceExt;
@@ -67,22 +66,16 @@ async fn send(app: Router, method: &str, uri: &str, groups: Option<&str>, ctype:
 
 #[tokio::test]
 async fn attachment_lifecycle_and_gates() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let seed = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-    let (host, att) = (m(&HOST), m(&ATTACHMENT));
-    seed.drop_table(&att).await.unwrap();
-    seed.drop_table(&host).await.unwrap();
-    seed.create_table(&host).await.unwrap();
-    seed.create_table(&att).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let seed = &t.db;
+    let su = kigumi_test::su();
+    // Both models are REGISTERED — the kit's reset already created their tables.
+    let host = m(&HOST);
     let hid = seed.insert_secured(&host, &su, ACLS, &[], json!({ "name": "doc holder" }).as_object().unwrap()).await.unwrap();
 
     let tmp = tempfile::tempdir().unwrap();
     let blobs = std::sync::Arc::new(FsBlobStore::new(tmp.path()));
-    let app = router_with_data(vec![m(&HOST), m(&ATTACHMENT)], Db::connect(&url).await.unwrap(), ACLS, &[], SECRET, blobs);
+    let app = router_with_data(vec![m(&HOST), m(&ATTACHMENT)], t.db.clone(), ACLS, &[], SECRET, blobs);
 
     let list_uri = format!("/api/att.host/{hid}/attachments");
     let payload = b"PDF-ish bytes \x00\x01 hello".to_vec();
@@ -135,7 +128,4 @@ async fn attachment_lifecycle_and_gates() {
     seed.delete_secured(&host, &su, ACLS, &[], hid).await.unwrap();
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM kigumi_attachment WHERE res_model='att.host' AND res_id=$1").bind(hid).fetch_one(seed.pool()).await.unwrap();
     assert_eq!(n, 0, "attachments cleaned up when the host record is deleted");
-
-    seed.drop_table(&att).await.unwrap();
-    seed.drop_table(&host).await.unwrap();
 }

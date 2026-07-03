@@ -20,19 +20,13 @@ kigumi_core::inventory::submit! {
 
 #[tokio::test]
 async fn due_job_runs_once_then_waits_its_interval() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     sqlx::query("DROP TABLE IF EXISTS cron_probe").execute(db.pool()).await.unwrap();
     sqlx::query("CREATE TABLE cron_probe (id bigserial PRIMARY KEY, at timestamptz DEFAULT now())")
         .execute(db.pool()).await.unwrap();
 
-    db.ensure_crons().await.unwrap(); // creates kigumi_cron + seeds test_probe (and the builtins)
+    // The kit's reset already ran ensure_crons (kigumi_cron seeded with test_probe + the builtins).
     // Make ONLY test_probe due (push everything else to the future) so the test is deterministic.
     sqlx::query("UPDATE kigumi_cron SET next_run = now() + interval '1 day'").execute(db.pool()).await.unwrap();
     sqlx::query("UPDATE kigumi_cron SET next_run = now() - interval '1 hour' WHERE name = 'test_probe'")
@@ -54,5 +48,4 @@ async fn due_job_runs_once_then_waits_its_interval() {
     assert_eq!(n, 1, "not re-run within its interval");
 
     sqlx::query("DROP TABLE cron_probe").execute(db.pool()).await.unwrap();
-    sqlx::query("DELETE FROM kigumi_cron WHERE name='test_probe'").execute(db.pool()).await.unwrap();
 }

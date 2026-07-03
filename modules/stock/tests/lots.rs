@@ -33,19 +33,9 @@ async fn lot_qty(db: &Db, su: &Ctx, quant: &ResolvedModel, product: i64, locatio
 #[tokio::test]
 async fn stock_is_tracked_per_lot_and_serial() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_stock_indexes().await.unwrap();
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (currency, company, product, template, location, picking, mv, quant, lot) = (
         resolve_registered("res.currency").unwrap(),
@@ -114,6 +104,4 @@ async fn stock_is_tracked_per_lot_and_serial() {
     let no_lot = ins(&picking, json!({ "picking_type": "receipt", "location_id": vendors, "location_dest_id": stock, "company_id": comp })).await;
     ins(&mv, json!({ "picking_id": no_lot, "product_id": serprod, "product_uom_qty": "1", "location_id": vendors, "location_dest_id": stock })).await;
     assert!(db.run_service(&picking, &su, &[], &[], no_lot, "validate", serde_json::Map::new()).await.is_err(), "a serial move without a serial is rejected");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }

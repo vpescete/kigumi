@@ -1,12 +1,11 @@
 //! M6/D11: res.users + res.groups as read-only metamodel models. res.users is an EXTERNAL table
 //! (a projection of the auth subsystem's `kigumi_user`) — excluded from migration and projected
 //! WITHOUT the password hash. res.groups is a normal seeded list. Live Postgres; skipped without
-//! DATABASE_URL. Lightweight on purpose (no full-catalog migrate) to avoid racing other test
-//! binaries on the shared reference tables.
+//! DATABASE_URL. The kigumi-test kit's advisory lock serializes test binaries on the shared
+//! reference tables.
 
 use kigumi::prelude::*;
 use kigumi_auth::hash_password;
-use kigumi_db::Db;
 
 fn link() {
     let _ = &kigumi_mod_base::MANIFEST;
@@ -26,16 +25,9 @@ async fn res_users_is_an_external_readonly_projection() {
     let groups = registered_group_names();
     assert!(groups.contains(&"user".to_string()) && groups.contains(&"admin".to_string()));
 
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping DB part: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-    db.ensure_auth_schema().await.unwrap(); // owns kigumi_user (the external table)
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     // A user created through the AUTH subsystem (upsert is idempotent on login)...
     db.upsert_user("ada-d11", &hash_password("x").unwrap(), &["user", "admin"]).await.unwrap();

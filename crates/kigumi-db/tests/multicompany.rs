@@ -5,7 +5,6 @@
 use kigumi_core::{
     resolve, Acl, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, RecordRule,
 };
-use kigumi_db::Db;
 
 static COMPANY: ModelDescriptor = ModelDescriptor {
     name: "mc.company",
@@ -41,22 +40,11 @@ fn names(rows: &[serde_json::Value]) -> Vec<String> {
 
 #[tokio::test]
 async fn company_scope_isolates_rows() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let company = resolve(&COMPANY, &[]).unwrap();
     let doc = resolve(&DOC, &[]).unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    db.drop_table(&doc).await.unwrap();
-    db.drop_table(&company).await.unwrap();
-    db.create_table(&company).await.unwrap();
-    db.create_table(&doc).await.unwrap();
+    let su = kigumi_test::su();
 
     // Two companies.
     let c1 = db.insert_secured(&company, &su, ACLS, RULES, serde_json::json!({ "name": "C1" }).as_object().unwrap()).await.unwrap();
@@ -110,7 +98,4 @@ async fn company_scope_isolates_rows() {
     // Editing other fields (or re-stating the SAME company) stays allowed.
     assert_eq!(db.update_secured(&doc, &in_c1, ACLS, RULES, new_id, serde_json::json!({ "name": "renamed" }).as_object().unwrap()).await.unwrap(), 1);
     assert_eq!(db.update_secured(&doc, &in_c1, ACLS, RULES, new_id, serde_json::json!({ "company_id": c1 }).as_object().unwrap()).await.unwrap(), 1, "writing the caller's own company is fine");
-
-    db.drop_table(&doc).await.unwrap();
-    db.drop_table(&company).await.unwrap();
 }

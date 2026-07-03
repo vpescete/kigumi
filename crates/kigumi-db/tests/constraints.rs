@@ -2,9 +2,9 @@
 //! and a CHECK constraint → BadInput (400). Live Postgres.
 
 use kigumi_core::{
-    resolve, Ctx, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel,
+    resolve, FieldDef, FieldKind, ModelDescriptor, ModelRegistration, ResolvedModel,
 };
-use kigumi_db::{Db, DbError};
+use kigumi_db::DbError;
 
 static ITEM: ModelDescriptor = ModelDescriptor {
     name: "cst.item",
@@ -27,18 +27,10 @@ fn model() -> ResolvedModel {
 
 #[tokio::test]
 async fn defaults_unique_and_check() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("skipping: DATABASE_URL not set");
-            return;
-        }
-    };
-    let db = Db::connect(&url).await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
     let m = model();
-    let su = Ctx::new(0, vec![]).sudo();
-    db.drop_table(&m).await.unwrap();
-    db.create_table(&m).await.unwrap();
+    let su = kigumi_test::su();
 
     // Create with only the required field → defaults fill qty=1, state=draft, active=true.
     let id = db.insert_secured(&m, &su, &[], &[], serde_json::json!({ "name": "a" }).as_object().unwrap()).await.unwrap();
@@ -60,6 +52,4 @@ async fn defaults_unique_and_check() {
     let g2 = db.find_one_secured(&m, &su, &[], &[], id2).await.unwrap().unwrap();
     assert_eq!(g2["qty"].as_i64().unwrap(), 7);
     assert_eq!(g2["state"], "done");
-
-    db.drop_table(&m).await.unwrap();
 }

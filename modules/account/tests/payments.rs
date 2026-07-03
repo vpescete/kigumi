@@ -3,7 +3,6 @@
 //! -> paid (reconciled). Requires DATABASE_URL.
 
 use kigumi::prelude::*;
-use kigumi_db::Db;
 use serde_json::json;
 
 fn link() {
@@ -17,18 +16,9 @@ fn money(v: &serde_json::Value, field: &str) -> f64 {
 #[tokio::test]
 async fn register_payment_draws_down_the_residual() {
     link();
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(u) => u,
-        Err(_) => { eprintln!("skipping: DATABASE_URL not set"); return; }
-    };
-    let db = Db::connect(&url).await.unwrap();
-    let su = Ctx::new(0, vec![]).sudo();
-
-    let plan = migration_plan().unwrap();
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_table(&t.model).await.unwrap(); }
-    for t in &plan { db.create_m2m_relations(&t.model).await.unwrap(); }
-    db.ensure_sequence_schema().await.unwrap();
+    let Some(t) = kigumi_test::TestDb::new().await else { return };
+    let db = &t.db;
+    let su = kigumi_test::su();
 
     let (currency, partner, mv, account, journal) = (
         resolve_registered("res.currency").unwrap(),
@@ -90,6 +80,4 @@ async fn register_payment_draws_down_the_residual() {
 
     // Overpayment / paying a settled invoice is rejected.
     assert!(db.run_service(&mv, &acct, a_acls, a_rules, move_id, "register_payment", serde_json::json!({"amount": "1", "journal_id": bank_journal}).as_object().unwrap().clone()).await.is_err(), "cannot pay beyond the residual");
-
-    for t in plan.iter().rev() { db.drop_table(&t.model).await.unwrap(); }
 }
