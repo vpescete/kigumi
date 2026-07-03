@@ -327,8 +327,25 @@ claude mcp add mioshop --env DATABASE_URL=postgres://localhost/mioshop -- \
   /path/to/mioshop/target/debug/app mcp mario
 ```
 
-Confine v1: catalogo e baseline di sicurezza compilati (i custom field runtime e le righe ACL a
-DB non sono ancora fusi); solo trasporto stdio.
+I custom field runtime SONO fusi (un campo aggiunto via API è letto/scritto anche su MCP); gli
+overlay ACL/rule a DB no (la baseline compilata è l'autorità qui).
+
+### MCP su HTTP (autenticato, esposto in rete)
+
+`kigumi mcp-http` (o `serve_http` in un embedding) serve gli stessi tool su streamable HTTP a
+`/mcp` (default `127.0.0.1:8601`). A differenza di stdio, è una superficie di rete: OGNI chiamata
+a un tool autentica la API key della richiesta e gira sotto l'utente di quella key, ristretto ai
+suoi scope — lo stesso lookup/verify/narrow del server REST, così un agente non supera mai il
+proprietario della key.
+
+```
+Authorization: Bearer kg_<prefix>_<secret>
+```
+
+L'handshake MCP `initialize` non richiede key (è negoziazione di protocollo); ogni `tools/call`
+risolve la key e nega senza una valida, così revocare una key ferma il suo agente alla chiamata
+successiva. Un client MCP che supporta HTTP + bearer token si connette direttamente; tieni
+`mcp-http` dietro un reverse proxy (TLS, rate limiting) per un'esposizione oltre localhost.
 
 ## Report ledger: `GET /api/reports/:name`
 

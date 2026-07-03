@@ -250,7 +250,6 @@ impl KigumiMcp {
     )]
     pub async fn search_records(&self, Parameters(p): Parameters<SearchParams>, rc: RequestContext<RoleServer>) -> ToolResult {
         let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
-        let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         self.search_records_inner(&ctx, p).await
     }
 
@@ -259,7 +258,6 @@ impl KigumiMcp {
         description = "Read one record by id (fields filtered by the impersonated user's field-group visibility)."
     )]
     pub async fn get_record(&self, Parameters(p): Parameters<RecordParam>, rc: RequestContext<RoleServer>) -> ToolResult {
-        let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         self.get_record_inner(&ctx, p).await
     }
@@ -270,7 +268,6 @@ impl KigumiMcp {
     )]
     pub async fn create_record(&self, Parameters(p): Parameters<CreateParams>, rc: RequestContext<RoleServer>) -> ToolResult {
         let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
-        let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         self.create_record_inner(&ctx, p).await
     }
 
@@ -280,13 +277,11 @@ impl KigumiMcp {
     )]
     pub async fn update_record(&self, Parameters(p): Parameters<UpdateParams>, rc: RequestContext<RoleServer>) -> ToolResult {
         let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
-        let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         self.update_record_inner(&ctx, p).await
     }
 
     #[tool(name = "delete_record", description = "Delete a record by id (requires the Delete ACL).")]
     pub async fn delete_record(&self, Parameters(p): Parameters<RecordParam>, rc: RequestContext<RoleServer>) -> ToolResult {
-        let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         self.delete_record_inner(&ctx, p).await
     }
@@ -297,7 +292,6 @@ impl KigumiMcp {
     )]
     pub async fn run_action(&self, Parameters(p): Parameters<ActionParams>, rc: RequestContext<RoleServer>) -> ToolResult {
         let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
-        let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         self.run_action_inner(&ctx, p).await
     }
 
@@ -307,7 +301,6 @@ impl KigumiMcp {
     )]
     pub async fn run_service(&self, Parameters(p): Parameters<ServiceParams>, rc: RequestContext<RoleServer>) -> ToolResult {
         let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
-        let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         self.run_service_inner(&ctx, p).await
     }
 
@@ -316,7 +309,6 @@ impl KigumiMcp {
         description = "Post a plain-text message on a record's chatter thread (models with \"chatter\": true in list_models)."
     )]
     pub async fn post_message(&self, Parameters(p): Parameters<MessageParams>, rc: RequestContext<RoleServer>) -> ToolResult {
-        let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         let ctx = match self.caller(&rc).await { Ok(c) => c, Err(e) => return Ok(e) };
         self.post_message_inner(&ctx, p).await
     }
@@ -540,19 +532,32 @@ impl KigumiMcp {
 /// add needs a restart, as documented for the static-catalog model.
 pub async fn serve_http(db: Db, bind: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use rmcp::transport::streamable_http_server::{
-        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+        session::never::NeverSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     };
     // Snapshot custom fields once; a broken catalog fails startup here (not per request).
     let custom = db.custom_fields_by_model().await.unwrap_or_default();
     let _ = KigumiMcp::with_overlays(db.clone(), Auth::PerRequest, &custom)?;
     let custom = Arc::new(custom);
+    // STATELESS mode (review should-fix): no per-session state, so an unauthenticated `initialize`
+    // storm cannot accumulate sessions, worker tasks or held-open SSE streams — each request is a
+    // self-contained JSON request/response and every tool call authenticates its own API key. Our
+    // tools are pure request/response (no server-initiated notifications), so nothing is lost. The
+    // residual Argon2-per-request cost is the same as password login — a reverse-proxy rate-limit
+    // concern, documented.
+    let config = StreamableHttpServerConfig::default()
+        .with_stateful_mode(false)
+        .with_json_response(true);
     let service = StreamableHttpService::new(
         move || {
-            KigumiMcp::with_overlays(db.clone(), Auth::PerRequest, &custom)
-                .map_err(|e| std::io::Error::other(format!("{e:?}")))
+            KigumiMcp::with_overlays(db.clone(), Auth::PerRequest, &custom).map_err(|e| {
+                // Never surface catalog/DB detail to the network client (the db_err invariant):
+                // log it, return a generic transport error.
+                eprintln!("kigumi-mcp: session build failed: {e:?}");
+                std::io::Error::other("service unavailable")
+            })
         },
-        Arc::new(LocalSessionManager::default()),
-        StreamableHttpServerConfig::default(),
+        Arc::new(NeverSessionManager::default()),
+        config,
     );
     let app = axum::Router::new().nest_service("/mcp", service);
     let listener = tokio::net::TcpListener::bind(bind).await?;

@@ -396,8 +396,12 @@ async fn run(cli: Cli) -> Fallible {
             user_command(&db, action).await
         }
         Cmd::Apikey { action } => {
-            let s = Settings::load(Some(&path))?;
-            let db = Db::connect(&s.secrets.database_url).await?;
+            // Env-first (like `mcp`/`mcp-http`): key management is often run without a kigumi.toml.
+            let url = match std::env::var("DATABASE_URL") {
+                Ok(u) => u,
+                Err(_) => Settings::load(Some(&path))?.secrets.database_url,
+            };
+            let db = Db::connect(&url).await?;
             db.ensure_auth_schema().await?;
             db.ensure_api_key_schema().await?;
             apikey_command(&db, action).await
