@@ -558,19 +558,10 @@ async fn authenticate(backend: &DataBackend, headers: &HeaderMap) -> Result<Ctx,
             if !ok {
                 return Err(unauthorized());
             }
-            // Impersonate the user; a key can only NARROW the user's groups, never widen them.
-            let (company_id, company_ids) =
-                backend.db.user_scope(key.user_id).await.map_err(|_| unauthorized())?;
-            let mut groups = backend.db.user_groups(key.user_id).await.map_err(|_| unauthorized())?;
-            if !key.scopes.is_empty() {
-                groups.retain(|g| key.scopes.contains(g));
-            }
-            let mut ctx = Ctx::new(key.user_id, groups);
-            // Mirror verify_access: derive the active company from the allowed set when the stored
-            // active is NULL, so a set-scoped user keeps its company visibility through a key.
-            if let Some(active) = company_id.or_else(|| company_ids.first().copied()) {
-                ctx = ctx.in_companies(active, company_ids);
-            }
+            // Impersonate the user, narrowed to the key's scopes — the identity math lives once in
+            // kigumi-db (shared with the MCP server), so the never-exceed-your-user contract has a
+            // single implementation.
+            let ctx = backend.db.build_key_ctx(key.user_id, &key.scopes).await.map_err(|_| unauthorized())?;
             // Best-effort usage stamp; never fails the request.
             let _ = backend.db.touch_api_key(&prefix, API_KEY_TOUCH_THROTTLE_SECS).await;
             return Ok(ctx);

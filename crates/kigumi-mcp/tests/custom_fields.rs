@@ -5,7 +5,6 @@
 use kigumi::prelude::*;
 use kigumi_mcp::{CreateParams, KigumiMcp, ModelParam, RecordParam};
 use kigumi_schema::pg_column_type;
-use rmcp::handler::server::wrapper::Parameters;
 use serde_json::{json, Value as Json};
 
 #[model(name = "cftest.doc", table = "cftest_doc")]
@@ -44,7 +43,7 @@ async fn mcp_sees_and_writes_runtime_custom_fields() {
 
     // A server built BEFORE the merge (with_ctx, compile-time only) does not see it...
     let bare = KigumiMcp::with_ctx(db.clone(), Ctx::new(9, vec!["cftest.user".to_string()])).unwrap();
-    let (_, contract) = unpack(&bare.get_model(Parameters(ModelParam { model: "cftest.doc".into() })).await.unwrap());
+    let (_, contract) = unpack(&bare.get_model_inner(ModelParam { model: "cftest.doc".into() }).await.unwrap());
     assert!(!contract.to_string().contains("priority"), "with_ctx is compile-time only");
 
     // ...but for_login (the real entry point) merges it: the contract lists it, and it round-trips.
@@ -54,20 +53,20 @@ async fn mcp_sees_and_writes_runtime_custom_fields() {
     db.upsert_user("cf_user", "x", &["cftest.user"]).await.unwrap();
     let srv = KigumiMcp::for_login(db.clone(), "cf_user").await.unwrap();
 
-    let (_, contract) = unpack(&srv.get_model(Parameters(ModelParam { model: "cftest.doc".into() })).await.unwrap());
+    let (_, contract) = unpack(&srv.get_model_inner(ModelParam { model: "cftest.doc".into() }).await.unwrap());
     assert!(contract.to_string().contains("priority"), "the runtime field is in the MCP contract: {contract}");
 
     let (err, created) = unpack(
-        &srv.create_record(Parameters(CreateParams {
+        &srv.create_record_inner(&kigumi_test::su(), CreateParams {
             model: "cftest.doc".into(),
             values: json!({ "title": "Onboard", "priority": 5 }).as_object().unwrap().clone(),
-        }))
+        })
         .await
         .unwrap(),
     );
     assert!(!err, "create with the custom field accepted: {created}");
     let id = created["id"].as_i64().unwrap();
 
-    let (_, rec) = unpack(&srv.get_record(Parameters(RecordParam { model: "cftest.doc".into(), id })).await.unwrap());
+    let (_, rec) = unpack(&srv.get_record_inner(&kigumi_test::su(), RecordParam { model: "cftest.doc".into(), id }).await.unwrap());
     assert_eq!(rec["priority"].as_i64(), Some(5), "the custom value round-trips through MCP: {rec}");
 }

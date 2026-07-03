@@ -103,6 +103,13 @@ enum Cmd {
         /// Login of the user the MCP client acts as.
         user: String,
     },
+    /// Serve MCP over streamable HTTP (network-facing): each request authenticates with an API key
+    /// (Authorization: Bearer kg_...) and acts as that key's user. Endpoint /mcp.
+    McpHttp {
+        /// Bind address (default 127.0.0.1:8601).
+        #[arg(long, default_value = "127.0.0.1:8601")]
+        bind: String,
+    },
     /// Scaffold a new Kigumi application workspace (module crate + server binary on kigumi-runtime).
     New {
         /// Name of the new app (also the directory and module crate name).
@@ -281,6 +288,15 @@ async fn run(cli: Cli) -> Fallible {
             let db = Db::connect(&url).await?;
             let server = kigumi_mcp::KigumiMcp::for_login(db, &user).await?;
             server.serve_stdio().await.map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        Cmd::McpHttp { bind } => {
+            let url = match std::env::var("DATABASE_URL") {
+                Ok(u) => u,
+                Err(_) => Settings::load(Some(&path))?.secrets.database_url,
+            };
+            let db = Db::connect(&url).await?;
+            kigumi_mcp::serve_http(db, &bind).await.map_err(|e| e.to_string())?;
             Ok(())
         }
         Cmd::New { name, modules, framework_path, git, yes } => {

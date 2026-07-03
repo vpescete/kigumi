@@ -6,6 +6,7 @@
 //! passwords). Revocation is a soft-delete (`revoked_at`), keeping the audit trail.
 
 use crate::{Db, DbError};
+use kigumi_core::Ctx;
 use sqlx::Row;
 
 const ENSURE: &str = "CREATE TABLE IF NOT EXISTS kigumi_api_key \
@@ -86,6 +87,24 @@ impl Db {
             user_id: r.get("user_id"),
             scopes: split_scopes(&r.get::<String, _>("scopes")),
         }))
+    }
+
+    /// Builds the impersonated `Ctx` for a verified key: the user's groups NARROWED to the key's
+    /// scopes (never widened), with the user's company scope (active derived from the allowed set
+    /// when the stored active is NULL, mirroring `verify_access`). The one place this identity math
+    /// lives — every host that authenticates a key (server, MCP) calls it, so the never-exceed-your-
+    /// user contract has a single implementation. Crypto (verifying the secret) is the caller's job.
+    pub async fn build_key_ctx(&self, user_id: i64, key_scopes: &[String]) -> Result<Ctx, DbError> {
+        let (company_id, company_ids) = self.user_scope(user_id).await?;
+        let mut groups = self.user_groups(user_id).await?;
+        if !key_scopes.is_empty() {
+            groups.retain(|g| key_scopes.iter().any(|s| s == g));
+        }
+        let mut ctx = Ctx::new(user_id, groups);
+        if let Some(active) = company_id.or_else(|| company_ids.first().copied()) {
+            ctx = ctx.in_companies(active, company_ids);
+        }
+        Ok(ctx)
     }
 
     /// Stamps `last_used_at` — but at most once per `throttle_secs` per key, so a busy key is not a

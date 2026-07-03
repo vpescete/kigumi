@@ -7,7 +7,6 @@ use kigumi::prelude::*;
 use kigumi_mcp::{
     ActionParams, CreateParams, KigumiMcp, ModelParam, RecordParam, SearchParams, UpdateParams,
 };
-use rmcp::handler::server::wrapper::Parameters;
 use serde_json::{json, Value as Json};
 
 #[model(name = "mcptest.item", table = "mcptest_item")]
@@ -45,106 +44,91 @@ fn unpack(result: &rmcp::model::CallToolResult) -> (bool, Json) {
 #[tokio::test]
 async fn mcp_tools_enforce_the_callers_ctx() {
     let Some(t) = kigumi_test::TestDb::new().await else { return };
-    let user = KigumiMcp::with_ctx(t.db.clone(), Ctx::new(7, vec!["mcptest.user".to_string()])).unwrap();
-    let nobody = KigumiMcp::with_ctx(t.db.clone(), Ctx::new(8, vec![])).unwrap();
+    // One server; the tool _inner methods take the caller Ctx explicitly (the #[tool] wrappers
+    // resolve it from the transport — Fixed on stdio, the API key on HTTP).
+    let srv = KigumiMcp::with_ctx(t.db.clone(), Ctx::new(0, vec![]).sudo()).unwrap();
+    let user = Ctx::new(7, vec!["mcptest.user".to_string()]);
+    let nobody = Ctx::new(8, vec![]);
 
     // Discovery: the model is in the catalog and its contract lists the action.
-    let (err, models) = unpack(&user.list_models().await.unwrap());
+    let (err, models) = unpack(&srv.list_models_inner().await.unwrap());
     assert!(!err);
     assert!(models.as_array().unwrap().iter().any(|m| m["model"] == "mcptest.item"));
     let (err, contract) = unpack(
-        &user.get_model(Parameters(ModelParam { model: "mcptest.item".into() })).await.unwrap(),
+        &srv.get_model_inner(ModelParam { model: "mcptest.item".into() }).await.unwrap(),
     );
     assert!(!err);
     assert!(contract.to_string().contains("finish"), "contract lists the action");
 
     // Create → search (domain AST) → get → update → action, all as the impersonated user.
     let (err, created) = unpack(
-        &user
-            .create_record(Parameters(CreateParams {
-                model: "mcptest.item".into(),
-                values: json!({ "title": "Fix the door" }).as_object().unwrap().clone(),
-            }))
-            .await
-            .unwrap(),
+        &srv.create_record_inner(&user, CreateParams {
+            model: "mcptest.item".into(),
+            values: json!({ "title": "Fix the door" }).as_object().unwrap().clone(),
+        }).await.unwrap(),
     );
     assert!(!err, "create failed: {created}");
     let id = created["id"].as_i64().unwrap();
 
     let (err, found) = unpack(
-        &user
-            .search_records(Parameters(SearchParams {
-                model: "mcptest.item".into(),
-                domain: Some(json!({ "field": "state", "op": "=", "value": "draft" })),
-                limit: None,
-            }))
-            .await
-            .unwrap(),
+        &srv.search_records_inner(&user, SearchParams {
+            model: "mcptest.item".into(),
+            domain: Some(json!({ "field": "state", "op": "=", "value": "draft" })),
+            limit: None,
+        }).await.unwrap(),
     );
     assert!(!err);
     assert_eq!(found["returned"].as_i64(), Some(1));
 
     let (err, rec) = unpack(
-        &user.get_record(Parameters(RecordParam { model: "mcptest.item".into(), id })).await.unwrap(),
+        &srv.get_record_inner(&user, RecordParam { model: "mcptest.item".into(), id }).await.unwrap(),
     );
     assert!(!err);
     assert_eq!(rec["title"], "Fix the door");
 
     let (err, _) = unpack(
-        &user
-            .update_record(Parameters(UpdateParams {
-                model: "mcptest.item".into(),
-                id,
-                values: json!({ "title": "Fix the gate" }).as_object().unwrap().clone(),
-            }))
-            .await
-            .unwrap(),
+        &srv.update_record_inner(&user, UpdateParams {
+            model: "mcptest.item".into(),
+            id,
+            values: json!({ "title": "Fix the gate" }).as_object().unwrap().clone(),
+        }).await.unwrap(),
     );
     assert!(!err);
 
     let (err, _) = unpack(
-        &user
-            .run_action(Parameters(ActionParams {
-                model: "mcptest.item".into(),
-                id,
-                action: "finish".into(),
-            }))
-            .await
-            .unwrap(),
+        &srv.run_action_inner(&user, ActionParams {
+            model: "mcptest.item".into(),
+            id,
+            action: "finish".into(),
+        }).await.unwrap(),
     );
     assert!(!err);
     let (_, rec) = unpack(
-        &user.get_record(Parameters(RecordParam { model: "mcptest.item".into(), id })).await.unwrap(),
+        &srv.get_record_inner(&user, RecordParam { model: "mcptest.item".into(), id }).await.unwrap(),
     );
     assert_eq!(rec["state"], "done");
 
     // The engine is the guardrail: no Delete ACL for the group → denied; a group-less caller is
     // default-denied even on read; a missing-required create returns the structured field error.
     let (err, body) = unpack(
-        &user.delete_record(Parameters(RecordParam { model: "mcptest.item".into(), id })).await.unwrap(),
+        &srv.delete_record_inner(&user, RecordParam { model: "mcptest.item".into(), id }).await.unwrap(),
     );
     assert!(err, "delete must be denied: {body}");
 
     let (err, body) = unpack(
-        &nobody
-            .search_records(Parameters(SearchParams {
-                model: "mcptest.item".into(),
-                domain: None,
-                limit: None,
-            }))
-            .await
-            .unwrap(),
+        &srv.search_records_inner(&nobody, SearchParams {
+            model: "mcptest.item".into(),
+            domain: None,
+            limit: None,
+        }).await.unwrap(),
     );
     assert!(err, "default-deny for the group-less caller: {body}");
 
     let (err, body) = unpack(
-        &user
-            .create_record(Parameters(CreateParams {
-                model: "mcptest.item".into(),
-                values: serde_json::Map::new(),
-            }))
-            .await
-            .unwrap(),
+        &srv.create_record_inner(&user, CreateParams {
+            model: "mcptest.item".into(),
+            values: serde_json::Map::new(),
+        }).await.unwrap(),
     );
     assert!(err);
     assert!(body["error"]["fields"].to_string().contains("title"), "field error surfaced: {body}");
