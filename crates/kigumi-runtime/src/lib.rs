@@ -31,6 +31,7 @@ fn migration_err<E: std::fmt::Debug>(e: E) -> DbError {
 /// fields, views, events) — the canonical order previously known only to kigumi-cli's source.
 pub async fn ensure_framework_schemas(db: &Db) -> Result<(), DbError> {
     db.ensure_auth_schema().await?;
+    db.ensure_api_key_schema().await?;
     db.ensure_job_schema().await?;
     db.ensure_sequence_schema().await?;
     db.ensure_setting_schema().await?;

@@ -188,6 +188,7 @@ async fn ensure_all(db: &Db) -> Result<(), DbError> {
     db.ensure_event_schema().await?;
     db.ensure_access_schema().await?;
     db.ensure_auth_schema().await?;
+    db.ensure_api_key_schema().await?;
     db.ensure_module_schema().await?;
     db.ensure_setting_schema().await?;
     db.ensure_view_schema().await?;

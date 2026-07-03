@@ -74,6 +74,11 @@ enum Cmd {
         #[command(subcommand)]
         action: UserCmd,
     },
+    /// Manage API keys (long-lived machine credentials that impersonate a user).
+    Apikey {
+        #[command(subcommand)]
+        action: ApikeyCmd,
+    },
     /// Manage runtime ACL overrides (additive on top of the compiled-in baseline).
     Acl {
         #[command(subcommand)]
@@ -224,6 +229,25 @@ enum UserCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum ApikeyCmd {
+    /// Mint a key for a user. Prints the secret ONCE. --scopes is a CSV subset of the user's groups
+    /// (empty = all); --expires-days sets an optional expiry.
+    Create {
+        user: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value = "")]
+        scopes: String,
+        #[arg(long)]
+        expires_days: Option<i64>,
+    },
+    /// List a user's live keys (never the secret).
+    List { user: String },
+    /// Revoke a key by id.
+    Revoke { id: i64 },
+}
+
 fn config_path(cli: &Cli) -> PathBuf {
     cli.config
         .clone()
@@ -352,7 +376,15 @@ async fn run(cli: Cli) -> Fallible {
             let s = Settings::load(Some(&path))?;
             let db = Db::connect(&s.secrets.database_url).await?;
             db.ensure_auth_schema().await?;
+            db.ensure_api_key_schema().await?;
             user_command(&db, action).await
+        }
+        Cmd::Apikey { action } => {
+            let s = Settings::load(Some(&path))?;
+            let db = Db::connect(&s.secrets.database_url).await?;
+            db.ensure_auth_schema().await?;
+            db.ensure_api_key_schema().await?;
+            apikey_command(&db, action).await
         }
         Cmd::Acl { action } => {
             let s = Settings::load(Some(&path))?;
@@ -762,6 +794,38 @@ async fn serve(s: Settings) -> Fallible {
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("kigumi serving on http://{bind}  ({} models)", registered_model_names().len());
     axum::serve(listener, app).await?;
+    Ok(())
+}
+
+async fn apikey_command(db: &Db, action: ApikeyCmd) -> Fallible {
+    match action {
+        ApikeyCmd::Create { user, name, scopes, expires_days } => {
+            let u = db.find_user(&user).await?.ok_or_else(|| format!("unknown user '{user}'"))?;
+            let requested: Vec<String> =
+                scopes.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+            // A key can only NARROW: every scope must be one of the user's groups.
+            if let Some(bad) = requested.iter().find(|g| !u.groups.contains(g)) {
+                return Err(format!("scope '{bad}' is not one of {user}'s groups ({})", u.groups.join(", ")).into());
+            }
+            let minted = kigumi_auth::new_api_key().map_err(|e| format!("{e:?}"))?;
+            let expires = expires_days.map(|d| d * 86_400);
+            db.create_api_key(&minted.prefix, &minted.hash, u.id, &name, &requested, expires).await?;
+            println!("{}", minted.plain);
+            eprintln!("store this key now — it is not recoverable");
+        }
+        ApikeyCmd::List { user } => {
+            let u = db.find_user(&user).await?.ok_or_else(|| format!("unknown user '{user}'"))?;
+            for k in db.list_api_keys(u.id).await? {
+                println!("{}\t{}\t[{}]\t{}", k.id, k.prefix, k.scopes.join(","), k.name);
+            }
+        }
+        ApikeyCmd::Revoke { id } => {
+            // The CLI is operator-trusted: revoke by id regardless of owner (the HTTP path scopes
+            // revocation to the caller).
+            let revoked = db.revoke_api_key_admin(id).await?;
+            println!("{}", if revoked { "revoked" } else { "no such live key" });
+        }
+    }
     Ok(())
 }
 

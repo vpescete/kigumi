@@ -9,6 +9,7 @@
 mod access_store;
 mod auth_store;
 mod cron;
+mod api_key;
 mod custom_field;
 mod event_schema;
 mod migration;
@@ -20,6 +21,7 @@ mod settings;
 mod view_override;
 pub use access_store::{AclRow, RuleRow};
 pub use auth_store::UserRow;
+pub use api_key::{ApiKeyAuth, ApiKeyInfo};
 pub use custom_field::{custom_scalar_kind, is_safe_ident, CustomField};
 pub use view_override::ViewOverride;
 pub use cron::{registered_crons, CronFn, CronRegistration};

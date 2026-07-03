@@ -409,6 +409,8 @@ fn build_data_router(
         .route("/auth/refresh", post(refresh_handler))
         .route("/auth/logout", post(logout_handler))
         .route("/auth/me", get(me_handler))
+        .route("/auth/keys", get(list_keys_handler).post(create_key_handler))
+        .route("/auth/keys/:id", axum::routing::delete(revoke_key_handler))
         .route("/health", get(health_handler))
         .route("/ready", get(ready_handler))
         // Runtime access policy (admin only): grant a DB ACL / add a DB record rule, live (no restart).
@@ -533,12 +535,43 @@ fn spawn_event_poller(db: Arc<Db>, tx: tokio::sync::broadcast::Sender<Arc<Vec<St
 
 /// Verifies the request's bearer token into a trusted `Ctx`, or a 401 response. This is real
 /// authentication: a client cannot claim a group without a token signed by the server secret.
-fn authenticate(backend: &DataBackend, headers: &HeaderMap) -> Result<Ctx, Response> {
+/// How often a busy API key restamps `last_used_at` (at most once per this window).
+const API_KEY_TOUCH_THROTTLE_SECS: i64 = 300;
+
+/// Turns the bearer token into the caller's `Ctx`. A token with the API-key scheme (`kg_`) is
+/// looked up in the key store, verified constant-time, and resolved to its user's Ctx narrowed to
+/// the key's scopes; anything else is a JWT (`verify_bearer`, stateless, fast). One 401 for every
+/// failure — never distinguish "no such key" from "bad secret".
+async fn authenticate(backend: &DataBackend, headers: &HeaderMap) -> Result<Ctx, Response> {
     let header = headers.get("authorization").and_then(|v| v.to_str().ok());
-    backend
-        .auth
-        .verify_bearer(header)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "unauthorized").into_response())
+    let unauthorized = || (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+
+    // API-key path: "Authorization: Bearer kg_<prefix>_<secret>".
+    if let Some(token) = header.and_then(|h| h.strip_prefix("Bearer ")) {
+        if let Some((prefix, secret)) = kigumi_auth::parse_api_key(token) {
+            let key = backend.db.find_api_key(&prefix).await.map_err(|_| unauthorized())?;
+            let Some(key) = key else { return Err(unauthorized()) };
+            if !kigumi_auth::verify_password(&secret, &key.hash) {
+                return Err(unauthorized());
+            }
+            // Impersonate the user; a key can only NARROW the user's groups, never widen them.
+            let (company_id, company_ids) =
+                backend.db.user_scope(key.user_id).await.map_err(|_| unauthorized())?;
+            let mut groups = backend.db.user_groups(key.user_id).await.map_err(|_| unauthorized())?;
+            if !key.scopes.is_empty() {
+                groups.retain(|g| key.scopes.contains(g));
+            }
+            let mut ctx = Ctx::new(key.user_id, groups);
+            if let Some(active) = company_id {
+                ctx = ctx.in_companies(active, company_ids);
+            }
+            // Best-effort usage stamp; never fails the request.
+            let _ = backend.db.touch_api_key(&prefix, API_KEY_TOUCH_THROTTLE_SECS).await;
+            return Ok(ctx);
+        }
+    }
+
+    backend.auth.verify_bearer(header).map_err(|_| unauthorized())
 }
 
 fn json_response(body: String) -> Response {
@@ -643,7 +676,7 @@ async fn ready_handler(State(state): State<AppState>) -> Response {
 /// The authenticated caller's own identity — the trusted `Ctx` derived from the bearer token.
 async fn me_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -656,10 +689,83 @@ async fn me_handler(State(state): State<AppState>, headers: HeaderMap) -> Respon
     json_response(body.to_string())
 }
 
+/// `POST /auth/keys` — mint an API key for the authenticated caller. Body: `name` (required),
+/// `scopes` (CSV, a SUBSET of the caller's own groups — a key never widens access), `expires_in`
+/// (seconds, optional; omit for no expiry). The plain key is returned ONCE and never again.
+async fn create_key_handler(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on auth routes");
+    let ctx = match authenticate(backend, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let Some(name) = str_field(&body, "name") else {
+        return error_response(StatusCode::BAD_REQUEST, "bad-input", "a key needs a 'name'", &[]);
+    };
+    let scopes: Vec<String> = str_field(&body, "scopes")
+        .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
+        .unwrap_or_default();
+    // A key can only NARROW: every requested scope must be a group the caller actually holds
+    // (the superuser, groups = [], may name any — it is unrestricted by design).
+    if !ctx.is_su() {
+        if let Some(bad) = scopes.iter().find(|g| !ctx.groups.contains(g)) {
+            return error_response(StatusCode::FORBIDDEN, "access-denied", &format!("scope '{bad}' is not one of your groups"), &[]);
+        }
+    }
+    let expires_in = body.get("expires_in").and_then(|v| v.as_i64()).filter(|&n| n > 0);
+    let minted = match kigumi_auth::new_api_key() {
+        Ok(m) => m,
+        Err(_) => return internal_error("create_key", DbError::BadInput("key generation failed".into())),
+    };
+    match backend.db.create_api_key(&minted.prefix, &minted.hash, ctx.uid, name, &scopes, expires_in).await {
+        Ok(id) => json_status(
+            StatusCode::CREATED,
+            serde_json::json!({ "id": id, "prefix": minted.prefix, "key": minted.plain,
+                "note": "store this key now — it is not recoverable" }).to_string(),
+        ),
+        Err(e) => write_error("create_key", e),
+    }
+}
+
+/// `GET /auth/keys` — list the caller's live keys (never the secret or the hash).
+async fn list_keys_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on auth routes");
+    let ctx = match authenticate(backend, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.list_api_keys(ctx.uid).await {
+        Ok(keys) => {
+            let rows: Vec<Json2> = keys
+                .iter()
+                .map(|k| serde_json::json!({ "id": k.id, "prefix": k.prefix, "name": k.name,
+                    "scopes": k.scopes, "expires_at": k.expires_at, "last_used_at": k.last_used_at,
+                    "created_at": k.created_at }))
+                .collect();
+            json_response(serde_json::json!({ "data": rows }).to_string())
+        }
+        Err(e) => internal_error("list_keys", e),
+    }
+}
+
+/// `DELETE /auth/keys/:id` — revoke one of the caller's keys (soft-delete). 404 if it is not
+/// theirs or already gone — a caller can only revoke their own.
+async fn revoke_key_handler(State(state): State<AppState>, Path(id): Path<i64>, headers: HeaderMap) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on auth routes");
+    let ctx = match authenticate(backend, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match backend.db.revoke_api_key(id, ctx.uid).await {
+        Ok(true) => json_status(StatusCode::OK, serde_json::json!({ "revoked": true }).to_string()),
+        Ok(false) => error_response(StatusCode::NOT_FOUND, "not-found", "no such key", &[]),
+        Err(e) => internal_error("revoke_key", e),
+    }
+}
+
 /// Lists every linked module with its manifest + installed state. Any authenticated user may read it.
 async fn modules_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    if let Err(r) = authenticate(backend, &headers) {
+    if let Err(r) = authenticate(backend, &headers).await {
         return r;
     }
     let mods = match resolve_modules() {
@@ -692,7 +798,7 @@ async fn modules_handler(State(state): State<AppState>, headers: HeaderMap) -> R
 /// Admin only.
 async fn module_install_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -742,7 +848,7 @@ async fn refresh_installed(installed: &Arc<RwLock<HashSet<String>>>, backend: &D
 /// an installed module still depends on. Applies on restart. Admin only.
 async fn module_uninstall_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -787,7 +893,7 @@ async fn module_uninstall_handler(State(state): State<AppState>, Path(name): Pat
 /// Scalar kinds: text | integer | float | decimal | bool | date | datetime.
 async fn add_field_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -870,7 +976,7 @@ async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -
 /// cannot show a control for it; this is how a Studio UI lists hidden fields to offer "Show").
 async fn list_view_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -912,7 +1018,7 @@ async fn list_view_handler(State(state): State<AppState>, Path(name): Path<Strin
 /// Pure UI metadata — it cannot grant access (the ACL/rule layer) or change storage (a custom field).
 async fn add_view_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1009,7 +1115,7 @@ async fn add_view_handler(State(state): State<AppState>, Path(name): Path<String
 /// WIDEN access (they union with the compiled-in baseline) — this can never revoke a static grant.
 async fn set_acl_handler(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1041,7 +1147,7 @@ async fn set_acl_handler(State(state): State<AppState>, headers: HeaderMap, Json
 /// per-subscription HMAC secret is generated server-side (CSPRNG) and returned ONCE — never again.
 async fn create_webhook_handler(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1072,7 +1178,7 @@ async fn create_webhook_handler(State(state): State<AppState>, headers: HeaderMa
 /// Lists webhook subscriptions (admin) — never the secret.
 async fn list_webhooks_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1088,7 +1194,7 @@ async fn list_webhooks_handler(State(state): State<AppState>, headers: HeaderMap
 /// Deactivates a webhook subscription (admin).
 async fn deactivate_webhook_handler(State(state): State<AppState>, Path(id): Path<i64>, headers: HeaderMap) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1111,7 +1217,7 @@ async fn deactivate_webhook_handler(State(state): State<AppState>, Path(id): Pat
 /// an additional alternative — so a group rule can widen that group's access (admin authority).
 async fn set_rule_handler(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1160,7 +1266,7 @@ async fn list_handler(
         Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1305,7 +1411,7 @@ async fn get_one_handler(
         Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1335,7 +1441,7 @@ async fn create_handler(
         Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1360,7 +1466,7 @@ async fn update_handler(
         Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1386,7 +1492,7 @@ async fn action_handler(
         Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1410,7 +1516,7 @@ async fn service_handler(
         Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1439,7 +1545,7 @@ async fn events_stream_handler(
     headers: HeaderMap,
 ) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1571,7 +1677,7 @@ async fn module_route_handler(
         // anonymous probe gets a uniform 401 (matching /api/reports) instead of a method map.
         let all_auth = others.iter().all(|m| route_for(&route, *m).map(|r| r.auth).unwrap_or(true));
         if all_auth {
-            if let Err(r) = authenticate(backend, &headers) {
+            if let Err(r) = authenticate(backend, &headers).await {
                 return r;
             }
         }
@@ -1586,7 +1692,7 @@ async fn module_route_handler(
         return (StatusCode::METHOD_NOT_ALLOWED, [("allow", allow)], "method not allowed").into_response();
     };
     let ctx = if reg.auth {
-        match authenticate(backend, &headers) {
+        match authenticate(backend, &headers).await {
             Ok(c) => c,
             Err(r) => return r,
         }
@@ -1668,7 +1774,7 @@ async fn ledger_report_handler(
     headers: HeaderMap,
 ) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1711,7 +1817,7 @@ async fn report_handler(
         return (StatusCode::NOT_FOUND, "unknown report").into_response();
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1770,7 +1876,7 @@ async fn open_wizard_handler(
         return (StatusCode::BAD_REQUEST, "not a wizard model").into_response();
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1811,7 +1917,7 @@ async fn delete_handler(
         Err(r) => return r,
     };
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -1869,7 +1975,7 @@ async fn chatter_setup<'a>(
     model_name: &str,
 ) -> Result<(&'a DataBackend, Ctx, &'a ResolvedModel), Response> {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = authenticate(backend, headers)?;
+    let ctx = authenticate(backend, headers).await?;
     chatter_gate(state, backend, &ctx, name, id).await?;
     let model = served_model(state, model_name)?;
     Ok((backend, ctx, model))
@@ -1948,7 +2054,7 @@ async fn attachment_setup<'a>(
     write: bool,
 ) -> Result<(&'a DataBackend, Ctx, &'a ResolvedModel), Response> {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = authenticate(backend, headers)?;
+    let ctx = authenticate(backend, headers).await?;
     attachment_gate(state, backend, &ctx, name, id, write).await?;
     let model = served_model(state, "ir.attachment")?;
     Ok((backend, ctx, model))
@@ -2019,7 +2125,7 @@ async fn download_attachment_handler(
     headers: HeaderMap,
 ) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -2071,7 +2177,7 @@ async fn delete_attachment_handler(
     headers: HeaderMap,
 ) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
-    let ctx = match authenticate(backend, &headers) {
+    let ctx = match authenticate(backend, &headers).await {
         Ok(c) => c,
         Err(r) => return r,
     };

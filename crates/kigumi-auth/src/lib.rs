@@ -184,6 +184,44 @@ pub fn new_jti() -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// The scheme prefix marking a token as a Kigumi API key (vs a JWT) in the Authorization header.
+pub const API_KEY_SCHEME: &str = "kg_";
+
+/// A freshly minted API key: the full secret shown to the operator ONCE, its lookup `prefix`, and
+/// the Argon2 `hash` to store. Format: `kg_<prefix>_<secret>` — the prefix (64 bits) indexes the
+/// row in O(1); the secret (128 bits) is verified constant-time against the stored hash. The plain
+/// key is never recoverable: it exists only in this struct's `plain`.
+pub struct NewApiKey {
+    pub plain: String,
+    pub prefix: String,
+    pub hash: String,
+}
+
+/// Mints a new API key (random prefix + secret, hashed). Errors only if Argon2 hashing fails.
+pub fn new_api_key() -> Result<NewApiKey, AuthError> {
+    let hex = |n: usize| -> String {
+        let mut b = vec![0u8; n];
+        OsRng.fill_bytes(&mut b);
+        b.iter().map(|x| format!("{x:02x}")).collect()
+    };
+    let prefix = hex(8); // 64-bit lookup id (16 hex chars)
+    let secret = hex(16); // 128-bit secret (32 hex chars)
+    let plain = format!("{API_KEY_SCHEME}{prefix}_{secret}");
+    let hash = hash_password(&secret)?;
+    Ok(NewApiKey { plain, prefix, hash })
+}
+
+/// Splits a presented key `kg_<prefix>_<secret>` into `(prefix, secret)`, or `None` if malformed.
+/// The caller looks up by `prefix`, then verifies `secret` against the stored hash constant-time.
+pub fn parse_api_key(token: &str) -> Option<(String, String)> {
+    let rest = token.strip_prefix(API_KEY_SCHEME)?;
+    let (prefix, secret) = rest.split_once('_')?;
+    if prefix.is_empty() || secret.is_empty() {
+        return None;
+    }
+    Some((prefix.to_string(), secret.to_string()))
+}
+
 fn now_unix() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
