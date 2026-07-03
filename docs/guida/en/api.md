@@ -262,6 +262,29 @@ data: {"type":"model.created","model":"workshop.vehicle","record_id":2,"txn":668
 
 Authentication is the same bearer token (`EventSource` cannot send headers — use `fetch` with a readable stream, as `web/src/api.ts` does).
 
+## MCP: the AI surface
+
+Every binary that links its modules can serve the catalog over the Model Context Protocol
+(stdio): `kigumi mcp <login>`, or a scaffolded app's `cargo run -p app -- mcp <login>`. Ten tools
+are derived from the catalog — `list_models`, `get_model` (the contract), `search_records`
+(domain AST, SQL-bounded limit), `get/create/update/delete_record`, `run_action`, `run_service`,
+`post_message` — and every one runs under the IMPERSONATED user's `Ctx`: ACLs, record rules and
+field visibility enforced by the data layer, validation failures returned as the same structured
+envelope as REST. The guardrail is the security engine, not the prompt.
+
+Trust model: impersonation is unauthenticated by design — starting the process already requires
+`DATABASE_URL`, so the boundary is operator trust, like every other CLI command. `DATABASE_URL`
+is read from the environment first (MCP clients launch servers with env-var config). Example
+Claude Code registration:
+
+```sh
+claude mcp add myshop --env DATABASE_URL=postgres://localhost/myshop -- \
+  /path/to/myshop/target/debug/app mcp mario
+```
+
+v1 boundary: the compiled-in catalog and security baseline (runtime custom fields and DB ACL
+rows are not merged yet); stdio transport only.
+
 ## Ledger reports: `GET /api/reports/:name`
 
 Record-less aggregate queries (a trial balance, a stock valuation) registered with `register_ledger_report!`, returning JSON rows; each report is gated by the Read ACL of the model it declares. Distinct from per-record document reports (`/api/:name/:id/report/:report`).

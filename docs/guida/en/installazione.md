@@ -14,9 +14,10 @@ This guide describes the installation and deployment of a Kigumi instance, from 
 
 ## Creating an application (`kigumi new`)
 
-The recommended path for building your own vertical: scaffold an out-of-tree workspace with the `kigumi` CLI (from a framework checkout today; `cargo install kigumi-cli` once published):
+The recommended path for building your own vertical:
 
 ```bash
+cargo install kigumi-cli
 kigumi new myshop            # asks which extra modules to include (sales, account, stock)
 cd myshop
 createdb myshop
@@ -26,7 +27,7 @@ KIGUMI_ADMIN_PASSWORD=change-me cargo run -p app -- migrate
 cargo run -p app -- serve    # http://127.0.0.1:8600 (override with KIGUMI_BIND)
 ```
 
-The workspace contains a module crate (a starter ticket model — see [moduli-custom.md](moduli-custom.md)) and a ~45-line server binary on `kigumi-runtime`, which owns the operational wiring: framework schemas, module install with data-migration replay, reference-data seeding, admin bootstrap, the cron/job workers, and the static-catalog server. `migrate` is idempotent — run it on every deploy; it also applies any pending `register_migration!` steps.
+The workspace contains a module crate (a starter ticket model — see [moduli-custom.md](moduli-custom.md)), a ~45-line server binary on `kigumi-runtime` — which owns the operational wiring: framework schemas, module install with data-migration replay, reference-data seeding, admin bootstrap, the cron/job workers, and the static-catalog server — plus the agent kit: `AGENTS.md`/`CLAUDE.md`, a project-local Claude Code skill and agent, and the `app mcp <login>` command that serves the app over the Model Context Protocol (see [api.md](api.md#mcp-the-ai-surface)). `migrate` is idempotent — run it on every deploy; it also applies any pending `register_migration!` steps.
 
 The rest of this page covers operating the framework repository itself (the full `kigumi` CLI with its configuration file, dynamic module install, and the admin SPA).
 

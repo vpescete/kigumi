@@ -40,6 +40,7 @@ The Cargo workspace (`Cargo.toml`, `members = ["crates/*", "modules/*", "apps/*"
 | `kigumi` | facade (prelude): a module depends only on this crate |
 | `kigumi-runtime` | adopter wiring: migrate, admin bootstrap, workers, static-catalog serve in four calls |
 | `kigumi-test` | test kit: fingerprinted database reset (seconds, not minutes) + shared fixtures |
+| `kigumi-mcp` | the AI surface: MCP server derived from the catalog, tools under the impersonated user's ACLs |
 
 The public prelude lives in `crates/kigumi/src/lib.rs`: a module opens its definition with
 

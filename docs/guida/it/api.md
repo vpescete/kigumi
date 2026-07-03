@@ -262,6 +262,29 @@ data: {"type":"model.created","model":"workshop.vehicle","record_id":2,"txn":668
 
 L'autenticazione è lo stesso bearer token (`EventSource` non può inviare header — usa `fetch` con uno stream leggibile, come fa `web/src/api.ts`).
 
+## MCP: la superficie AI
+
+Ogni binario che linka i suoi moduli può servire il catalogo sul Model Context Protocol (stdio):
+`kigumi mcp <login>`, o `cargo run -p app -- mcp <login>` in un'app generata. Dieci tool derivati
+dal catalogo — `list_models`, `get_model` (il contratto), `search_records` (domain AST, limite
+imposto in SQL), `get/create/update/delete_record`, `run_action`, `run_service`, `post_message` —
+e ognuno gira sotto il `Ctx` dell'utente IMPERSONATO: ACL, record rule e visibilità dei campi
+imposte dal data layer, gli errori di validazione tornano nella stessa busta strutturata di REST.
+Il guardrail è il motore di sicurezza, non il prompt.
+
+Modello di fiducia: l'impersonazione è per progetto non autenticata — avviare il processo
+richiede già `DATABASE_URL`, quindi il confine è la fiducia dell'operatore, come per ogni altro
+comando CLI. `DATABASE_URL` è letta prima dall'ambiente (i client MCP lanciano i server con
+configurazione a variabili). Esempio di registrazione in Claude Code:
+
+```sh
+claude mcp add mioshop --env DATABASE_URL=postgres://localhost/mioshop -- \
+  /path/to/mioshop/target/debug/app mcp mario
+```
+
+Confine v1: catalogo e baseline di sicurezza compilati (i custom field runtime e le righe ACL a
+DB non sono ancora fusi); solo trasporto stdio.
+
 ## Report ledger: `GET /api/reports/:name`
 
 Query aggregate senza record (un bilancio di verifica, una valorizzazione di magazzino) registrate con `register_ledger_report!`, che restituiscono righe JSON; ogni report è protetto dalla ACL di lettura del modello che dichiara. Distinti dai report documentali per-record (`/api/:name/:id/report/:report`).
