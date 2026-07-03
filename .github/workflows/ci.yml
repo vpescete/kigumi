@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kigumi
+          POSTGRES_PASSWORD: kigumi
+          POSTGRES_DB: kigumi_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kigumi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://kigumi:kigumi@localhost:5432/kigumi_test
+      KIGUMI_TEST_ALLOW_RESET: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build workspace
+        run: cargo build --workspace --all-targets
+      - name: Run tests
+        # Single-threaded across binaries is not needed - the kigumi-test kit serializes DB
+        # resets with an advisory lock - but cargo runs test BINARIES sequentially by default
+        # only within a package; cross-package binaries may interleave, which the kit handles.
+        run: cargo test --workspace
