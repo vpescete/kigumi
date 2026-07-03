@@ -652,10 +652,7 @@ impl Db {
         // Serialize the parent's aggregate recompute per row (same advisory lock as the other write
         // paths), so concurrent variant writes to the shared template can't lose-update its computes.
         if !computed_fields(parent_model).is_empty() {
-            sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
-                .bind(format!("agg:{}:{}", parent_model.table, pid))
-                .execute(&mut **tx)
-                .await?;
+            acquire_agg_lock(tx, parent_model.table, pid).await?;
             recompute_columns_on(tx, parent_model, pid).await?;
         }
         Ok(())
@@ -842,6 +839,18 @@ impl Db {
                 let pid = pid.ok_or_else(|| {
                     DbError::BadInput(format!("_inherits via '{via}' is null on '{}'", model.name))
                 })?;
+                // This is the ONLY path that co-holds two aggregate locks (the delegated parent's and
+                // this row's, both taken later at their recompute sites). Pre-acquire BOTH now in a
+                // canonical sorted order so concurrent delegated writers serialize instead of forming
+                // an ABBA deadlock — the later per-site acquisitions are then re-entrant no-ops.
+                let mut agg_keys = Vec::new();
+                if !computed_fields(&parent_model).is_empty() {
+                    agg_keys.push((parent_model.table.to_string(), pid));
+                }
+                if !computed_fields(model).is_empty() {
+                    agg_keys.push((model.table.to_string(), id));
+                }
+                acquire_agg_locks_ordered(&mut *tx, agg_keys).await?;
                 self.update_delegated_parent(&parent_model, ctx, acls, rules, pid, &delegated, &mut *tx).await?;
             }
         }
@@ -849,10 +858,7 @@ impl Db {
         // 3) Recompute this row's computed columns (same-record + aggregate over its children),
         //    in-tx and serialized per row so concurrent child writes cannot lose-update the aggregate.
         if !computed_fields(model).is_empty() {
-            sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
-                .bind(format!("agg:{}:{}", model.table, id))
-                .execute(&mut **tx)
-                .await?;
+            acquire_agg_lock(&mut *tx, model.table, id).await?;
             recompute_columns_on(&mut *tx, model, id).await?;
         }
 
@@ -1331,10 +1337,7 @@ impl Db {
             // Per-row advisory lock across read+recompute+write, so concurrent recomputes of the
             // same row serialize and the final aggregate is correct.
             let mut lock = self.pool.begin().await?;
-            sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
-                .bind(format!("agg:{}:{}", m.table, pid))
-                .execute(&mut *lock)
-                .await?;
+            acquire_agg_lock(&mut lock, m.table, pid).await?;
             recompute_columns_on(&mut lock, &m, pid).await?;
             lock.commit().await?;
             // Propagate upward: if m is itself a child of a higher aggregate, enqueue that grandparent.
@@ -1582,6 +1585,29 @@ impl Db {
             .collect())
     }
 
+    /// Like [`Db::tracking_for`], but D6-SECURED: drops tracking of any field the caller may not read
+    /// (`field_accessible`). The mail audit trail records every tracked change verbatim (including
+    /// group-restricted fields), so it must never become a second, unguarded read channel for a
+    /// caller outside a field's group. Baking the filter here — beside the secured record read, like
+    /// `visible_events` for the event stream — means a new caller of the audit trail can't forget it.
+    pub async fn tracking_for_secured(
+        &self,
+        model: &str,
+        ctx: &Ctx,
+        message_ids: &[i64],
+    ) -> Result<Vec<Json>, DbError> {
+        let all = self.tracking_for(message_ids).await?;
+        Ok(all
+            .into_iter()
+            .filter(|t| {
+                t.get("field")
+                    .and_then(|v| v.as_str())
+                    .map(|f| field_accessible(model, f, ctx))
+                    .unwrap_or(false)
+            })
+            .collect())
+    }
+
     /// Creates the mail subsystem's lookup indexes (idempotent, tolerant of unmigrated tables): the
     /// polymorphic `mail_message(res_model, res_id)` thread lookup and `mail_tracking(message_id)`.
     /// The metamodel can't express indexes yet and the mail tables are a known framework concern, so
@@ -1633,6 +1659,40 @@ fn is_undefined_table(e: &sqlx::Error) -> bool {
 
 /// Reads the given columns of one row as Postgres `::text` (None for NULL / absent row). Used for the
 /// tracking diff: rendering old and new through the SAME `::text` cast makes the comparison
+/// Acquires the per-row aggregate advisory lock `agg:{table}:{id}` on `tx` (a Postgres transaction
+/// advisory lock, released at commit). Serializes computed-column/aggregate recomputes of one row
+/// so concurrent writers cannot lose-update it. Advisory xact locks are re-entrant, so acquiring
+/// the same key twice in one transaction is a harmless no-op — which is what makes the canonical
+/// pre-acquisition in `update_secured_in_tx` safe alongside the per-recompute-site acquisitions.
+async fn acquire_agg_lock(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    table: &str,
+    id: i64,
+) -> Result<(), DbError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+        .bind(format!("agg:{table}:{id}"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// Acquires a set of aggregate locks in a CANONICAL (sorted-by-key) order. This is what prevents an
+/// ABBA deadlock: every transaction that co-holds more than one `agg:*` lock takes them in the same
+/// global order, so concurrent writers serialize instead of deadlocking. Today only the
+/// delegated-parent + self pair in `update_secured_in_tx` co-holds two locks, and it always acquires
+/// ancestor-first — this makes that ordering explicit and robust against future multi-lock paths.
+async fn acquire_agg_locks_ordered(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    mut keys: Vec<(String, i64)>,
+) -> Result<(), DbError> {
+    keys.sort();
+    keys.dedup();
+    for (table, id) in keys {
+        acquire_agg_lock(tx, &table, id).await?;
+    }
+    Ok(())
+}
+
 /// representation-independent (no Date/Datetime/Float text-format mismatch). `lock` adds FOR UPDATE so
 /// the old snapshot is exactly what the subsequent UPDATE overwrites.
 async fn snapshot_text(

@@ -21,9 +21,9 @@ use axum::{
     Json, Router,
 };
 use serde_json::Value as Json2;
-use kigumi_auth::{hash_password, new_jti, verify_password, Authenticator};
+use kigumi_auth::{hash_password, new_jti, Authenticator};
 use kigumi_core::{
-    check_access, delegated_fields, field_accessible, is_mailed, module_closure, module_of,
+    check_access, delegated_fields, is_mailed, module_closure, module_of,
     registered_acls, registered_rules, report_for, resolve_modules, wizard_for, Acl, Condition, Ctx,
     Domain, FieldDef, FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
 };
@@ -552,8 +552,11 @@ async fn authenticate(backend: &DataBackend, headers: &HeaderMap) -> Result<Ctx,
             let key = backend.db.find_api_key(&prefix).await.map_err(|_| unauthorized())?;
             // Timing equalizer (review should-fix): a missing/revoked/expired prefix must spend the
             // same Argon2 as a live one with a wrong secret, so latency does not leak key liveness.
+            // Throttled: shed under a verification flood (busy is uniform, leaks nothing).
             let hash = key.as_ref().map(|k| k.hash.as_str()).unwrap_or_else(|| dummy_hash());
-            let ok = kigumi_auth::verify_password(&secret, hash);
+            let Some(ok) = kigumi_auth::verify_password_throttled(&secret, hash) else {
+                return Err((StatusCode::SERVICE_UNAVAILABLE, "authentication is busy, retry shortly").into_response());
+            };
             let Some(key) = key else { return Err(unauthorized()) };
             if !ok {
                 return Err(unauthorized());
@@ -2225,7 +2228,10 @@ async fn messages_handler(
             // Embed each message's field-change audit (mail.tracking) so a notification message
             // carries its old→new diffs — one thread payload, comments and audit uniform.
             let ids: Vec<i64> = rows.iter().filter_map(|m| m.get("id").and_then(|v| v.as_i64())).collect();
-            let tracking = match backend.db.tracking_for(&ids).await {
+            // D6 redaction lives in the DB layer (tracking_for_secured): tracking of fields the caller
+            // may not read is dropped there, beside the secured record read, so the audit trail can
+            // never become a second unguarded read channel for group-restricted values.
+            let tracking = match backend.db.tracking_for_secured(&name, &ctx, &ids).await {
                 Ok(t) => t,
                 Err(e) => {
                     // A DB error here must not be hidden as "no audit"; log it (the messages still return).
@@ -2233,18 +2239,8 @@ async fn messages_handler(
                     Vec::new()
                 }
             };
-            // D6: redact tracking of fields the caller may not read (field-level security). The audit
-            // trail must not become a second, unguarded read channel for group-restricted field values.
             let mut by_msg: HashMap<i64, Vec<Json2>> = HashMap::new();
             for t in tracking {
-                let readable = t
-                    .get("field")
-                    .and_then(|v| v.as_str())
-                    .map(|f| field_accessible(&name, f, &ctx))
-                    .unwrap_or(false);
-                if !readable {
-                    continue;
-                }
                 if let Some(mid) = t.get("message_id").and_then(|v| v.as_i64()) {
                     by_msg.entry(mid).or_default().push(t);
                 }
@@ -2575,8 +2571,11 @@ async fn login_handler(State(state): State<AppState>, Json(body): Json<Json2>) -
     };
     // Always run argon2 (against a dummy hash if the user is unknown) so timing — and the
     // 401 body — are identical for unknown-user and wrong-password (no user enumeration).
+    // Throttled: under a verification flood the process sheds (503) rather than thrashing.
     let hash = user.as_ref().map(|u| u.password_hash.as_str()).unwrap_or_else(|| dummy_hash());
-    let ok = verify_password(password, hash);
+    let Some(ok) = kigumi_auth::verify_password_throttled(password, hash) else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "authentication is busy, retry shortly").into_response();
+    };
     match user {
         Some(u) if ok => {
             let scope = (u.company_id, u.company_ids);

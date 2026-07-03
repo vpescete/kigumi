@@ -177,6 +177,37 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
     }
 }
 
+/// Process-wide cap on Argon2 verifications running at once. Argon2 is deliberately CPU- AND
+/// MEMORY-hard (~19 MB each by default), so an attacker who can cheaply present many auth requests
+/// (login, API key, MCP-HTTP — all verify per request) could otherwise spawn thousands of
+/// concurrent verifications and exhaust CPU/RAM. The cap bounds concurrent verifications to the
+/// machine's parallelism; excess requests are SHED (not queued), so the server stays responsive
+/// under a flood instead of thrashing. This is defense-in-depth — a reverse proxy should still
+/// rate-limit per source (the auth path spends one Argon2 per attempt by design).
+static VERIFY_INFLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn verify_cap() -> usize {
+    use std::sync::OnceLock;
+    static CAP: OnceLock<usize> = OnceLock::new();
+    *CAP.get_or_init(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).max(2))
+}
+
+/// Like [`verify_password`], but load-shed under a verification flood: returns `None` when the
+/// process is already running [`verify_cap`] verifications (the caller should answer "busy", e.g.
+/// HTTP 503, NOT a 401 — busy is independent of whether the credential exists, so it leaks nothing).
+/// `Some(bool)` is the normal verify result. Use this on every attacker-reachable auth path.
+pub fn verify_password_throttled(password: &str, hash: &str) -> Option<bool> {
+    use std::sync::atomic::Ordering::SeqCst;
+    // Reserve a slot; if we'd exceed the cap, release and shed.
+    if VERIFY_INFLIGHT.fetch_add(1, SeqCst) >= verify_cap() {
+        VERIFY_INFLIGHT.fetch_sub(1, SeqCst);
+        return None;
+    }
+    let ok = verify_password(password, hash);
+    VERIFY_INFLIGHT.fetch_sub(1, SeqCst);
+    Some(ok)
+}
+
 /// A random 128-bit token id (hex) for refresh-token tracking.
 pub fn new_jti() -> String {
     let mut b = [0u8; 16];
@@ -308,6 +339,11 @@ mod tests {
         assert!(verify_password("correct horse", &h1));
         assert!(!verify_password("battery staple", &h1));
         assert!(!verify_password("x", "not-a-valid-hash"));
+        // The throttle returns Some(result) when under the cap (single call, uncontended).
+        assert_eq!(verify_password_throttled("correct horse", &h1), Some(true));
+        assert_eq!(verify_password_throttled("wrong", &h1), Some(false));
+        // The cap is at least the machine parallelism (>= 2) and the in-flight counter resets.
+        assert!(verify_cap() >= 2);
     }
 
     #[test]

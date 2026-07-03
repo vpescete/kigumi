@@ -207,9 +207,14 @@ impl KigumiMcp {
         };
         let key = self.db.find_api_key(&prefix).await.map_err(|_| denied())?;
         // Timing equalizer: an absent/revoked/expired prefix still spends one Argon2. Own the hash
-        // so no borrow of `key` survives its move below.
+        // so no borrow of `key` survives its move below. Throttled: shed under a verification flood.
         let hash: String = key.as_ref().map(|k| k.hash.clone()).unwrap_or_else(|| dummy_hash().to_string());
-        let ok = kigumi_auth::verify_password(&secret, &hash);
+        let Some(ok) = kigumi_auth::verify_password_throttled(&secret, &hash) else {
+            // Busy — a transient in-band error the agent can retry; leaks nothing about the key.
+            return Err(CallToolResult::error(vec![ContentBlock::text(
+                json!({ "error": { "code": "busy", "message": "authentication is busy, retry shortly" } }).to_string(),
+            )]));
+        };
         let Some(key) = key else { return Err(denied()) };
         if !ok {
             return Err(denied());
