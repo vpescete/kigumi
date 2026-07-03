@@ -105,9 +105,12 @@ enum Cmd {
         /// Extra modules beyond base+mail, CSV of sales,account,stock. Prompted when omitted.
         #[arg(long)]
         modules: Option<String>,
-        /// Point the generated Cargo.toml at a local framework checkout instead of the git URL.
+        /// Point the generated Cargo.toml at a local framework checkout instead of crates.io.
         #[arg(long)]
         framework_path: Option<PathBuf>,
+        /// Use git dependencies on this URL instead of crates.io versions.
+        #[arg(long)]
+        git: Option<String>,
         /// Accept defaults without prompting.
         #[arg(long, short = 'y')]
         yes: bool,
@@ -245,13 +248,18 @@ async fn run(cli: Cli) -> Fallible {
     let path = config_path(&cli);
     match cli.cmd {
         Cmd::Mcp { user } => {
-            let s = Settings::load(Some(&path))?;
-            let db = Db::connect(&s.secrets.database_url).await?;
+            // MCP servers are launched by agent clients with env-var config (no kigumi.toml next
+            // to them): DATABASE_URL from the environment wins, the config file is the fallback.
+            let url = match std::env::var("DATABASE_URL") {
+                Ok(u) => u,
+                Err(_) => Settings::load(Some(&path))?.secrets.database_url,
+            };
+            let db = Db::connect(&url).await?;
             let server = kigumi_mcp::KigumiMcp::for_login(db, &user).await?;
             server.serve_stdio().await.map_err(|e| e.to_string())?;
             Ok(())
         }
-        Cmd::New { name, modules, framework_path, yes } => {
+        Cmd::New { name, modules, framework_path, git, yes } => {
             let ident = scaffold::sanitize_name(&name);
             if ident.is_empty() || ident.chars().all(|c| c == '_') {
                 return Err(format!("'{name}' is not a valid app name").into());
@@ -278,13 +286,12 @@ async fn run(cli: Cli) -> Fallible {
                 .collect();
             scaffold::validate_extras(&extras)?;
             let extras = scaffold::module_closure(&extras);
-            let framework = match framework_path {
-                Some(p) => scaffold::FrameworkSource::Path(
+            let framework = match (framework_path, git) {
+                (Some(p), _) => scaffold::FrameworkSource::Path(
                     p.canonicalize().map_err(|e| format!("--framework-path '{}': {e}", p.display()))?,
                 ),
-                None => scaffold::FrameworkSource::Git(
-                    "https://github.com/vpescete/kigumi.git".to_string(),
-                ),
+                (None, Some(url)) => scaffold::FrameworkSource::Git(url),
+                (None, None) => scaffold::FrameworkSource::CratesIo,
             };
             let dest = PathBuf::from(&ident);
             let opts = scaffold::ScaffoldOptions { name: ident.clone(), extra_modules: extras, framework };

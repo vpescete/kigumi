@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 
 /// Where the generated Cargo.toml points its kigumi dependencies.
 pub enum FrameworkSource {
-    /// A git URL (the default — what a real adopter uses pre-crates.io).
+    /// Published versions from crates.io (the default).
+    CratesIo,
+    /// A git URL (tracking the repo's main).
     Git(String),
     /// A local checkout of the framework repo (development of the framework itself).
     Path(PathBuf),
@@ -74,9 +76,11 @@ pub fn validate_extras(extras: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// One dependency line for a kigumi crate, in the chosen source form.
-fn dep(framework: &FrameworkSource, crate_name: &str, subdir: &str) -> String {
+/// One dependency line for a kigumi crate, in the chosen source form. `version` is the crates.io
+/// requirement (framework crates "0.1", modules "1.0").
+fn dep(framework: &FrameworkSource, crate_name: &str, subdir: &str, version: &str) -> String {
     match framework {
+        FrameworkSource::CratesIo => format!("{crate_name} = \"{version}\""),
         FrameworkSource::Git(url) => format!("{crate_name} = {{ git = \"{url}\" }}"),
         FrameworkSource::Path(root) => {
             format!("{crate_name} = {{ path = \"{}/{subdir}\" }}", root.display())
@@ -426,16 +430,16 @@ The server binary (`app/src/main.rs`) is four runtime calls; it should rarely ch
 
 fn render(template: &str, opts: &ScaffoldOptions) -> String {
     let (kigumi_dep, runtime_dep, mcp_dep, base_dep, mail_dep) = (
-        dep(&opts.framework, "kigumi", "crates/kigumi"),
-        dep(&opts.framework, "kigumi-runtime", "crates/kigumi-runtime"),
-        dep(&opts.framework, "kigumi-mcp", "crates/kigumi-mcp"),
-        dep(&opts.framework, "kigumi-mod-base", "modules/base"),
-        dep(&opts.framework, "kigumi-mod-mail", "modules/mail"),
+        dep(&opts.framework, "kigumi", "crates/kigumi", "0.1"),
+        dep(&opts.framework, "kigumi-runtime", "crates/kigumi-runtime", "0.1"),
+        dep(&opts.framework, "kigumi-mcp", "crates/kigumi-mcp", "0.1"),
+        dep(&opts.framework, "kigumi-mod-base", "modules/base", "1.0"),
+        dep(&opts.framework, "kigumi-mod-mail", "modules/mail", "1.0"),
     );
     let extra_deps: String = opts
         .extra_modules
         .iter()
-        .map(|m| dep(&opts.framework, &format!("kigumi-mod-{m}"), &format!("modules/{m}")) + "\n")
+        .map(|m| dep(&opts.framework, &format!("kigumi-mod-{m}"), &format!("modules/{m}"), "1.0") + "\n")
         .collect();
     let extra_links: String = opts
         .extra_modules
@@ -444,7 +448,7 @@ fn render(template: &str, opts: &ScaffoldOptions) -> String {
         .collect();
     let repo_url = match &opts.framework {
         FrameworkSource::Git(url) => url.trim_end_matches(".git").to_string(),
-        FrameworkSource::Path(_) => "https://github.com/vpescete/kigumi".to_string(),
+        _ => "https://github.com/vpescete/kigumi".to_string(),
     };
     // __APP__ FIRST: the dep lines carry a user-supplied filesystem path that may itself contain
     // the literal token (review finding) — substituted afterwards, they are never rescanned.
@@ -537,6 +541,22 @@ mod tests {
         scaffold(&dest, &o).unwrap();
         let toml = std::fs::read_to_string(dest.join("app/Cargo.toml")).unwrap();
         assert!(toml.contains("/checkout/__APP__/framework/crates/kigumi"), "dep path untouched");
+        std::fs::remove_dir_all(&dest).unwrap();
+    }
+
+    #[test]
+    fn crates_io_deps_render_as_versions() {
+        let dest = std::env::temp_dir().join(format!("kigumi_new_cio_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        let o = ScaffoldOptions {
+            name: "demo".to_string(),
+            extra_modules: vec!["sales".to_string()],
+            framework: FrameworkSource::CratesIo,
+        };
+        scaffold(&dest, &o).unwrap();
+        let toml = std::fs::read_to_string(dest.join("app/Cargo.toml")).unwrap();
+        assert!(toml.contains("kigumi = \"0.1\""), "framework crates pinned to 0.1: {toml}");
+        assert!(toml.contains("kigumi-mod-sales = \"1.0\""), "modules pinned to 1.0");
         std::fs::remove_dir_all(&dest).unwrap();
     }
 
