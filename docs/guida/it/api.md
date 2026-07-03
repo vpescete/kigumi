@@ -85,6 +85,51 @@ Restituisce l'identità del chiamante autenticato, cioè il `Ctx` derivato dal b
 }
 ```
 
+## API key (credenziali macchina)
+
+Credenziali a lunga vita e revocabili per macchine e agenti — la sorella stateful del refresh
+token. Una key IMPERSONA un utente: eredita i suoi gruppi e il suo company scope, opzionalmente
+RISTRETTI a un sottoinsieme di gruppi. Una key non può mai superare l'utente a cui appartiene.
+
+Si presenta come un JWT, nell'header `Authorization` — lo schema `kg_` la instrada sul percorso key:
+
+```
+Authorization: Bearer kg_<prefix>_<secret>
+```
+
+Gestione delle key (devi essere autenticato con un JWT o un'altra key per gestire le tue):
+
+### `POST /auth/keys` — conia una key
+
+Body: `name` (obbligatorio), `scopes` (CSV, un sottoinsieme dei tuoi gruppi; ometti per tutti i
+gruppi che hai ora), `expires_in` (secondi, opzionale — ometti per nessuna scadenza; la revoca è
+il controllo). La key in chiaro è restituita UNA VOLTA e non è più recuperabile.
+
+```json
+// → 201
+{ "id": 4, "prefix": "kg_a1b2c3d4...", "key": "kg_a1b2c3d4..._9f8e...", "note": "store this key now — it is not recoverable" }
+```
+
+Gli scope sono CONGELATI alla creazione ai gruppi che possiedi in quel momento — una key ristretta
+non può coniarne una non ristretta. Uno scope che non possiedi è rifiutato con `403`.
+
+### `GET /auth/keys` — elenca le tue key attive
+
+Restituisce `{ "data": [ { id, prefix, name, scopes, expires_at, last_used_at, created_at } ] }` —
+mai il segreto né l'hash.
+
+### `DELETE /auth/keys/:id` — revoca una key
+
+Soft-delete (`revoked_at`): la key smette di autenticare immediatamente. Puoi revocare solo le tue;
+un id sconosciuto o già revocato è `404`.
+
+Equivalente CLI per l'automazione headless: `kigumi apikey create <user> --name ... [--scopes ...]
+[--expires-days N]`, `kigumi apikey list <user>`, `kigumi apikey revoke <id>`.
+
+Ogni fallimento di auth — segreto errato, key sconosciuta/revocata/scaduta — è un unico `401`
+uniforme; il percorso di auth spende lo stesso lavoro in ogni caso, così i tempi non rivelano
+quali key esistono.
+
 ## Endpoint dati (CRUD)
 
 Tutte le route sotto `/api/:name` richiedono un access token e applicano il motore ACL + record rule + scope multi-azienda nello strato `kigumi-db` (i metodi `*_secured`). L'autorizzazione **non** è nel server: l'handler autentica, modella la risposta e mappa gli errori.

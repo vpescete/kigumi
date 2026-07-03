@@ -85,6 +85,51 @@ Returns the identity of the authenticated caller, i.e. the `Ctx` derived from th
 }
 ```
 
+## API keys (machine credentials)
+
+Long-lived, revocable credentials for machines and agents — the stateful sibling of the refresh
+token. A key IMPERSONATES a user: it inherits that user's groups and company scope, optionally
+NARROWED to a subset of groups. A key can never exceed the user it belongs to.
+
+Present it exactly like a JWT, in the `Authorization` header — the `kg_` scheme routes it to the
+key path:
+
+```
+Authorization: Bearer kg_<prefix>_<secret>
+```
+
+Managing keys (you must be authenticated with a JWT or another key to manage your own):
+
+### `POST /auth/keys` — mint a key
+
+Body: `name` (required), `scopes` (CSV, a subset of your own groups; omit for all the groups you
+hold now), `expires_in` (seconds, optional — omit for no expiry; revocation is the control). The
+plain key is returned ONCE and is never recoverable.
+
+```json
+// → 201
+{ "id": 4, "prefix": "kg_a1b2c3d4...", "key": "kg_a1b2c3d4..._9f8e...", "note": "store this key now — it is not recoverable" }
+```
+
+Scopes are FROZEN at mint to the groups you hold at that moment — a narrowed key cannot mint an
+un-narrowed one. A scope you do not hold is rejected with `403`.
+
+### `GET /auth/keys` — list your live keys
+
+Returns `{ "data": [ { id, prefix, name, scopes, expires_at, last_used_at, created_at } ] }` — never
+the secret or the hash.
+
+### `DELETE /auth/keys/:id` — revoke a key
+
+Soft-delete (`revoked_at`): the key stops authenticating immediately. You can only revoke your own;
+an unknown or already-revoked id is `404`.
+
+CLI equivalent for headless automation: `kigumi apikey create <user> --name ... [--scopes ...]
+[--expires-days N]`, `kigumi apikey list <user>`, `kigumi apikey revoke <id>`.
+
+Every auth failure — bad secret, unknown/revoked/expired key — is one uniform `401`; the auth path
+spends the same work regardless, so timing does not reveal which keys exist.
+
 ## Data endpoints (CRUD)
 
 All routes under `/api/:name` require an access token and apply the ACL + record rule + multi-company scope engine in the `kigumi-db` layer (the `*_secured` methods). Authorization is **not** in the server: the handler authenticates, shapes the response, and maps errors.
