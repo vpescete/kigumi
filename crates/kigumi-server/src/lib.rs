@@ -27,7 +27,7 @@ use kigumi_core::{
     registered_acls, registered_rules, report_for, resolve_modules, wizard_for, Acl, Condition, Ctx,
     Domain, FieldDef, FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
 };
-use kigumi_db::{is_safe_ident, route_for, route_methods, validate_routes, CustomField, Db, DbError, RouteInput, RouteMethod, RouteOutput, StoredEvent, ViewOverride};
+use kigumi_db::{custom_scalar_kind, is_safe_ident, route_for, route_methods, validate_routes, Db, DbError, RouteInput, RouteMethod, RouteOutput, StoredEvent, ViewOverride};
 use kigumi_schema::{openapi, pg_column_type, to_ui_contract};
 use kigumi_storage::{sha256_hex, BlobStore};
 
@@ -88,58 +88,13 @@ fn is_served(state: &AppState, model_name: &str) -> bool {
 }
 
 /// The scalar field kinds a runtime custom field may take (relations are a follow-up).
-fn parse_custom_kind(kind: &str) -> Option<FieldKind> {
-    match kind {
-        "text" => Some(FieldKind::Text),
-        "integer" => Some(FieldKind::Integer),
-        "float" => Some(FieldKind::Float),
-        "decimal" => Some(FieldKind::Decimal { currency_field: None }),
-        "bool" => Some(FieldKind::Bool),
-        "date" => Some(FieldKind::Date),
-        "datetime" => Some(FieldKind::Datetime),
-        _ => None,
-    }
-}
-
-/// Builds a `'static` `FieldDef` from a runtime custom-field row. Strings are leaked, like the runtime
-/// ACL/rule strings — loaded once and held for the process lifetime. `many2one` carries its target in
-/// `relation`; all other kinds are scalars.
-fn custom_field_def(cf: &CustomField) -> Option<FieldDef> {
-    let leak = |s: &str| -> &'static str { Box::leak(s.to_string().into_boxed_str()) };
-    let kind = match cf.kind.as_str() {
-        "many2one" => FieldKind::Many2one { target: leak(cf.relation.as_deref()?) },
-        other => parse_custom_kind(other)?,
-    };
-    Some(FieldDef {
-        name: leak(&cf.name),
-        label: leak(&cf.label),
-        kind,
-        required: cf.required,
-        stored: true,
-        compute: None,
-        depends: &[],
-        default: cf.default_value.as_deref().map(leak),
-        unique: false,
-        check: None,
-    })
-}
-
-/// Groups loaded custom fields into the by-model map the resolver consults.
-fn group_custom_fields(fields: &[CustomField]) -> HashMap<String, Vec<FieldDef>> {
-    let mut map: HashMap<String, Vec<FieldDef>> = HashMap::new();
-    for cf in fields {
-        if let Some(def) = custom_field_def(cf) {
-            map.entry(cf.model.clone()).or_default().push(def);
-        }
-    }
-    map
-}
-
-/// Reloads the live custom-field map from the registry (after an add, and at startup).
+/// Reloads the live custom-field map from the registry (after an add, and at startup). The
+/// `CustomField → FieldDef` conversion now lives in kigumi-db (`custom_fields_by_model`), shared
+/// with the MCP server; this only owns the live-refresh cadence.
 pub async fn refresh_custom_fields(map: &Arc<RwLock<HashMap<String, Vec<FieldDef>>>>, db: &Db) {
-    if let Ok(fields) = db.load_custom_fields().await {
+    if let Ok(grouped) = db.custom_fields_by_model().await {
         if let Ok(mut w) = map.write() {
-            *w = group_custom_fields(&fields);
+            *w = grouped;
         }
     }
 }
@@ -867,7 +822,7 @@ async fn add_field_handler(State(state): State<AppState>, Path(name): Path<Strin
         }
         pg_column_type(&FieldKind::Many2one { target: "" })
     } else {
-        let Some(kind) = parse_custom_kind(kind_str) else {
+        let Some(kind) = custom_scalar_kind(kind_str) else {
             return (StatusCode::BAD_REQUEST, format!("unsupported kind '{kind_str}' (text|integer|float|decimal|bool|date|datetime|many2one)")).into_response();
         };
         pg_column_type(&kind)

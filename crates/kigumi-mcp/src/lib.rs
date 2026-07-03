@@ -10,11 +10,12 @@
 //! so the boundary is operator trust, like every other CLI command; it is NOT a network-facing
 //! authenticated surface.
 //!
-//! Scope (v1): the static compiled-in security baseline and catalog (like `kigumi-runtime`'s
-//! serve) and the stdio transport. Runtime DB overlays are NOT merged: ACL/rule rows added via
-//! the API and custom fields from `ir_model_field` are invisible here until a v2 merge — a
-//! custom field readable over REST is rejected as unknown by this surface. HTTP transports and
-//! the runtime overlays can layer on later.
+//! Scope: the compiled-in security baseline (like `kigumi-runtime`'s serve) plus the runtime
+//! CUSTOM FIELDS from `ir_model_field` (merged at construction, so a field added via the API and
+//! readable over REST is read/written here too), over the stdio transport. Still NOT merged:
+//! runtime ACL/rule DB overlays (the compiled-in baseline is the authority here); the custom-field
+//! snapshot is taken at connect, so a field added mid-session appears on reconnect. HTTP
+//! transports and the ACL overlays can layer on later.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -344,17 +345,37 @@ impl KigumiMcp {
         if let Some(active) = user.company_id {
             ctx = ctx.in_companies(active, user.company_ids);
         }
-        Self::with_ctx(db, ctx)
+        // Merge the runtime custom fields (like the server's live map) so a field added via the
+        // API is read/written here too — snapshot at connect, so a mid-session add needs a
+        // reconnect. Ignored if the registry table is absent (a bare, never-migrated DB).
+        let custom = db.custom_fields_by_model().await.unwrap_or_default();
+        Self::with_overlays(db, ctx, &custom)
     }
 
-    /// Builds the server with an explicit `Ctx` (embedding, tests). The catalog and the security
-    /// baseline are the compiled-in registrations, like kigumi-runtime's serve; a catalog that
-    /// fails to resolve REFUSES to serve (review must-fix: silently serving zero models looks
-    /// "up" while every tool answers unknown-model). Runtime custom fields are not merged (v1).
+    /// Builds the server with an explicit `Ctx` and no runtime overlays — the compiled-in catalog
+    /// only (embedding, tests).
     pub fn with_ctx(db: Db, ctx: Ctx) -> Result<Self, DbError> {
-        let models = resolve_all_registered()
-            .map(|models| models.into_iter().map(|m| (m.name.to_string(), m)).collect())
-            .map_err(DbError::Migration)?;
+        Self::with_overlays(db, ctx, &std::collections::HashMap::new())
+    }
+
+    /// Builds the server, extending each compiled-in model with its runtime custom fields. A
+    /// catalog that fails to resolve REFUSES to serve (review must-fix: silently serving zero
+    /// models looks "up" while every tool answers unknown-model).
+    fn with_overlays(
+        db: Db,
+        ctx: Ctx,
+        custom: &HashMap<String, Vec<kigumi_core::FieldDef>>,
+    ) -> Result<Self, DbError> {
+        let resolved = resolve_all_registered().map_err(DbError::Migration)?;
+        let models = resolved
+            .into_iter()
+            .map(|mut m| {
+                if let Some(extra) = custom.get(m.name) {
+                    m.fields.extend(extra.iter().cloned());
+                }
+                (m.name.to_string(), m)
+            })
+            .collect();
         Ok(KigumiMcp {
             db,
             ctx,

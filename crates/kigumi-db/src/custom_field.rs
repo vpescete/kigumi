@@ -7,7 +7,9 @@
 //! with the target model in `relation`). One2many/Many2many (no own column) remain a follow-up.
 
 use crate::{Db, DbError};
+use kigumi_core::{FieldDef, FieldKind, ResolvedModel};
 use sqlx::Row;
+use std::collections::HashMap;
 
 const ENSURE: &str = "CREATE TABLE IF NOT EXISTS ir_model_field \
      (id bigserial PRIMARY KEY, model text NOT NULL, name text NOT NULL, label text NOT NULL, \
@@ -27,6 +29,48 @@ pub struct CustomField {
     pub default_value: Option<String>,
     /// Target model for a `many2one`; `None` for scalar kinds.
     pub relation: Option<String>,
+}
+
+/// The scalar `FieldKind` for a custom-field kind string, or `None` for an unknown one. `many2one`
+/// is NOT here (it needs a leaked relation target); it is handled by the caller. Shared by the
+/// runtime `FieldDef` build and the server's create-field DDL-type validation.
+pub fn custom_scalar_kind(kind: &str) -> Option<FieldKind> {
+    Some(match kind {
+        "text" => FieldKind::Text,
+        "integer" => FieldKind::Integer,
+        "float" => FieldKind::Float,
+        "decimal" => FieldKind::Decimal { currency_field: None },
+        "bool" => FieldKind::Bool,
+        "date" => FieldKind::Date,
+        "datetime" => FieldKind::Datetime,
+        _ => return None,
+    })
+}
+
+impl CustomField {
+    /// Builds a `'static` `FieldDef` from this runtime row, or `None` for an unknown kind (or a
+    /// `many2one` with no relation). Strings are leaked — loaded once and held for the process
+    /// lifetime, like the runtime ACL/rule strings. `many2one` carries its target in `relation`;
+    /// all other kinds are scalars. The canonical conversion, shared by every host (server, MCP).
+    pub fn to_field_def(&self) -> Option<FieldDef> {
+        let leak = |s: &str| -> &'static str { Box::leak(s.to_string().into_boxed_str()) };
+        let kind = match self.kind.as_str() {
+            "many2one" => FieldKind::Many2one { target: leak(self.relation.as_deref()?) },
+            other => custom_scalar_kind(other)?,
+        };
+        Some(FieldDef {
+            name: leak(&self.name),
+            label: leak(&self.label),
+            kind,
+            required: self.required,
+            stored: true,
+            compute: None,
+            depends: &[],
+            default: self.default_value.as_deref().map(leak),
+            unique: false,
+            check: None,
+        })
+    }
 }
 
 /// A Postgres identifier safe to interpolate into DDL: lowercase start, then letters/digits/underscore.
@@ -68,6 +112,37 @@ impl Db {
                 relation: r.get("relation"),
             })
             .collect())
+    }
+
+    /// The runtime custom fields grouped by model, as `'static` `FieldDef`s ready to merge into a
+    /// resolved model. The shared loader for every host that serves runtime-extended models (the
+    /// server's live map, the MCP server's per-connection snapshot).
+    pub async fn custom_fields_by_model(&self) -> Result<HashMap<String, Vec<FieldDef>>, DbError> {
+        let mut map: HashMap<String, Vec<FieldDef>> = HashMap::new();
+        for cf in self.load_custom_fields().await? {
+            if let Some(def) = cf.to_field_def() {
+                map.entry(cf.model.clone()).or_default().push(def);
+            }
+        }
+        Ok(map)
+    }
+
+    /// Resolves `model` from the compile-time catalog and merges its runtime custom fields, so the
+    /// returned `ResolvedModel` matches what secured CRUD and the UI contract see — the shape an MCP
+    /// tool or a one-off caller needs without standing up the server's live refresh loop.
+    pub async fn resolve_with_custom_fields(
+        &self,
+        model: &ResolvedModel,
+    ) -> Result<ResolvedModel, DbError> {
+        let extra = self.custom_fields_by_model().await?;
+        Ok(match extra.get(model.name) {
+            Some(fields) if !fields.is_empty() => {
+                let mut m = model.clone();
+                m.fields.extend(fields.iter().cloned());
+                m
+            }
+            _ => model.clone(),
+        })
     }
 
     /// Registers a custom field on `model` and adds its column to `table`. `col_type` is the Postgres
