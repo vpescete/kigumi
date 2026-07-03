@@ -5,8 +5,16 @@
 //! are enforced by the data layer on every path, exactly as for the REST API. The guardrail is
 //! the security engine, not the prompt.
 //!
-//! Scope (v1): the static compiled-in security baseline (like `kigumi-runtime`'s serve) and the
-//! stdio transport. Runtime DB ACL overlays and HTTP transports can layer on later.
+//! TRUST MODEL: impersonation is UNAUTHENTICATED — `for_login` takes a login string, no
+//! credential. Whoever can start this process already holds DATABASE_URL (full database access),
+//! so the boundary is operator trust, like every other CLI command; it is NOT a network-facing
+//! authenticated surface.
+//!
+//! Scope (v1): the static compiled-in security baseline and catalog (like `kigumi-runtime`'s
+//! serve) and the stdio transport. Runtime DB overlays are NOT merged: ACL/rule rows added via
+//! the API and custom fields from `ir_model_field` are invisible here until a v2 merge — a
+//! custom field readable over REST is rejected as unknown by this surface. HTTP transports and
+//! the runtime overlays can layer on later.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,8 +32,8 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value as Json};
 
 /// How many records `search_records` returns when the caller does not say (and its hard cap).
-const DEFAULT_LIMIT: usize = 50;
-const MAX_LIMIT: usize = 200;
+const DEFAULT_LIMIT: i64 = 50;
+const MAX_LIMIT: i64 = 200;
 
 pub struct KigumiMcp {
     db: Db,
@@ -193,13 +201,11 @@ impl KigumiMcp {
             },
             None => None,
         };
-        let limit = (p.limit.unwrap_or(DEFAULT_LIMIT as u32) as usize).min(MAX_LIMIT);
-        match self.db.find_secured(model, &self.ctx, &self.acls, &self.rules, filter.as_ref()).await {
-            Ok(mut rows) => {
-                let total = rows.len();
-                rows.truncate(limit);
-                Ok(ok_json(&json!({ "returned": rows.len(), "matched": total, "records": rows })))
-            }
+        let limit = (p.limit.unwrap_or(DEFAULT_LIMIT as u32) as i64).min(MAX_LIMIT);
+        // The cap is enforced by the DATABASE (LIMIT in SQL): an agent-issued broad search must
+        // never materialize a huge table in memory (review must-fix). `matched` is a count.
+        match self.db.list_secured(model, &self.ctx, &self.acls, &self.rules, filter.as_ref(), &[], limit, 0).await {
+            Ok(page) => Ok(ok_json(&json!({ "returned": page.data.len(), "matched": page.total, "records": page.data }))),
             Err(e) => Ok(db_err(e)),
         }
     }
@@ -297,19 +303,28 @@ impl KigumiMcp {
         if !is_mailed(&p.model) {
             return Ok(arg_err(format!("model '{}' has no chatter thread", p.model)));
         }
-        if self.models.get(&p.model).is_none() {
+        let Some(host) = self.models.get(&p.model) else {
             return Ok(arg_err(format!("unknown model '{}'", p.model)));
-        }
+        };
         let Some(message) = self.models.get("mail.message") else {
             return Ok(arg_err("the mail module is not linked in this binary"));
         };
+        // The chatter invariant, same as the REST handler: you may post only to the thread of a
+        // record YOU can read — gate on the host under the caller's ctx, THEN insert elevated
+        // (normal users have no mail.message ACL by design; author_id stays the real uid).
+        match self.db.find_one_secured(host, &self.ctx, &self.acls, &self.rules, p.id).await {
+            Ok(Some(_)) => {}
+            Ok(None) => return Ok(arg_err("not found or not permitted")),
+            Err(e) => return Ok(db_err(e)),
+        }
         let mut values = Map::new();
         values.insert("res_model".into(), Json::String(p.model));
         values.insert("res_id".into(), Json::Number(p.id.into()));
         values.insert("author_id".into(), Json::Number(self.ctx.uid.into()));
         values.insert("body".into(), Json::String(p.body));
         values.insert("message_type".into(), Json::String("comment".into()));
-        match self.db.insert_secured(message, &self.ctx, &self.acls, &self.rules, &values).await {
+        let elevated = self.ctx.sudo();
+        match self.db.insert_secured(message, &elevated, &self.acls, &self.rules, &values).await {
             Ok(id) => Ok(ok_json(&json!({ "id": id }))),
             Err(e) => Ok(db_err(e)),
         }
@@ -318,6 +333,8 @@ impl KigumiMcp {
 
 impl KigumiMcp {
     /// Builds the server impersonating `login`: every tool call runs under that user's `Ctx`.
+    /// UNAUTHENTICATED by design — no credential is checked; running this at all requires
+    /// DATABASE_URL, so the gate is operator trust (see the module doc).
     pub async fn for_login(db: Db, login: &str) -> Result<Self, DbError> {
         let user = db
             .find_user(login)
@@ -327,22 +344,24 @@ impl KigumiMcp {
         if let Some(active) = user.company_id {
             ctx = ctx.in_companies(active, user.company_ids);
         }
-        Ok(Self::with_ctx(db, ctx))
+        Self::with_ctx(db, ctx)
     }
 
     /// Builds the server with an explicit `Ctx` (embedding, tests). The catalog and the security
-    /// baseline are the compiled-in registrations, like kigumi-runtime's serve.
-    pub fn with_ctx(db: Db, ctx: Ctx) -> Self {
+    /// baseline are the compiled-in registrations, like kigumi-runtime's serve; a catalog that
+    /// fails to resolve REFUSES to serve (review must-fix: silently serving zero models looks
+    /// "up" while every tool answers unknown-model). Runtime custom fields are not merged (v1).
+    pub fn with_ctx(db: Db, ctx: Ctx) -> Result<Self, DbError> {
         let models = resolve_all_registered()
             .map(|models| models.into_iter().map(|m| (m.name.to_string(), m)).collect())
-            .unwrap_or_default();
-        KigumiMcp {
+            .map_err(DbError::Migration)?;
+        Ok(KigumiMcp {
             db,
             ctx,
             acls: registered_acls().into(),
             rules: registered_rules().into(),
             models,
-        }
+        })
     }
 
     /// Serves MCP over stdio until the client disconnects.

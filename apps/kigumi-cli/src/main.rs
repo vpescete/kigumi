@@ -92,7 +92,8 @@ enum Cmd {
     /// Print the framework version and the linked modules.
     Version,
     /// Serve this instance over the Model Context Protocol (stdio), impersonating a user: every
-    /// tool call runs under that user's ACLs and record rules.
+    /// tool call runs under that user's ACLs and record rules. No credential is checked - running
+    /// this command already requires the database URL, so the gate is operator trust.
     Mcp {
         /// Login of the user the MCP client acts as.
         user: String,

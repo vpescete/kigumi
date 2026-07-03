@@ -45,8 +45,8 @@ fn unpack(result: &rmcp::model::CallToolResult) -> (bool, Json) {
 #[tokio::test]
 async fn mcp_tools_enforce_the_callers_ctx() {
     let Some(t) = kigumi_test::TestDb::new().await else { return };
-    let user = KigumiMcp::with_ctx(t.db.clone(), Ctx::new(7, vec!["mcptest.user".to_string()]));
-    let nobody = KigumiMcp::with_ctx(t.db.clone(), Ctx::new(8, vec![]));
+    let user = KigumiMcp::with_ctx(t.db.clone(), Ctx::new(7, vec!["mcptest.user".to_string()])).unwrap();
+    let nobody = KigumiMcp::with_ctx(t.db.clone(), Ctx::new(8, vec![])).unwrap();
 
     // Discovery: the model is in the catalog and its contract lists the action.
     let (err, models) = unpack(&user.list_models().await.unwrap());
