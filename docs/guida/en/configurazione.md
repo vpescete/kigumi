@@ -93,7 +93,22 @@ The connection identity (host, port, db, user, password, sslmode) is the single 
 | `bucket` | `Option<String>` | absent | Bucket for the `s3` backend. **Required** when `backend = s3`. |
 | `region` | `Option<String>` | absent | Region for the `s3` backend. |
 
-For the `s3` backend the access credentials come from the environment (not from this file). For the `fs` backend, `serve` instantiates an `FsBlobStore` (an `Arc<dyn BlobStore>`) rooted at `storage.path`, and identical bytes deduplicate into a single immutable file.
+For the `fs` backend, `serve` instantiates an `FsBlobStore` (an `Arc<dyn BlobStore>`) rooted at `storage.path`, and identical bytes deduplicate into a single immutable file.
+
+For the `s3` backend, `serve` instantiates an `S3BlobStore` over `bucket`/`region` with the same content-addressed dedup (keys `ab/cd/<sha256>`). The `kigumi` binary ships the `s3` feature built in — no rebuild is needed. Two things come from the **environment**, never from this file:
+
+- **Credentials** — the standard AWS chain: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `AWS_SESSION_TOKEN`; falling back to the shared profile and then IAM role.
+- **Endpoint** — `KIGUMI_S3_ENDPOINT` selects an S3-compatible service other than AWS (MinIO, Cloudflare R2, LocalStack). Setting it switches to path-style addressing automatically. Leave it unset for real AWS S3. When `region` is absent it defaults to `us-east-1`.
+
+Example — MinIO:
+
+```bash
+export AWS_ACCESS_KEY_ID=minioadmin
+export AWS_SECRET_ACCESS_KEY=minioadmin
+export KIGUMI_S3_ENDPOINT=http://127.0.0.1:9000
+# kigumi.toml: [storage] backend = "s3", bucket = "kigumi-blobs"
+kigumi serve
+```
 
 ### `[auth]`
 

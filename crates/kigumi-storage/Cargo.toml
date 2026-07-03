@@ -11,6 +11,12 @@ async-trait = "0.1"
 sha2 = "0.10"
 hex = "0.4"
 tokio = { version = "1", features = ["fs"] }
+# S3-compatible backend (AWS/MinIO/R2). Heavy (hyper+rustls) so it is opt-in: the default build
+# stays fs-only and light. rustls, not native-tls, to avoid a system OpenSSL dependency.
+rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"], optional = true }
+
+[features]
+s3 = ["dep:rust-s3"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"] }

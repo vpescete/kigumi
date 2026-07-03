@@ -787,16 +787,31 @@ async fn serve(s: Settings) -> Fallible {
         }
     });
 
-    // Content-addressed blob store for attachments. The root is config-driven (validated present for
-    // the fs backend); identical bytes deduplicate to one immutable file.
-    let blob_root = s
-        .config
-        .storage
-        .path
-        .clone()
-        .ok_or("storage.path is required for the fs blob store")?;
-    let blobs: std::sync::Arc<dyn kigumi_storage::BlobStore> =
-        std::sync::Arc::new(kigumi_storage::FsBlobStore::new(blob_root));
+    // Content-addressed blob store for attachments, chosen by [storage] backend (config validates the
+    // required fields). Identical bytes deduplicate to one immutable object on either backend.
+    let blobs: std::sync::Arc<dyn kigumi_storage::BlobStore> = match s.config.storage.backend {
+        kigumi_config::StorageBackend::Fs => {
+            let blob_root = s
+                .config
+                .storage
+                .path
+                .clone()
+                .ok_or("storage.path is required for the fs blob store")?;
+            std::sync::Arc::new(kigumi_storage::FsBlobStore::new(blob_root))
+        }
+        kigumi_config::StorageBackend::S3 => {
+            // bucket/region from config; endpoint (MinIO/R2/custom) + credentials from the env.
+            let bucket = s
+                .config
+                .storage
+                .bucket
+                .clone()
+                .ok_or("storage.bucket is required for the s3 blob store")?;
+            let region = s.config.storage.region.clone().unwrap_or_else(|| "us-east-1".into());
+            let endpoint = std::env::var("KIGUMI_S3_ENDPOINT").ok();
+            std::sync::Arc::new(kigumi_storage::S3BlobStore::new(&bucket, &region, endpoint.as_deref())?)
+        }
+    };
 
     let app = router_with_data_dynamic_rasterized(
         models,

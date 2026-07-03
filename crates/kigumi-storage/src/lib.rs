@@ -2,9 +2,10 @@
 //! keyed by the sha256 of their content: identical bytes dedupe to one immutable object, and every
 //! `put` re-verifies the hash so the content-address invariant is enforced, never trusted.
 //!
-//! v1 ships [`FsBlobStore`] (files at `<root>/ab/cd/<hash>`). The API is buffered (a whole blob is held
-//! in memory); streaming for very large blobs (the backup/restore path) is a later enhancement —
-//! attachments are single files of modest size. `S3BlobStore` / `DbBlobStore` are out of v1.
+//! Ships [`FsBlobStore`] (files at `<root>/ab/cd/<hash>`) and, behind the `s3` feature,
+//! [`S3BlobStore`] (objects at `ab/cd/<hash>` in an S3-compatible bucket: AWS, MinIO, R2). The API is
+//! buffered (a whole blob is held in memory); streaming for very large blobs (the backup/restore
+//! path) is a later enhancement — attachments are single files of modest size.
 
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
@@ -169,6 +170,161 @@ impl BlobStore for FsBlobStore {
     }
 }
 
+#[cfg(feature = "s3")]
+pub use s3_store::S3BlobStore;
+
+#[cfg(feature = "s3")]
+mod s3_store {
+    use super::{sha256_hex, valid_hash, BlobError, BlobStore};
+    use async_trait::async_trait;
+    use s3::{creds::Credentials, region::Region, Bucket};
+
+    /// The two-level fan-out key for a blob: `<h[0:2]>/<h[2:4]>/<h>`, mirroring the fs store's layout.
+    fn blob_key(sha256: &str) -> String {
+        format!("{}/{}/{}", &sha256[0..2], &sha256[2..4], sha256)
+    }
+
+    /// Any S3-SDK error (config, credentials, transport) is an I/O failure to a blob caller — mapped
+    /// to [`BlobError::Io`] so the trait's error surface stays backend-agnostic (no new variant).
+    fn s3_io<E: Into<Box<dyn std::error::Error + Send + Sync>>>(e: E) -> BlobError {
+        BlobError::Io(std::io::Error::other(e))
+    }
+
+    /// Content-addressed blob store over an S3-compatible bucket (AWS S3, MinIO, Cloudflare R2).
+    ///
+    /// Keys mirror [`FsBlobStore`](super::FsBlobStore): `ab/cd/<hash>`. Credentials come from the
+    /// standard AWS chain (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`, then
+    /// profile, then IAM) — never from config. A non-AWS `endpoint` (MinIO/R2) implies path-style
+    /// addressing. Built with `fail-on-err` off, so this store inspects HTTP status codes directly
+    /// (via `head_status`) — an ambiguous status (403/5xx) is an error, never a false "exists", so a
+    /// transient HEAD failure can never make `put` silently skip an upload.
+    ///
+    /// Unlike the fs store, a bucket is NOT assumed exclusive: another principal (console, lifecycle,
+    /// a co-tenant app) could replace an object out-of-band, so [`get`](Self::get) re-verifies the
+    /// content address on read — the invariant is verified, never trusted, on both write and read.
+    pub struct S3BlobStore {
+        bucket: Box<Bucket>,
+    }
+
+    impl S3BlobStore {
+        /// `bucket` and `region` come from `[storage]` config; `endpoint` (for MinIO/R2/custom) and
+        /// credentials come from the environment. `endpoint = None` targets real AWS S3.
+        pub fn new(bucket: &str, region: &str, endpoint: Option<&str>) -> Result<Self, BlobError> {
+            // Validate the region BEFORE touching the credential chain, so an obvious config typo
+            // fails fast and independently of the environment.
+            let region = match endpoint {
+                Some(ep) => Region::Custom { region: region.to_string(), endpoint: ep.to_string() },
+                None => {
+                    // aws-region's FromStr never rejects: an unknown string degrades to a Custom
+                    // region whose ENDPOINT is that string, which would silently send credentialed,
+                    // SigV4-signed requests to a stray host. Reaching a custom host must require the
+                    // explicit endpoint, so a region that does not resolve to a real AWS region is an
+                    // error here, not a mystery connection failure later.
+                    match region.parse::<Region>().map_err(s3_io)? {
+                        Region::Custom { .. } => {
+                            return Err(s3_io(format!(
+                                "unknown S3 region '{region}'; set KIGUMI_S3_ENDPOINT to target a custom S3-compatible host"
+                            )))
+                        }
+                        r => r,
+                    }
+                }
+            };
+            let creds = Credentials::default().map_err(s3_io)?;
+            let mut b = Bucket::new(bucket, region, creds).map_err(s3_io)?;
+            // A custom endpoint (MinIO, R2, LocalStack) needs path-style URLs; virtual-host style is
+            // AWS-only. On real AWS this stays the default virtual-host style.
+            if endpoint.is_some() {
+                b = b.with_path_style();
+            }
+            Ok(S3BlobStore { bucket: b })
+        }
+
+        /// HEAD → present/absent, mapping the raw HTTP status: `Some(true)` = 2xx (present),
+        /// `Some(false)` = 404 (absent), any other status (403/5xx) = `Err`. This is the safe
+        /// primitive `object_exists` is NOT: with `fail-on-err` off it collapses every non-404 to
+        /// "exists", so a 403/5xx would read as present and let `put` skip the upload.
+        async fn head_present(&self, key: &str) -> Result<bool, BlobError> {
+            let (_, status) = self.bucket.head_object(key).await.map_err(s3_io)?;
+            match status {
+                200..=299 => Ok(true),
+                404 => Ok(false),
+                code => Err(s3_io(format!("s3 head {key} returned status {code}"))),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl BlobStore for S3BlobStore {
+        async fn put(&self, sha256: &str, bytes: &[u8]) -> Result<(), BlobError> {
+            if !valid_hash(sha256) {
+                return Err(BlobError::BadHash(sha256.to_string()));
+            }
+            // Same content-address invariant as the fs store: the bytes must hash to the claimed key.
+            let actual = sha256_hex(bytes);
+            if actual != sha256 {
+                return Err(BlobError::HashMismatch { expected: sha256.to_string(), actual });
+            }
+            let key = blob_key(sha256);
+            // Dedup: an object under this key already holds identical bytes (content-addressed), so a
+            // re-upload is wasted bandwidth. A cheap HEAD beats a redundant PUT of the whole blob.
+            // head_present errors (not "exists") on an ambiguous status, so a transient/403 HEAD
+            // surfaces instead of silently skipping the upload.
+            if self.head_present(&key).await? {
+                return Ok(());
+            }
+            let resp = self.bucket.put_object(&key, bytes).await.map_err(s3_io)?;
+            match resp.status_code() {
+                200..=299 => Ok(()),
+                code => Err(s3_io(format!("s3 put {key} returned status {code}"))),
+            }
+        }
+
+        async fn get(&self, sha256: &str) -> Result<Vec<u8>, BlobError> {
+            if !valid_hash(sha256) {
+                return Err(BlobError::BadHash(sha256.to_string()));
+            }
+            let key = blob_key(sha256);
+            let resp = self.bucket.get_object(&key).await.map_err(s3_io)?;
+            match resp.status_code() {
+                200..=299 => {
+                    let bytes = resp.bytes().to_vec();
+                    // Re-verify on read: a shared/remote bucket is not the fs store's exclusive dir,
+                    // so an object could have been replaced out-of-band. Refuse to serve bytes that do
+                    // not hash to the requested key rather than trust the store's contents.
+                    let actual = sha256_hex(&bytes);
+                    if actual != sha256 {
+                        return Err(BlobError::HashMismatch { expected: sha256.to_string(), actual });
+                    }
+                    Ok(bytes)
+                }
+                404 => Err(BlobError::NotFound(sha256.to_string())),
+                code => Err(s3_io(format!("s3 get {key} returned status {code}"))),
+            }
+        }
+
+        async fn exists(&self, sha256: &str) -> Result<bool, BlobError> {
+            if !valid_hash(sha256) {
+                return Err(BlobError::BadHash(sha256.to_string()));
+            }
+            self.head_present(&blob_key(sha256)).await
+        }
+
+        async fn delete(&self, sha256: &str) -> Result<(), BlobError> {
+            if !valid_hash(sha256) {
+                return Err(BlobError::BadHash(sha256.to_string()));
+            }
+            let key = blob_key(sha256);
+            let resp = self.bucket.delete_object(&key).await.map_err(s3_io)?;
+            match resp.status_code() {
+                // 204 = deleted, 404 = already gone: both satisfy the idempotent contract.
+                200..=299 | 404 => Ok(()),
+                code => Err(s3_io(format!("s3 delete {key} returned status {code}"))),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,5 +391,56 @@ mod tests {
         // An uppercase hash is rejected (keys are canonical lowercase hex).
         let upper = sha256_hex(b"x").to_uppercase();
         assert!(matches!(s.exists(&upper).await, Err(BlobError::BadHash(_))));
+    }
+}
+
+// Live S3 round-trip, gated on both the `s3` feature and a configured bucket. Skips (does not fail)
+// when the env is absent, like the DB-backed tests — CI without a MinIO/S3 target just skips it.
+// Run against a local MinIO with:
+//   AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin \
+//   KIGUMI_S3_TEST_BUCKET=kigumi-test KIGUMI_S3_TEST_ENDPOINT=http://127.0.0.1:9000 \
+//   cargo test -p kigumi-storage --features s3 -- --ignored
+#[cfg(all(test, feature = "s3"))]
+mod s3_tests {
+    use super::*;
+
+    // Network-free: the region is validated before the credential chain, so an unknown region with no
+    // explicit endpoint is rejected rather than silently used as a host (credential-exfil guard).
+    #[test]
+    fn rejects_unknown_region_without_endpoint() {
+        assert!(S3BlobStore::new("b", "not-a-real-region", None).is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a live S3-compatible bucket (KIGUMI_S3_TEST_BUCKET/ENDPOINT)"]
+    async fn s3_roundtrip_dedup_and_delete() {
+        let (Ok(bucket), endpoint) =
+            (std::env::var("KIGUMI_S3_TEST_BUCKET"), std::env::var("KIGUMI_S3_TEST_ENDPOINT").ok())
+        else {
+            eprintln!("skipping: KIGUMI_S3_TEST_BUCKET unset");
+            return;
+        };
+        let region = std::env::var("KIGUMI_S3_TEST_REGION").unwrap_or_else(|_| "us-east-1".into());
+        let s = S3BlobStore::new(&bucket, &region, endpoint.as_deref()).unwrap();
+
+        // Unique bytes per run so a shared test bucket does not cross-contaminate.
+        let bytes = format!("kigumi s3 blob {}", std::process::id()).into_bytes();
+        let h = sha256_hex(&bytes);
+
+        s.delete(&h).await.unwrap(); // clean slate; idempotent
+        assert!(!s.exists(&h).await.unwrap());
+        s.put(&h, &bytes).await.unwrap();
+        assert!(s.exists(&h).await.unwrap());
+        assert_eq!(s.get(&h).await.unwrap(), bytes);
+        s.put(&h, &bytes).await.unwrap(); // dedup: no-op
+        assert_eq!(s.get(&h).await.unwrap(), bytes);
+
+        // Content-address invariant holds over S3 too.
+        assert!(matches!(s.put(&h, b"tampered").await, Err(BlobError::HashMismatch { .. })));
+
+        s.delete(&h).await.unwrap();
+        assert!(!s.exists(&h).await.unwrap());
+        assert!(matches!(s.get(&h).await, Err(BlobError::NotFound(_))));
+        s.delete(&h).await.unwrap(); // idempotent
     }
 }
