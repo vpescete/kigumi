@@ -93,11 +93,21 @@ async fn api_key_lifecycle() {
     let (s, _) = send(app.clone(), "POST", "/api/widget", Some(&ro_key), Some(r#"{"name":"nope"}"#)).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "the scope NARROWED away create");
 
+    // ESCALATION GUARD (review must-fix): the narrowed read-only key tries to mint an un-narrowed
+    // key (no scopes). The minted key must stay pinned to the minter's effective groups [reader] —
+    // it must NOT regain create by re-expanding to the user's full [reader, writer].
+    let (s, esc) = send(app.clone(), "POST", "/auth/keys", Some(&ro_key), Some(r#"{"name":"escalate"}"#)).await;
+    assert_eq!(s, StatusCode::CREATED, "a key may mint keys");
+    let esc_key = esc["key"].as_str().unwrap().to_string();
+    assert_eq!(send(app.clone(), "GET", "/api/widget", Some(&esc_key), None).await.0, StatusCode::OK, "still reads");
+    let (s, _) = send(app.clone(), "POST", "/api/widget", Some(&esc_key), Some(r#"{"name":"escalated"}"#)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "a narrowed key cannot mint its way back to create");
+
     // The key appears in the owner's list (without the secret).
     let (s, list) = send(app.clone(), "GET", "/auth/keys", Some(&access), None).await;
     assert_eq!(s, StatusCode::OK);
     let rows = list["data"].as_array().unwrap();
-    assert_eq!(rows.len(), 2, "two live keys");
+    assert_eq!(rows.len(), 3, "three live keys (ci, readonly, escalate) — all owned by dev");
     assert!(rows.iter().all(|r| r.get("key").is_none() && r.get("hash").is_none()), "no secret leaks");
 
     // Revoke the read-only key → it stops authenticating immediately.

@@ -550,8 +550,12 @@ async fn authenticate(backend: &DataBackend, headers: &HeaderMap) -> Result<Ctx,
     if let Some(token) = header.and_then(|h| h.strip_prefix("Bearer ")) {
         if let Some((prefix, secret)) = kigumi_auth::parse_api_key(token) {
             let key = backend.db.find_api_key(&prefix).await.map_err(|_| unauthorized())?;
+            // Timing equalizer (review should-fix): a missing/revoked/expired prefix must spend the
+            // same Argon2 as a live one with a wrong secret, so latency does not leak key liveness.
+            let hash = key.as_ref().map(|k| k.hash.as_str()).unwrap_or_else(|| dummy_hash());
+            let ok = kigumi_auth::verify_password(&secret, hash);
             let Some(key) = key else { return Err(unauthorized()) };
-            if !kigumi_auth::verify_password(&secret, &key.hash) {
+            if !ok {
                 return Err(unauthorized());
             }
             // Impersonate the user; a key can only NARROW the user's groups, never widen them.
@@ -562,7 +566,9 @@ async fn authenticate(backend: &DataBackend, headers: &HeaderMap) -> Result<Ctx,
                 groups.retain(|g| key.scopes.contains(g));
             }
             let mut ctx = Ctx::new(key.user_id, groups);
-            if let Some(active) = company_id {
+            // Mirror verify_access: derive the active company from the allowed set when the stored
+            // active is NULL, so a set-scoped user keeps its company visibility through a key.
+            if let Some(active) = company_id.or_else(|| company_ids.first().copied()) {
                 ctx = ctx.in_companies(active, company_ids);
             }
             // Best-effort usage stamp; never fails the request.
@@ -701,16 +707,22 @@ async fn create_key_handler(State(state): State<AppState>, headers: HeaderMap, J
     let Some(name) = str_field(&body, "name") else {
         return error_response(StatusCode::BAD_REQUEST, "bad-input", "a key needs a 'name'", &[]);
     };
-    let scopes: Vec<String> = str_field(&body, "scopes")
+    if name.len() > 200 {
+        return error_response(StatusCode::BAD_REQUEST, "bad-input", "name is too long (max 200)", &[]);
+    }
+    let requested: Vec<String> = str_field(&body, "scopes")
         .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
         .unwrap_or_default();
-    // A key can only NARROW: every requested scope must be a group the caller actually holds
-    // (the superuser, groups = [], may name any — it is unrestricted by design).
-    if !ctx.is_su() {
-        if let Some(bad) = scopes.iter().find(|g| !ctx.groups.contains(g)) {
-            return error_response(StatusCode::FORBIDDEN, "access-denied", &format!("scope '{bad}' is not one of your groups"), &[]);
-        }
+    // A key can only NARROW: every requested scope must be a group the caller actually holds.
+    if let Some(bad) = requested.iter().find(|g| !ctx.groups.contains(g)) {
+        return error_response(StatusCode::FORBIDDEN, "access-denied", &format!("scope '{bad}' is not one of your groups"), &[]);
     }
+    // Scopes are FROZEN to the minter's CURRENT effective groups (review must-fix): an absent
+    // request must not mean "all the user's groups, dynamically" — else a narrowed key could mint
+    // an un-narrowed key and regain what it was scoped away from. Empty request = exactly the
+    // groups the caller holds right now; an explicit request is that subset. A key thus never
+    // grants more than the credential that minted it.
+    let scopes: Vec<String> = if requested.is_empty() { ctx.groups.clone() } else { requested };
     let expires_in = body.get("expires_in").and_then(|v| v.as_i64()).filter(|&n| n > 0);
     let minted = match kigumi_auth::new_api_key() {
         Ok(m) => m,
