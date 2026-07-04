@@ -656,6 +656,7 @@ fn build_webhook_sender() -> Box<dyn Fn(&WebhookDelivery) -> Result<(), String> 
 }
 
 async fn serve(s: Settings) -> Fallible {
+    kigumi_server::init_tracing(&s.config.log.level, &s.config.log.format);
     let bind = s.config.server.bind.clone();
     let db = Db::connect(&s.secrets.database_url).await?;
 

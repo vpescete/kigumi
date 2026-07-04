@@ -14,3 +14,5 @@ kigumi-server = { workspace = true }
 kigumi-storage = { workspace = true }
 axum = "0.7"
 tokio = { version = "1", features = ["rt", "net", "time", "macros"] }
+# Worker error sites log through the same subscriber this crate installs (init_tracing).
+tracing = "0.1"

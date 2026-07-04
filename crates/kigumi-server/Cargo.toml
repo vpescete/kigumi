@@ -19,6 +19,11 @@ async-stream = "0.3"
 serde_json = "1"
 rust_decimal = "1"
 genpdf = "0.2"
+# Observability: a per-request span (method/path/status/latency) via TraceLayer, and a subscriber
+# init driven by [log]. Metadata only — never request/response bodies.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tower-http = { version = "0.6", features = ["trace"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }

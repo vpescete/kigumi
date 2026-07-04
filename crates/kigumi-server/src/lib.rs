@@ -477,6 +477,26 @@ fn build_data_router(
             }),
         })
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
+        // Outermost: one span per request (method/path/status/latency), completed requests at INFO,
+        // failures at ERROR. Metadata only — TraceLayer never records request or response bodies.
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http()
+                .on_response(tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO)),
+        )
+}
+
+/// Installs the global tracing subscriber from `[log]` config: `level` seeds the filter (the standard
+/// `RUST_LOG` env var overrides it) and `format` picks `json` (structured, for production log
+/// pipelines) or text (human-readable, the default). Call once at startup from the binary's `main`;
+/// a second call is a harmless no-op, so both the CLI and the runtime may call it.
+pub fn init_tracing(level: &str, format: &str) {
+    use tracing_subscriber::{fmt, EnvFilter};
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
+    // try_init errors only when a subscriber is already set — ignore it so double-init is a no-op.
+    let _ = match format {
+        "json" => fmt().with_env_filter(filter).json().try_init(),
+        _ => fmt().with_env_filter(filter).try_init(),
+    };
 }
 
 /// The SHARED outbox poller: one task per data router, broadcasting gap-safe event batches to every
@@ -505,7 +525,7 @@ fn spawn_event_poller(db: Arc<Db>, tx: tokio::sync::broadcast::Sender<Arc<Vec<St
             if tx.receiver_count() == 0 {
                 match db.latest_event_cursor().await {
                     Ok(c) => cursor = Some(c),
-                    Err(e) => eprintln!("kigumi-server event poller (idle cursor) failed: {e:?}"),
+                    Err(e) => tracing::error!("kigumi-server event poller (idle cursor) failed: {e:?}"),
                 }
                 continue;
             }
@@ -514,7 +534,7 @@ fn spawn_event_poller(db: Arc<Db>, tx: tokio::sync::broadcast::Sender<Arc<Vec<St
                 None => match db.latest_event_cursor().await {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("kigumi-server event poller (cursor) failed: {e:?}");
+                        tracing::error!("kigumi-server event poller (cursor) failed: {e:?}");
                         continue;
                     }
                 },
@@ -527,7 +547,7 @@ fn spawn_event_poller(db: Arc<Db>, tx: tokio::sync::broadcast::Sender<Arc<Vec<St
                     cursor = Some(events.last().map(|e| (e.txn, e.id)).unwrap_or(from));
                     let _ = tx.send(Arc::new(events)); // no receivers = fine
                 }
-                Err(e) => eprintln!("kigumi-server event poller failed: {e:?}"),
+                Err(e) => tracing::error!("kigumi-server event poller failed: {e:?}"),
             }
         }
     });
@@ -655,7 +675,7 @@ async fn models_handler(State(state): State<AppState>) -> Json<Vec<String>> {
 /// Logs the detail server-side and returns an opaque 500 — internal schema/SQL detail must never
 /// reach the client (it would leak table/column names and Postgres error text).
 fn internal_error(context: &str, detail: impl std::fmt::Debug) -> Response {
-    eprintln!("kigumi-server {context} error: {detail:?}");
+    tracing::error!("kigumi-server {context} error: {detail:?}");
     error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal", "internal error", &[])
 }
 
@@ -1579,7 +1599,7 @@ async fn events_stream_handler(
             None => match db.latest_event_cursor().await {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("kigumi-server event stream (cursor) failed: {e:?}");
+                    tracing::error!("kigumi-server event stream (cursor) failed: {e:?}");
                     return;
                 }
             },
@@ -1593,7 +1613,7 @@ async fn events_stream_handler(
                 let page = match db.events_after(last, 200).await {
                     Ok(p) => p,
                     Err(e) => {
-                        eprintln!("kigumi-server event stream (catch-up) failed: {e:?}");
+                        tracing::error!("kigumi-server event stream (catch-up) failed: {e:?}");
                         return;
                     }
                 };
@@ -1616,7 +1636,7 @@ async fn events_stream_handler(
                         }
                     }
                     // Transient filter failure: skip this page (events are hints), don't kill the stream.
-                    Err(e) => eprintln!("kigumi-server event stream (filter) failed: {e:?}"),
+                    Err(e) => tracing::error!("kigumi-server event stream (filter) failed: {e:?}"),
                 }
             }
             // -- live batches (bounded by the token TTL: on expiry the client reconnects fresh) --
@@ -1645,7 +1665,7 @@ async fn events_stream_handler(
                                 yield Ok(axum::response::sse::Event::default().id(sse_id(&ev)).data(ev.to_string()));
                             }
                         }
-                        Err(e) => eprintln!("kigumi-server event stream (filter) failed: {e:?}"),
+                        Err(e) => tracing::error!("kigumi-server event stream (filter) failed: {e:?}"),
                     }
                 }
                 // Lagged: the broadcast buffer overtook this client — fall back to a catch-up query.
@@ -2235,7 +2255,7 @@ async fn messages_handler(
                 Ok(t) => t,
                 Err(e) => {
                     // A DB error here must not be hidden as "no audit"; log it (the messages still return).
-                    eprintln!("kigumi-server messages tracking enrichment failed: {e:?}");
+                    tracing::error!("kigumi-server messages tracking enrichment failed: {e:?}");
                     Vec::new()
                 }
             };

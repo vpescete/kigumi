@@ -145,6 +145,8 @@ The core keys of `[modules]` are strict, but each `[modules.<name>]` is an **ope
 | `level` | `String` | `"info"` | Log level: `error` \| `warn` \| `info` \| `debug` \| `trace`. |
 | `format` | `String` | `"text"` | Log format: `json` \| `text`. (The example uses `json`.) |
 
+`serve` installs a `tracing` subscriber from these values: `format = "json"` emits structured logs for a production log pipeline, `text` is human-readable. The **`RUST_LOG`** environment variable overrides `level` when set (e.g. `RUST_LOG=kigumi_server=debug,info`). Each HTTP request is wrapped in a span logging the method, path, status, and latency (completed requests at `info`, failures at `error`) — **metadata only; request and response bodies are never logged**. Metrics/traces export to an OpenTelemetry collector is the opt-in next layer.
+
 ## Validation
 
 `Config::validate` performs the cross-checks that the serde schema cannot express:

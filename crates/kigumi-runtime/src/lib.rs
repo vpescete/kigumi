@@ -104,7 +104,7 @@ pub fn spawn_workers(db: &Db) {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(CRON_TICK_SECS)).await;
             if let Err(e) = cron_db.run_due_crons().await {
-                eprintln!("kigumi cron tick failed: {e:?}");
+                tracing::error!("kigumi cron tick failed: {e:?}");
             }
         }
     });
@@ -113,10 +113,10 @@ pub fn spawn_workers(db: &Db) {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(JOB_TICK_SECS)).await;
             if let Err(e) = job_db.reap_stuck_jobs().await {
-                eprintln!("kigumi job reap failed: {e:?}");
+                tracing::error!("kigumi job reap failed: {e:?}");
             }
             if let Err(e) = job_db.run_due_jobs().await {
-                eprintln!("kigumi job tick failed: {e:?}");
+                tracing::error!("kigumi job tick failed: {e:?}");
             }
         }
     });
@@ -139,6 +139,9 @@ pub struct ServeOptions {
 /// re-reads the ledger live. If that matters operationally, restart after ledger changes or
 /// graduate to the CLI's dynamic wiring.
 pub async fn serve(db: Db, opts: ServeOptions) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Default subscriber for the adopter binary (RUST_LOG overrides the level); a no-op if the adopter
+    // already installed its own.
+    kigumi_server::init_tracing("info", "text");
     let models: Vec<_> = resolve_all_registered().map_err(|e| e.to_string())?.into_iter().collect();
     // The static router wants 'static security data; the registry Vecs live for the process anyway.
     let acls: &'static [Acl] = Box::leak(registered_acls().into_boxed_slice());

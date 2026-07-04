@@ -145,6 +145,8 @@ Le chiavi core di `[modules]` sono strette, ma ogni `[modules.<name>]` è un **s
 | `level` | `String` | `"info"` | Livello di log: `error` \| `warn` \| `info` \| `debug` \| `trace`. |
 | `format` | `String` | `"text"` | Formato di log: `json` \| `text`. (L'esempio usa `json`.) |
 
+`serve` installa un subscriber `tracing` da questi valori: `format = "json"` produce log strutturati per una pipeline di produzione, `text` è leggibile dall'uomo. La variabile d'ambiente **`RUST_LOG`** sovrascrive `level` quando impostata (es. `RUST_LOG=kigumi_server=debug,info`). Ogni richiesta HTTP è avvolta in uno span che logga metodo, path, status e latenza (richieste completate a `info`, fallimenti a `error`) — **solo metadati; body di richiesta e risposta non vengono mai loggati**. L'export di metriche/tracce verso un collector OpenTelemetry è il layer opt-in successivo.
+
 ## Validazione
 
 `Config::validate` esegue i controlli incrociati che lo schema serde non può esprimere:
