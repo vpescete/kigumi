@@ -27,7 +27,7 @@ use kigumi_core::{
     registered_acls, registered_rules, report_for, resolve_modules, wizard_for, Acl, Condition, Ctx,
     Domain, FieldDef, FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
 };
-use kigumi_db::{custom_scalar_kind, is_safe_ident, route_for, route_methods, validate_routes, Db, DbError, RouteInput, RouteMethod, RouteOutput, StoredEvent, ViewOverride};
+use kigumi_db::{custom_scalar_kind, is_safe_ident, route_for, route_methods, validate_routes, Db, DbError, RouteInput, RouteMethod, RouteOutput, StoredEvent, Translation, ViewOverride};
 use kigumi_schema::{openapi, pg_column_type, to_ui_contract};
 use kigumi_storage::{sha256_hex, BlobStore};
 
@@ -77,6 +77,10 @@ struct AppState {
     /// admin can relabel / hide / lock / re-widget a field at runtime with no recompile. Owned data
     /// (no leak), so the poll loop can refresh it every tick freely.
     view_overrides: Arc<RwLock<HashMap<String, Vec<ViewOverride>>>>,
+    /// Runtime UI translations, by model name — the i18n post-pass over the contract. When a model's
+    /// `view` is served with an `Accept-Language`, matching field/option labels are swapped for the
+    /// locale's text (fallback: the compile-time English). Owned data, refreshed every poll tick.
+    translations: Arc<RwLock<HashMap<String, Vec<Translation>>>>,
     data: Option<DataBackend>,
 }
 
@@ -174,6 +178,89 @@ fn apply_view_overrides(contract: &str, overrides: &[ViewOverride]) -> String {
     v.to_string()
 }
 
+fn group_translations(rows: &[Translation]) -> HashMap<String, Vec<Translation>> {
+    let mut map: HashMap<String, Vec<Translation>> = HashMap::new();
+    for t in rows {
+        map.entry(t.model.clone()).or_default().push(t.clone());
+    }
+    map
+}
+
+/// Reloads the live translation map from `ir_translation` (after a change, and at startup). Owned data,
+/// so like the view overrides this can run on every poll tick unconditionally.
+pub async fn refresh_translations(map: &Arc<RwLock<HashMap<String, Vec<Translation>>>>, db: &Db) {
+    if let Ok(rows) = db.load_translations().await {
+        if let Ok(mut w) = map.write() {
+            *w = group_translations(&rows);
+        }
+    }
+}
+
+/// The primary language subtag of an `Accept-Language` header, lowercased (`it-IT,it;q=0.9,en` -> `it`).
+/// Absent/empty -> `None`.
+// ponytail: first tag's primary subtag; add full q-value negotiation only if a caller needs it.
+fn accept_language(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get("accept-language")?.to_str().ok()?;
+    let primary = raw.split(',').next()?.split(';').next()?.trim().split('-').next()?.trim();
+    (!primary.is_empty()).then(|| primary.to_ascii_lowercase())
+}
+
+/// Post-pass over the contract JSON: for `lang`, replace field labels, selection option labels, and
+/// matching list-column labels with their translation. Anything without a translation keeps the
+/// compile-time English. Returns the input unchanged if there is nothing for `lang` or it does not parse.
+fn apply_translations(contract: &str, translations: &[Translation], lang: &str) -> String {
+    // Lang-specific lookups: (field -> label) for value "", and (field, option value -> label) otherwise.
+    let mut field_label: HashMap<&str, &str> = HashMap::new();
+    let mut option_label: HashMap<(&str, &str), &str> = HashMap::new();
+    for t in translations.iter().filter(|t| t.lang == lang) {
+        if t.value.is_empty() {
+            field_label.insert(&t.field, &t.text);
+        } else {
+            option_label.insert((&t.field, &t.value), &t.text);
+        }
+    }
+    if field_label.is_empty() && option_label.is_empty() {
+        return contract.to_string();
+    }
+    let mut v: Json2 = match serde_json::from_str(contract) {
+        Ok(v) => v,
+        Err(_) => return contract.to_string(),
+    };
+    let translate = |arr: &mut Vec<Json2>| {
+        for item in arr.iter_mut() {
+            let Some(name) = item.get("name").and_then(|n| n.as_str()).map(str::to_string) else {
+                continue;
+            };
+            let Some(obj) = item.as_object_mut() else { continue };
+            if let Some(t) = field_label.get(name.as_str()) {
+                obj.insert("label".into(), Json2::String((*t).to_string()));
+            }
+            // Selection option labels live in the field's `options` array of {value, label}.
+            if let Some(Json2::Array(opts)) = obj.get_mut("options") {
+                for opt in opts.iter_mut() {
+                    let Some(val) = opt.get("value").and_then(|x| x.as_str()).map(str::to_string) else {
+                        continue;
+                    };
+                    if let Some(t) = option_label.get(&(name.as_str(), val.as_str())) {
+                        if let Some(o) = opt.as_object_mut() {
+                            o.insert("label".into(), Json2::String((*t).to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    };
+    if let Some(arr) = v.get_mut("fields").and_then(|f| f.as_array_mut()) {
+        translate(arr);
+    }
+    if let Some(cols) =
+        v.get_mut("list").and_then(|l| l.get_mut("columns")).and_then(|c| c.as_array_mut())
+    {
+        translate(cols);
+    }
+    v.to_string()
+}
+
 #[derive(Clone)]
 struct DataBackend {
     db: Arc<Db>,
@@ -267,6 +354,7 @@ fn base_router() -> Router<AppState> {
         .route("/api/modules/:name/uninstall", post(module_uninstall_handler))
         .route("/api/:name/_fields", post(add_field_handler))
         .route("/api/:name/_view", get(list_view_handler).post(add_view_handler))
+        .route("/api/:name/_translation", post(add_translation_handler))
         .route("/api/:name/view", get(view_handler))
 }
 
@@ -277,6 +365,7 @@ pub fn router(models: Vec<ResolvedModel>) -> Router {
         installed: Arc::new(RwLock::new(HashSet::new())),
         custom_fields: Arc::new(RwLock::new(HashMap::new())),
         view_overrides: Arc::new(RwLock::new(HashMap::new())),
+        translations: Arc::new(RwLock::new(HashMap::new())),
         data: None,
     })
 }
@@ -316,6 +405,7 @@ pub fn router_with_data_rasterized(
         Arc::new(RwLock::new(HashSet::new())),
         Arc::new(RwLock::new(HashMap::new())),
         Arc::new(RwLock::new(HashMap::new())),
+        Arc::new(RwLock::new(HashMap::new())),
         db,
         Arc::new(RwLock::new(Arc::from(acls))),
         Arc::new(RwLock::new(Arc::from(rules))),
@@ -335,6 +425,7 @@ pub fn router_with_data_dynamic(
     installed: Arc<RwLock<HashSet<String>>>,
     custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
     view_overrides: Arc<RwLock<HashMap<String, Vec<ViewOverride>>>>,
+    translations: Arc<RwLock<HashMap<String, Vec<Translation>>>>,
     db: Db,
     acls: AclState,
     rules: RuleState,
@@ -346,6 +437,7 @@ pub fn router_with_data_dynamic(
         installed,
         custom_fields,
         view_overrides,
+        translations,
         db,
         acls,
         rules,
@@ -362,6 +454,7 @@ pub fn router_with_data_dynamic_rasterized(
     installed: Arc<RwLock<HashSet<String>>>,
     custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
     view_overrides: Arc<RwLock<HashMap<String, Vec<ViewOverride>>>>,
+    translations: Arc<RwLock<HashMap<String, Vec<Translation>>>>,
     db: Db,
     acls: AclState,
     rules: RuleState,
@@ -374,6 +467,7 @@ pub fn router_with_data_dynamic_rasterized(
         installed,
         custom_fields,
         view_overrides,
+        translations,
         db,
         acls,
         rules,
@@ -389,6 +483,7 @@ fn build_data_router(
     installed: Arc<RwLock<HashSet<String>>>,
     custom_fields: Arc<RwLock<HashMap<String, Vec<FieldDef>>>>,
     view_overrides: Arc<RwLock<HashMap<String, Vec<ViewOverride>>>>,
+    translations: Arc<RwLock<HashMap<String, Vec<Translation>>>>,
     db: Db,
     acls: AclState,
     rules: RuleState,
@@ -466,6 +561,7 @@ fn build_data_router(
             installed,
             custom_fields,
             view_overrides,
+            translations,
             data: Some(DataBackend {
                 db,
                 events,
@@ -974,7 +1070,7 @@ async fn add_field_handler(State(state): State<AppState>, Path(name): Path<Strin
     }
 }
 
-async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+async fn view_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> Response {
     let model = match resolve_model(&state, &name) {
         Ok(m) => m,
         Err(r) => return r,
@@ -983,18 +1079,29 @@ async fn view_handler(State(state): State<AppState>, Path(name): Path<String>) -
         Ok(j) => j,
         Err(e) => return internal_error("view", e),
     };
-    // Post-pass: fold in any runtime view overrides (relabel/hide/lock/re-widget) for this model.
+    // Post-pass 1: runtime view overrides (relabel/hide/lock/re-widget) for this model.
     let overrides = state
         .view_overrides
         .read()
         .ok()
         .and_then(|m| m.get(&name).cloned())
         .unwrap_or_default();
-    if overrides.is_empty() {
-        json_response(json)
-    } else {
-        json_response(apply_view_overrides(&json, &overrides))
-    }
+    let json = if overrides.is_empty() { json } else { apply_view_overrides(&json, &overrides) };
+    // Post-pass 2: per-locale label/option translations for the caller's Accept-Language. No header (or
+    // no translations for the model) leaves the compile-time English in place.
+    let json = match accept_language(&headers) {
+        Some(lang) => {
+            let tr = state
+                .translations
+                .read()
+                .ok()
+                .and_then(|m| m.get(&name).cloned())
+                .unwrap_or_default();
+            if tr.is_empty() { json } else { apply_translations(&json, &tr, &lang) }
+        }
+        None => json,
+    };
+    json_response(json)
 }
 
 /// The runtime view overrides configured on a model (admin only) — the inverse of the contract's
@@ -1133,6 +1240,49 @@ async fn add_view_handler(State(state): State<AppState>, Path(name): Path<String
             json_response(serde_json::json!({ "view": { "model": name, "field": field } }).to_string())
         }
         Err(e) => write_error("set_view", e),
+    }
+}
+
+/// Set a per-locale translation for a field label or selection option (admin only): the i18n sibling of
+/// the view override, applied as a post-pass when the contract is served under a matching
+/// `Accept-Language`. Body: `{field, lang, text, value?}` — `value` empty/absent translates the field's
+/// own label, a non-empty `value` translates that selection option's label. Upserts the `ir_translation`
+/// row and reloads the live map. Pure UI metadata — it cannot grant access or change storage.
+async fn add_translation_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap, Json(body): Json<Json2>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on data routes");
+    let ctx = match authenticate(backend, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !ctx.is_member("admin") {
+        return (StatusCode::FORBIDDEN, "setting a translation requires the admin group").into_response();
+    }
+    let model = match resolve_model(&state, &name) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let (Some(field), Some(lang), Some(text)) =
+        (str_field(&body, "field"), str_field(&body, "lang"), str_field(&body, "text"))
+    else {
+        return (StatusCode::BAD_REQUEST, "'field', 'lang' and 'text' are required").into_response();
+    };
+    let value = str_field(&body, "value").unwrap_or(""); // "" = the field's own label
+    // The field must appear in the served contract (a model-own/custom field, or a delegated parent
+    // field) — the same gate as a view override. A bogus option `value` is harmless (it simply never
+    // matches an option in the contract), so it is not separately validated.
+    let known = model.fields.iter().any(|f| f.name == field)
+        || delegated_fields(&name).unwrap_or_default().iter().any(|d| d.def.name == field);
+    if !known {
+        return (StatusCode::BAD_REQUEST, format!("unknown field '{field}' on {name}")).into_response();
+    }
+    match backend.db.set_translation(&name, field, value, lang, text).await {
+        Ok(_) => {
+            refresh_translations(&state.translations, &backend.db).await;
+            json_response(
+                serde_json::json!({ "translation": { "model": name, "field": field, "lang": lang } }).to_string(),
+            )
+        }
+        Err(e) => write_error("set_translation", e),
     }
 }
 
@@ -2748,6 +2898,55 @@ mod tests {
         let untouched = apply_view_overrides(contract, &[]);
         let v2: Json2 = serde_json::from_str(&untouched).unwrap();
         assert_eq!(v2["fields"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn translations_swap_labels_options_and_columns_for_lang() {
+        let contract = "{\"fields\":[\
+            {\"name\":\"state\",\"label\":\"State\",\"widget\":\"selection\",\"options\":[\
+                {\"value\":\"draft\",\"label\":\"Draft\"},{\"value\":\"done\",\"label\":\"Done\"}]},\
+            {\"name\":\"name\",\"label\":\"Name\",\"widget\":\"text\"}],\
+            \"list\":{\"columns\":[\
+            {\"name\":\"state\",\"label\":\"State\",\"widget\":\"selection\"},\
+            {\"name\":\"name\",\"label\":\"Name\",\"widget\":\"text\"}]}}";
+        let tr = |field: &str, value: &str, lang: &str, text: &str| Translation {
+            model: "sale.order".into(),
+            field: field.into(),
+            value: value.into(),
+            lang: lang.into(),
+            text: text.into(),
+        };
+        let translations = vec![
+            tr("state", "", "it", "Stato"),   // field label
+            tr("state", "draft", "it", "Bozza"), // one option only
+            tr("name", "", "fr", "Nom"),      // a different language
+        ];
+        let out = apply_translations(contract, &translations, "it");
+        let v: Json2 = serde_json::from_str(&out).unwrap();
+        let fields = v["fields"].as_array().unwrap();
+        assert_eq!(fields[0]["label"], "Stato"); // field label translated
+        let opts = fields[0]["options"].as_array().unwrap();
+        assert_eq!(opts[0]["label"], "Bozza"); // 'draft' option translated
+        assert_eq!(opts[1]["label"], "Done"); // 'done' untranslated -> English fallback
+        assert_eq!(fields[1]["label"], "Name"); // 'name' has only an 'fr' entry -> unchanged for 'it'
+        // The matching list column is translated too, so form and list agree.
+        assert_eq!(v["list"]["columns"].as_array().unwrap()[0]["label"], "Stato");
+        // A language with no entries returns the contract unchanged.
+        let none = apply_translations(contract, &translations, "de");
+        assert_eq!(serde_json::from_str::<Json2>(&none).unwrap()["fields"][0]["label"], "State");
+    }
+
+    #[test]
+    fn accept_language_takes_primary_subtag() {
+        let lang = |v: &str| {
+            let mut h = HeaderMap::new();
+            h.insert("accept-language", v.parse().unwrap());
+            accept_language(&h)
+        };
+        assert_eq!(lang("it-IT,it;q=0.9,en;q=0.8").as_deref(), Some("it"));
+        assert_eq!(lang("FR").as_deref(), Some("fr")); // lowercased
+        assert_eq!(lang("  ").as_deref(), None);
+        assert_eq!(accept_language(&HeaderMap::new()), None); // header absent
     }
 }
 

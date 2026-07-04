@@ -15,8 +15,8 @@ use kigumi_auth::hash_password;
 use kigumi_config::Settings;
 use kigumi_db::{Db, OutgoingMail, WebhookDelivery};
 use kigumi_server::{
-    access_fingerprint, refresh_access, refresh_custom_fields, refresh_view_overrides,
-    router_with_data_dynamic_rasterized, GenpdfRasterizer,
+    access_fingerprint, refresh_access, refresh_custom_fields, refresh_translations,
+    refresh_view_overrides, router_with_data_dynamic_rasterized, GenpdfRasterizer,
 };
 
 mod scaffold;
@@ -667,6 +667,7 @@ async fn serve(s: Settings) -> Fallible {
     db.ensure_module_schema().await?;
     db.ensure_custom_field_schema().await?;
     db.ensure_view_schema().await?;
+    db.ensure_translation_schema().await?;
     let models: Vec<_> = resolve_all_registered().map_err(|e| e.to_string())?.into_iter().collect();
     let installed_set: std::sync::Arc<std::sync::RwLock<std::collections::HashSet<String>>> =
         std::sync::Arc::new(std::sync::RwLock::new(db.installed_modules().await?.into_iter().collect()));
@@ -679,6 +680,10 @@ async fn serve(s: Settings) -> Fallible {
     let view_overrides: std::sync::Arc<std::sync::RwLock<std::collections::HashMap<String, Vec<kigumi_db::ViewOverride>>>> =
         std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
     refresh_view_overrides(&view_overrides, &db).await;
+    // Runtime UI translations: per-locale field/option labels, applied to the contract by Accept-Language.
+    let translations: std::sync::Arc<std::sync::RwLock<std::collections::HashMap<String, Vec<kigumi_db::Translation>>>> =
+        std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+    refresh_translations(&translations, &db).await;
 
     // Effective access = compiled-in baseline ∪ runtime DB overrides (hybrid, D12). For ACLs the DB
     // rows only widen access (union); for record rules they add restrictions/alternatives through the
@@ -763,6 +768,7 @@ async fn serve(s: Settings) -> Fallible {
     let refresh_set = installed_set.clone();
     let refresh_custom = custom_fields.clone();
     let refresh_views = view_overrides.clone();
+    let refresh_trans = translations.clone();
     let refresh_acls = acls.clone();
     let refresh_rules = rules.clone();
     let mut access_fp = access_fingerprint(&db).await;
@@ -776,6 +782,7 @@ async fn serve(s: Settings) -> Fallible {
             }
             refresh_custom_fields(&refresh_custom, &refresh_db).await;
             refresh_view_overrides(&refresh_views, &refresh_db).await;
+            refresh_translations(&refresh_trans, &refresh_db).await;
             // Reload the access policy only when the DB rows actually changed — avoids the
             // load_*_static identifier-string leak on every idle tick, while still picking up
             // out-of-band edits (the `kigumi acl/rule` CLI, or direct SQL) without a restart. The
@@ -819,6 +826,7 @@ async fn serve(s: Settings) -> Fallible {
         installed_set,
         custom_fields,
         view_overrides,
+        translations,
         db,
         acls,
         rules,

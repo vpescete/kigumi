@@ -39,6 +39,7 @@ pub async fn ensure_framework_schemas(db: &Db) -> Result<(), DbError> {
     db.ensure_module_schema().await?;
     db.ensure_custom_field_schema().await?;
     db.ensure_view_schema().await?;
+    db.ensure_translation_schema().await?;
     db.ensure_event_schema().await?;
     Ok(())
 }

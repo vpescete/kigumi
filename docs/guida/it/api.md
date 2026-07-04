@@ -495,6 +495,24 @@ Il layout del form dichiarato dal modello (`view_for`), oppure `null` quando il 
 - `groups` — gruppi titolati di campi scalari (layout a due colonne nel "sheet"); `title` può essere `null` (un gruppo di testa senza intestazione); `full: true` fa estendere il campo su entrambe le colonne (relazioni, testo lungo, immagini, nome primario).
 - `pages` — le pagine del notebook (tab) sotto lo sheet, di solito una relazione `One2many` o dettagli secondari; ogni pagina è `{ "title", "fields": [...] }`.
 
+### Traduzioni (i18n)
+
+`GET /api/:name/view` rispetta l'header **`Accept-Language`** della richiesta: quando esiste una traduzione per il subtag primario della lingua (es. `it` da `it-IT,it;q=0.9`), le **label dei campi** e le **label delle opzioni selection** nel contratto servito vengono sostituite col testo localizzato. Ciò che non ha traduzione — e ogni richiesta senza `Accept-Language` — mantiene l'inglese compile-time, quindi è puramente additivo. Si traducono solo i metadati; i dati dei record non vengono mai tradotti.
+
+Le traduzioni si impostano (solo admin) via:
+
+`POST /api/:name/_translation` — body `{ "field", "lang", "text", "value"? }`. Un `value` vuoto o assente traduce la label del campo stesso; un `value` non vuoto traduce la label di quell'opzione selection. Fa l'upsert della riga `(model, field, value, lang)` ed è attivo alla prossima fetch del contratto — nessuna ricompilazione.
+
+```bash
+# Label italiana per sale.order.state, e per la sua opzione "draft":
+curl -X POST -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"field":"state","lang":"it","text":"Stato"}'          .../api/sale.order/_translation
+curl -X POST -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"field":"state","value":"draft","lang":"it","text":"Bozza"}' .../api/sale.order/_translation
+```
+
+La negoziazione della lingua è volutamente minima: il subtag primario del primo tag, match esatto, fallback all'inglese. Help text dei campi, titoli di report/gruppi e una lingua di default per-utente non sono ancora tradotti.
+
 ## Documento OpenAPI
 
 `GET /openapi.json` restituisce un documento **OpenAPI 3.1.0** generato dal catalogo dei modelli (`openapi` in `crates/kigumi-schema/src/openapi.rs`). È pretty-printed, con `info.title = "Kigumi API"` e `info.version = "0.1.0"`. È pensato per generare SDK tipizzati (TS/Python/Go) con tooling standard (openapi-generator), senza client scritti a mano.

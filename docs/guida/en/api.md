@@ -494,6 +494,24 @@ The form layout declared by the model (`view_for`), or `null` when the model dec
 - `groups` — titled groups of scalar fields (two-column layout in the "sheet"); `title` may be `null` (a leading group with no heading); `full: true` makes the field span both columns (relations, long text, images, primary name).
 - `pages` — the notebook pages (tabs) below the sheet, usually a `One2many` relation or secondary details; each page is `{ "title", "fields": [...] }`.
 
+### Translations (i18n)
+
+`GET /api/:name/view` honors the request's **`Accept-Language`** header: when a translation exists for the primary language subtag (e.g. `it` from `it-IT,it;q=0.9`), the served contract's **field labels** and **selection option labels** are swapped for the localized text. Anything without a translation — and every request with no `Accept-Language` — keeps the compile-time English, so this is purely additive. Translation is metadata only; record data is never translated.
+
+Translations are set (admin only) via:
+
+`POST /api/:name/_translation` — body `{ "field", "lang", "text", "value"? }`. An empty or absent `value` translates the field's own label; a non-empty `value` translates that selection option's label. Upserts the `(model, field, value, lang)` row and takes effect on the next contract fetch — no recompile.
+
+```bash
+# Italian label for sale.order.state, and for its "draft" option:
+curl -X POST -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"field":"state","lang":"it","text":"Stato"}'          .../api/sale.order/_translation
+curl -X POST -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"field":"state","value":"draft","lang":"it","text":"Bozza"}' .../api/sale.order/_translation
+```
+
+Language negotiation is deliberately minimal: the first tag's primary subtag, exact match, English fallback. Field help text, report/group titles, and a per-user default language are not translated yet.
+
 ## OpenAPI document
 
 `GET /openapi.json` returns an **OpenAPI 3.1.0** document generated from the model catalog (`openapi` in `crates/kigumi-schema/src/openapi.rs`). It is pretty-printed, with `info.title = "Kigumi API"` and `info.version = "0.1.0"`. It is meant for generating typed SDKs (TS/Python/Go) with standard tooling (openapi-generator), without hand-written clients.
