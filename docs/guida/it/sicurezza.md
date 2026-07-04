@@ -378,6 +378,18 @@ Due esempi reali in `crates/kigumi-db/src/lib.rs`:
 
 Analogamente, le azioni di transizione di stato hanno un gate di gruppo proprio oltre al `Write`: in `run_action_secured`, se l'azione dichiara dei gruppi, un chiamante non-superuser deve appartenervi (`operation: "action (group)"` → `AccessDenied`).
 
+### Accesso pubblico: il primitivo del portale
+
+Una richiesta **non autenticata** — una route di modulo registrata con `auth: false` — gira sotto l'identità **guest** riservata (`uid = -1`), che porta un solo gruppo: `PUBLIC_GROUP` (`"public"`, da `kigumi-core`). È il primitivo su cui si costruisce un portale pubblico (tracciamento ordine, download fattura, catalogo pubblicato), usando i layer sopra — nessun meccanismo nuovo:
+
+1. Concedi `public` **`Read`** sul modello (un normale ACL). Finché non lo fai, il guest è default-deny su tutto: il primitivo è **inerte di default**.
+2. Aggiungi una **record rule** per il gruppo `public` che lo restringe alle righe destinate a essere pubbliche (es. `website_published = true`).
+3. Leggi col `Ctx` guest da una route `auth: false` (`input.ctx`) tramite i metodi `*_secured` — ACL e regola filtrano il risultato. **Non** fare `sudo()` su un endpoint pubblico; il punto è che a decidere cosa vede un guest sia il layer di sicurezza, non l'handler.
+
+> **Footgun:** un ACL `public` **senza** una record rule corrispondente lascia il guest illimitato. Per un modello **con** `company_id`, lo scope company limita comunque il guest alle righe condivise (company `NULL`); ma un modello **senza** — un catalogo, una config o un modello di contenuti pubblicati, esattamente ciò che un portale tende a esporre — non ha quel bound, quindi al guest viene servita l'**intera tabella**. Il guest può solo `Read` (mai scrivere), ma è la record rule — non lo scope company — a curare davvero il sottoinsieme pubblico, ed è obbligatoria che il modello sia company-scoped o meno. Accompagna sempre la concessione con una regola.
+
+Il guest non ottiene mai accesso in scrittura da `public` (concedi solo `Read`), e un ricevitore webhook HMAC sullo stesso path `auth: false` non è toccato: colpisce il default-deny prima di fare `.sudo()` esplicito dopo aver verificato la firma.
+
 ## L'AST dei domini e i suoi operatori
 
 Un `Domain` è un AST di filtro **tipato**, validato contro il modello e compilato in **SQL parametrizzato** (`crates/kigumi-core/src/domain.rs`). I valori non sono mai interpolati nel testo SQL — vengono legati come parametri (`$1, $2, …`) — il che chiude la superficie di SQL injection e fa fallire i filtri malformati alla validazione, non in produzione.

@@ -83,6 +83,13 @@ pub struct Ctx {
     pub allowed_company_ids: Vec<i64>,
 }
 
+/// The conventional group carried by the unauthenticated (guest) identity — the primitive a public
+/// portal is built on. It grants NOTHING by itself (default-deny holds until an adopter adds an ACL
+/// for it), so it is inert unless opted into. Grant `public` READ on a model AND add a record rule
+/// restricting it to the rows meant to be public: an ACL without such a rule exposes every
+/// shared-company row of that model to unauthenticated callers.
+pub const PUBLIC_GROUP: &str = "public";
+
 impl Ctx {
     pub fn new(uid: i64, groups: Vec<String>) -> Self {
         Ctx { uid, groups, su: false, company_id: None, allowed_company_ids: Vec::new() }
@@ -286,6 +293,39 @@ mod tests {
         // global (not_done) AND group (small_orders)
         let expected = not_done().and(small_orders());
         assert_eq!(d, expected);
+    }
+
+    #[test]
+    fn public_group_is_inert_until_granted_then_gates_the_guest() {
+        // The guest identity as the server builds it: uid -1, only the public group.
+        let guest = Ctx::new(-1, vec![PUBLIC_GROUP.to_string()]);
+        // Inert by default: with no `public` ACL the guest is default-denied (the safe baseline).
+        assert!(!check_access(Operation::Read, "sale.order", &guest, ACLS));
+
+        // Opt in: a `public` READ grant lets the guest read the model — and only read.
+        static PUBLIC_ACLS: &[Acl] = &[Acl {
+            model: "sale.order",
+            group: PUBLIC_GROUP,
+            read: true,
+            write: false,
+            create: false,
+            delete: false,
+        }];
+        assert!(check_access(Operation::Read, "sale.order", &guest, PUBLIC_ACLS));
+        assert!(!check_access(Operation::Write, "sale.order", &guest, PUBLIC_ACLS));
+
+        // The footgun: a `public` ACL with NO record rule leaves the guest unrestricted.
+        assert!(record_rule_domain(Operation::Read, "sale.order", &guest, &[]).is_none());
+
+        // The safe pattern: a `public` record rule restricts the guest to the published subset.
+        static PUBLIC_RULES: &[RecordRule] = &[RecordRule {
+            model: "sale.order",
+            groups: &[PUBLIC_GROUP],
+            ops: &[Operation::Read],
+            domain: RuleDomain::Static(small_orders),
+        }];
+        let d = record_rule_domain(Operation::Read, "sale.order", &guest, PUBLIC_RULES).unwrap();
+        assert_eq!(d, small_orders());
     }
 
     #[test]

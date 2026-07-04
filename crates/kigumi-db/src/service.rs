@@ -237,7 +237,7 @@ pub fn validate_routes() -> Result<(), String> {
         }
         if !r.auth && !r.groups.is_empty() {
             return Err(format!(
-                "module route '{}' is auth: false with a group gate — the guest context has no groups, so it could never succeed",
+                "module route '{}' is auth: false with a group gate — an unauthenticated route carries only the inert `public` group, so a route-level group gate is not a real access control; gate a public route with a `public` ACL + record rule read via the *_secured methods instead",
                 r.name
             ));
         }

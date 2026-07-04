@@ -264,8 +264,9 @@ macro_rules! register_job {
 /// Registers a MODULE HTTP ROUTE on the generic dispatch `GET|POST /api/x/<name>` — bespoke module
 /// endpoints (an inbound-webhook receiver, a custom search) without the module ever depending on the
 /// server crate or axum. `method` is a RouteMethod variant name (Get|Post); `auth: false` runs the
-/// body under the GUEST context (uid −1, no groups — the default-deny ACL blocks every secured call,
-/// so verify the sender yourself — use `RouteInput::verify_hmac_sha256` or your provider's exact
+/// body under the GUEST context (uid −1, carrying only the inert `public` group — default-deny until
+/// an adopter adds a `public` ACL, so the ACL blocks every secured call by default and you must
+/// verify the sender yourself — use `RouteInput::verify_hmac_sha256` or your provider's exact
 /// scheme with a CONSTANT-TIME comparison, never a hand-rolled hash + `==` — then elevate via
 /// `.sudo()`. Query/body/header values are anonymous input: bind them in SQL, never interpolate).
 /// `kigumi::register_route!("stripe-hook", Post, false, &[], stripe_hook);`

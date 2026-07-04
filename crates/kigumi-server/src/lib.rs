@@ -26,6 +26,7 @@ use kigumi_core::{
     check_access, delegated_fields, is_mailed, module_closure, module_of,
     registered_acls, registered_rules, report_for, resolve_modules, wizard_for, Acl, Condition, Ctx,
     Domain, FieldDef, FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
+    PUBLIC_GROUP,
 };
 use kigumi_db::{custom_scalar_kind, is_safe_ident, route_for, route_methods, validate_routes, Db, DbError, RouteInput, RouteMethod, RouteOutput, StoredEvent, Translation, ViewOverride};
 use kigumi_schema::{openapi, pg_column_type, to_ui_contract};
@@ -1831,7 +1832,8 @@ async fn events_stream_handler(
 
 /// The generic MODULE-ROUTE dispatch: `GET|POST /api/x/:route`. Resolves the module-registered
 /// route by (name, method), builds the caller context — bearer-authenticated for `auth: true`
-/// routes, the GUEST context (uid −1, no groups: default-deny under the ACL engine) for
+/// routes, the GUEST context (uid −1, carrying only the inert `public` group: default-deny under the
+/// ACL engine until an adopter adds a `public` ACL) for
 /// `auth: false` receivers that verify their sender themselves — and hands the body the query,
 /// the parsed-JSON-or-empty body, the EXACT raw bytes (HMAC material) and the lowercased headers.
 /// Method mismatch on an existing name → 405 with Allow. Zero module literals.
@@ -1873,9 +1875,11 @@ async fn module_route_handler(
             Err(r) => return r,
         }
     } else {
-        // uid −1 is the reserved guest identity (0 = superuser, real users ≥ 1). No groups → the
-        // default-deny ACL engine rejects every secured call; the body authenticates the sender.
-        Ctx::new(-1, vec![])
+        // uid −1 is the reserved guest identity (0 = superuser, real users ≥ 1). It carries only the
+        // PUBLIC_GROUP, which grants nothing until an adopter adds a `public` ACL — so an HMAC webhook
+        // receiver still hits default-deny before it `.sudo()`s, while a portal route can read exactly
+        // the rows a `public` ACL+rule expose. Still company-scoped to shared rows (no company set).
+        Ctx::new(-1, vec![PUBLIC_GROUP.to_string()])
     };
     // Headers: lowercased names, duplicates joined with ", ", non-UTF8 values dropped (signature
     // headers are ASCII by construction).

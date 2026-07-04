@@ -378,6 +378,18 @@ Two real examples in `crates/kigumi-db/src/lib.rs`:
 
 Similarly, state-transition actions have their own group gate beyond `Write`: in `run_action_secured`, if the action declares groups, a non-superuser caller must belong to them (`operation: "action (group)"` → `AccessDenied`).
 
+### Public access: the portal primitive
+
+An **unauthenticated** request — a module route registered with `auth: false` — runs under the reserved **guest** identity (`uid = -1`), which carries a single group: `PUBLIC_GROUP` (`"public"`, from `kigumi-core`). This is the primitive a public portal (order tracking, invoice download, a published catalog) is built on, using the layers above — no new mechanism:
+
+1. Grant `public` **`Read`** on the model (an ordinary ACL). Until you do, the guest is default-denied on everything, so the primitive is **inert by default**.
+2. Add a **record rule** for group `public` restricting it to the rows meant to be public (e.g. `website_published = true`).
+3. Read with the guest `Ctx` from an `auth: false` route (`input.ctx`) via the `*_secured` methods — the ACL and rule filter the result. Do **not** `sudo()` a public endpoint; the whole point is that the security layer, not the handler, decides what a guest sees.
+
+> **Footgun:** a `public` ACL **without** a matching record rule leaves the guest unrestricted. For a model **with** a `company_id`, company scoping still limits the guest to shared (`NULL`-company) rows; but a model **without** one — a catalog, config, or published-content model, which is exactly what a portal tends to expose — has no such bound, so the guest is served the **entire table**. The guest can only `Read` (never write), but the record rule — not company scoping — is what actually curates the public subset, and it is mandatory whether or not the model is company-scoped. Always pair the grant with a rule.
+
+The guest never gains write access from `public` (grant `Read` only), and an HMAC webhook receiver on the same `auth: false` path is unaffected: it hits default-deny before it explicitly `.sudo()`s after verifying the signature.
+
 ## The domain AST and its operators
 
 A `Domain` is a **typed** filter AST, validated against the model and compiled into **parameterized SQL** (`crates/kigumi-core/src/domain.rs`). Values are never interpolated into the SQL text — they are bound as parameters (`$1, $2, …`) — which closes off the SQL injection surface and makes malformed filters fail at validation, not in production.
