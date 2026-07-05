@@ -8,6 +8,9 @@
 
 mod pdf;
 pub use pdf::GenpdfRasterizer;
+mod oidc;
+pub use oidc::OidcState;
+use oidc::OidcError;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock, RwLock};
@@ -16,7 +19,7 @@ use axum::{
     body::Bytes,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Redirect, Response},
     routing::{delete, get, post},
     Json, Router,
 };
@@ -272,6 +275,8 @@ struct DataBackend {
     auth: Arc<Authenticator>,
     blobs: Arc<dyn BlobStore>,
     rasterizer: Option<Arc<dyn Rasterizer>>,
+    /// The configured SSO provider, or `None` when `[oidc]` is absent (the /auth/oidc routes then 404).
+    oidc: Option<Arc<OidcState>>,
 }
 
 impl DataBackend {
@@ -413,6 +418,7 @@ pub fn router_with_data_rasterized(
         auth_secret,
         blobs,
         rasterizer,
+        None,
     )
 }
 
@@ -432,6 +438,7 @@ pub fn router_with_data_dynamic(
     rules: RuleState,
     auth_secret: impl Into<String>,
     blobs: Arc<dyn BlobStore>,
+    oidc: Option<Arc<OidcState>>,
 ) -> Router {
     build_data_router(
         models,
@@ -445,6 +452,7 @@ pub fn router_with_data_dynamic(
         auth_secret,
         blobs,
         None,
+        oidc,
     )
 }
 
@@ -462,6 +470,7 @@ pub fn router_with_data_dynamic_rasterized(
     auth_secret: impl Into<String>,
     blobs: Arc<dyn BlobStore>,
     rasterizer: Option<Arc<dyn Rasterizer>>,
+    oidc: Option<Arc<OidcState>>,
 ) -> Router {
     build_data_router(
         models,
@@ -475,6 +484,7 @@ pub fn router_with_data_dynamic_rasterized(
         auth_secret,
         blobs,
         rasterizer,
+        oidc,
     )
 }
 
@@ -491,6 +501,7 @@ fn build_data_router(
     auth_secret: impl Into<String>,
     blobs: Arc<dyn BlobStore>,
     rasterizer: Option<Arc<dyn Rasterizer>>,
+    oidc: Option<Arc<OidcState>>,
 ) -> Router {
     // Module route registrations are compile-time-authored; an invalid one (slash in the name, a
     // duplicate (name, method)) is a bug that must fail the boot, not surface as a puzzling 404.
@@ -504,6 +515,8 @@ fn build_data_router(
         .route("/auth/login", post(login_handler))
         .route("/auth/refresh", post(refresh_handler))
         .route("/auth/logout", post(logout_handler))
+        .route("/auth/oidc/start", get(oidc_start_handler))
+        .route("/auth/oidc/callback", get(oidc_callback_handler))
         .route("/auth/me", get(me_handler))
         .route("/auth/keys", get(list_keys_handler).post(create_key_handler))
         .route("/auth/keys/:id", axum::routing::delete(revoke_key_handler))
@@ -571,6 +584,7 @@ fn build_data_router(
                 auth: Arc::new(Authenticator::new(auth_secret)),
                 blobs,
                 rasterizer,
+                oidc,
             }),
         })
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
@@ -2698,32 +2712,160 @@ async fn unfollow_handler(
 /// Issues an access + (stored) refresh token pair for `uid` with `groups` and company `scope`
 /// (active, allowed). The access token bakes in the scope so each request verifies into a
 /// company-scoped Ctx with no extra DB round-trip.
+/// Mints an access+refresh pair for a session (and stores the refresh jti). Returns the raw tokens, or
+/// an error `Response` on a signing/store failure. Callers wrap the result differently: password login
+/// returns them as JSON, OIDC hands them to the browser in a redirect fragment.
+async fn mint_tokens(
+    backend: &DataBackend,
+    uid: i64,
+    groups: Vec<String>,
+    scope: (Option<i64>, Vec<i64>),
+) -> Result<(String, String), Response> {
+    let (company, companies) = scope;
+    let access = backend
+        .auth
+        .issue_access(uid, groups, company, companies, ACCESS_TTL)
+        .map_err(|_| internal_error("token", "issue access"))?;
+    let jti = new_jti();
+    backend
+        .db
+        .store_refresh(&jti, uid, REFRESH_TTL as i64)
+        .await
+        .map_err(|e| internal_error("refresh-store", e))?;
+    let refresh = backend
+        .auth
+        .issue_refresh(uid, &jti, REFRESH_TTL)
+        .map_err(|_| internal_error("token", "issue refresh"))?;
+    Ok((access, refresh))
+}
+
 async fn issue_token_pair(
     backend: &DataBackend,
     uid: i64,
     groups: Vec<String>,
     scope: (Option<i64>, Vec<i64>),
 ) -> Response {
-    let (company, companies) = scope;
-    let access = match backend.auth.issue_access(uid, groups, company, companies, ACCESS_TTL) {
-        Ok(t) => t,
-        Err(_) => return internal_error("token", "issue access"),
-    };
-    let jti = new_jti();
-    if let Err(e) = backend.db.store_refresh(&jti, uid, REFRESH_TTL as i64).await {
-        return internal_error("refresh-store", e);
+    match mint_tokens(backend, uid, groups, scope).await {
+        Ok((access, refresh)) => {
+            let body = serde_json::json!({
+                "access_token": access,
+                "refresh_token": refresh,
+                "token_type": "Bearer",
+                "expires_in": ACCESS_TTL,
+            });
+            json_status(StatusCode::OK, body.to_string())
+        }
+        Err(resp) => resp,
     }
-    let refresh = match backend.auth.issue_refresh(uid, &jti, REFRESH_TTL) {
-        Ok(t) => t,
-        Err(_) => return internal_error("token", "issue refresh"),
+}
+
+/// The cookie that pins an in-flight OIDC login to the browser that started it (the login-CSRF defense).
+const OIDC_STATE_COOKIE: &str = "kigumi_oidc_state";
+
+/// The value of `name` in a request's `Cookie` header, if present.
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(axum::http::header::COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .filter_map(|kv| kv.trim().split_once('='))
+        .find(|(k, _)| *k == name)
+        .map(|(_, v)| v.to_string())
+}
+
+/// `GET /auth/oidc/start` — begin SSO by redirecting the browser to the IdP (with PKCE + nonce + state).
+/// 404 when `[oidc]` is not configured.
+async fn oidc_start_handler(State(state): State<AppState>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on auth routes");
+    let Some(oidc) = backend.oidc.as_ref() else {
+        return (StatusCode::NOT_FOUND, "OIDC is not configured").into_response();
     };
-    let body = serde_json::json!({
-        "access_token": access,
-        "refresh_token": refresh,
-        "token_type": "Bearer",
-        "expires_in": ACCESS_TTL,
-    });
-    json_status(StatusCode::OK, body.to_string())
+    match oidc.authorize(&backend.db).await {
+        Ok((url, csrf_state)) => {
+            // Pin the flow to THIS browser: a cookie the callback must echo. An attacker cannot set this
+            // cookie on a victim's browser, so a forged callback (the attacker's own code + state) fails
+            // the echo check — the login-CSRF / session-fixation defense. SameSite=Lax so the cookie
+            // still rides the top-level GET redirect back from the IdP.
+            let cookie = format!(
+                "{OIDC_STATE_COOKIE}={csrf_state}; Max-Age=600; Path=/auth/oidc; HttpOnly; Secure; SameSite=Lax"
+            );
+            ([(axum::http::header::SET_COOKIE, cookie)], Redirect::to(&url)).into_response()
+        }
+        Err(e) => oidc_error_response("oidc-start", e),
+    }
+}
+
+/// `GET /auth/oidc/callback` — complete SSO: verify the IdP response, provision or link the user by
+/// verified email, mint a session, and redirect to the app with the tokens in the URL fragment.
+async fn oidc_callback_handler(State(state): State<AppState>, headers: HeaderMap, Query(params): Query<HashMap<String, String>>) -> Response {
+    let backend = state.data.as_ref().expect("data backend present on auth routes");
+    let Some(oidc) = backend.oidc.as_ref() else {
+        return (StatusCode::NOT_FOUND, "OIDC is not configured").into_response();
+    };
+    // An IdP error redirect carries `?error=...`; surface it rather than a confusing "missing code".
+    if let Some(err) = params.get("error") {
+        return (StatusCode::BAD_REQUEST, format!("OIDC provider returned an error: {err}")).into_response();
+    }
+    let (Some(code), Some(st)) = (params.get("code"), params.get("state")) else {
+        return (StatusCode::BAD_REQUEST, "missing code or state").into_response();
+    };
+    // Login-CSRF defense: the state MUST match the cookie set on THIS browser at /start, checked before
+    // the one-shot flow lookup. A callback replayed into a victim's browser (which never received the
+    // cookie) is rejected here, so an attacker cannot fixate the victim onto the attacker's identity.
+    if cookie_value(&headers, OIDC_STATE_COOKIE).as_deref() != Some(st.as_str()) {
+        return (StatusCode::BAD_REQUEST, "invalid or expired login state").into_response();
+    }
+    let email = match oidc.exchange_and_verify(&backend.db, code, st).await {
+        Ok(e) => e,
+        Err(e) => return oidc_error_response("oidc-callback", e),
+    };
+    let user = match backend.db.find_or_create_oidc_user(&email).await {
+        Ok(u) => u,
+        Err(e) => return internal_error("oidc-provision", e),
+    };
+    let scope = (user.company_id, user.company_ids);
+    match mint_tokens(backend, user.id, user.groups, scope).await {
+        Ok((access, refresh)) => {
+            // Tokens go in the FRAGMENT: a browser never sends it to a server and it is absent from the
+            // Referer, so it stays client-side for the SPA to read from location.hash and then clear.
+            // Access/refresh are compact JWTs (URL-safe charset), so no percent-encoding is needed.
+            let sep = if oidc.post_login_url.contains('#') { '&' } else { '#' };
+            let url = format!(
+                "{}{sep}access_token={access}&refresh_token={refresh}&token_type=Bearer&expires_in={ACCESS_TTL}",
+                oidc.post_login_url,
+            );
+            // Clear the one-time state cookie now that the flow is complete.
+            let clear = format!("{OIDC_STATE_COOKIE}=; Max-Age=0; Path=/auth/oidc; HttpOnly; Secure; SameSite=Lax");
+            ([(axum::http::header::SET_COOKIE, clear)], Redirect::to(&url)).into_response()
+        }
+        Err(resp) => resp,
+    }
+}
+
+/// Maps an [`OidcError`] to a client response, logging the upstream detail server-side (via tracing)
+/// and never leaking it to the caller.
+fn oidc_error_response(context: &str, e: OidcError) -> Response {
+    match e {
+        OidcError::Db(db) => internal_error(context, db),
+        OidcError::Discovery(d) => {
+            tracing::error!("kigumi-server {context} oidc discovery: {d}");
+            (StatusCode::BAD_GATEWAY, "SSO provider unreachable").into_response()
+        }
+        OidcError::Exchange(d) => {
+            tracing::error!("kigumi-server {context} oidc exchange: {d}");
+            (StatusCode::BAD_GATEWAY, "SSO token exchange failed").into_response()
+        }
+        OidcError::Verify(d) => {
+            tracing::warn!("kigumi-server {context} oidc verify: {d}");
+            (StatusCode::UNAUTHORIZED, "SSO token verification failed").into_response()
+        }
+        OidcError::InvalidState => (StatusCode::BAD_REQUEST, "invalid or expired login state").into_response(),
+        OidcError::NoEmail => (StatusCode::BAD_REQUEST, "the provider returned no email").into_response(),
+        OidcError::UnverifiedEmail => {
+            (StatusCode::FORBIDDEN, "the provider has not verified this email").into_response()
+        }
+    }
 }
 
 /// A constant valid argon2 hash, verified against on the unknown-user path so login spends the

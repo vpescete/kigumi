@@ -24,6 +24,9 @@ genpdf = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tower-http = { version = "0.6", features = ["trace"] }
+# SSO / OpenID Connect: the protocol (discovery, JWKS, PKCE, nonce, id_token verification) — never
+# hand-rolled. rustls, not native-tls, to avoid a system OpenSSL dependency.
+openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }

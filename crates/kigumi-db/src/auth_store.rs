@@ -69,9 +69,13 @@ impl Db {
         Ok(id)
     }
 
+    /// Looks a user up by login, case-INSENSITIVELY: logins are effectively email addresses, and an
+    /// OIDC identity must link to the same account whatever casing the IdP echoes (e.g. `Alice@x` vs
+    /// `alice@x`). Password login matches the same way. (A `lower(login)` unique index would also block
+    /// case-variant duplicate rows at the DB level — deferred; the write paths canonicalize instead.)
     pub async fn find_user(&self, login: &str) -> Result<Option<UserRow>, DbError> {
         let row = sqlx::query(
-            "SELECT id, password_hash, groups, company_id, company_ids FROM kigumi_user WHERE login = $1",
+            "SELECT id, password_hash, groups, company_id, company_ids FROM kigumi_user WHERE lower(login) = lower($1)",
         )
         .bind(login)
         .fetch_optional(&self.pool)

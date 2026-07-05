@@ -147,6 +147,19 @@ Le chiavi core di `[modules]` sono strette, ma ogni `[modules.<name>]` è un **s
 
 `serve` installa un subscriber `tracing` da questi valori: `format = "json"` produce log strutturati per una pipeline di produzione, `text` è leggibile dall'uomo. La variabile d'ambiente **`RUST_LOG`** sovrascrive `level` quando impostata (es. `RUST_LOG=kigumi_server=debug,info`). Ogni richiesta HTTP è avvolta in uno span che logga metodo, path, status e latenza (richieste completate a `info`, fallimenti a `error`) — **solo metadati; body di richiesta e risposta non vengono mai loggati**. L'export di metriche/tracce verso un collector OpenTelemetry è il layer opt-in successivo.
 
+### `[oidc]`
+
+SSO opzionale via OpenID Connect (Authorization Code + PKCE), accanto al login password. È **all-or-nothing**: o ometti la sezione (SSO off, le route `/auth/oidc/*` danno 404) o imposti tutte e quattro le chiavi (un blocco parziale fallisce la validazione).
+
+| Chiave | Tipo | Significato |
+|--------|------|-------------|
+| `issuer` | `String` | L'issuer URL dell'IdP — da `<issuer>/.well-known/openid-configuration` si scoprono gli endpoint authorization/token/JWKS. Qualsiasi IdP conforme (Google, Microsoft, Okta, Keycloak, …). |
+| `client_id` | `String` | Il client id OAuth registrato presso l'IdP. |
+| `redirect_uri` | `String` | L'URL `…/auth/oidc/callback` del server stesso, registrato presso l'IdP. |
+| `post_login_url` | `String` | Dove atterra il browser dopo un login riuscito; i token arrivano nel **fragment** dell'URL (`#access_token=…&refresh_token=…`) perché la SPA li legga. |
+
+Il **secret** del client arriva dalla env var `KIGUMI_OIDC_CLIENT_SECRET`, mai da questo file. Al primo login un'email sconosciuta (verificata) viene provisionata just-in-time con **nessun gruppo** (può autenticarsi ma non vede nulla finché un admin non concede i gruppi) e senza password utilizzabile; un'email nota entra nell'utente esistente. Solo le email che l'IdP marca **verified** sono accettate.
+
 ## Validazione
 
 `Config::validate` esegue i controlli incrociati che lo schema serde non può esprimere:
@@ -202,6 +215,7 @@ I segreti sono letti solo dall'ambiente (mai da `kigumi.toml`) tramite `Secrets:
 | `KIGUMI_JWT_SECRET_OLD` | No | Segreto JWT precedente, ancora **accettato in verifica** durante una finestra di rotazione (rotazione per `kid`). |
 | `KIGUMI_SMTP_PASSWORD` | No (*) | Password SMTP. (*) Diventa obbligatoria se `[mail].smtp_host` è configurato. |
 | `KIGUMI_ADMIN_TOKEN` | No | Bearer token destinato a proteggere operazioni distruttive sul database (dump/restore/gc). Opzionale al boot; quando presente viene solo caricato in `Secrets` e mostrato redatto da `print` (l'enforcement lato endpoint non è ancora cablato). |
+| `KIGUMI_OIDC_CLIENT_SECRET` | No (*) | Secret del client OIDC. (*) Diventa obbligatorio quando la sezione `[oidc]` è configurata. |
 
 Una variabile è considerata "non impostata" sia se assente sia se vuota (`req`/`opt` filtrano le stringhe vuote).
 

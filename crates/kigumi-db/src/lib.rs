@@ -16,6 +16,7 @@ mod migration;
 mod module_store;
 mod sequence;
 mod jobs;
+mod oidc;
 mod service;
 mod settings;
 mod translation;

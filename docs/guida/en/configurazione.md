@@ -147,6 +147,19 @@ The core keys of `[modules]` are strict, but each `[modules.<name>]` is an **ope
 
 `serve` installs a `tracing` subscriber from these values: `format = "json"` emits structured logs for a production log pipeline, `text` is human-readable. The **`RUST_LOG`** environment variable overrides `level` when set (e.g. `RUST_LOG=kigumi_server=debug,info`). Each HTTP request is wrapped in a span logging the method, path, status, and latency (completed requests at `info`, failures at `error`) — **metadata only; request and response bodies are never logged**. Metrics/traces export to an OpenTelemetry collector is the opt-in next layer.
 
+### `[oidc]`
+
+Optional SSO via OpenID Connect (Authorization Code + PKCE), alongside password login. It is **all-or-nothing**: either omit the section entirely (SSO off, the `/auth/oidc/*` routes 404) or set all four keys (a partial block fails validation).
+
+| Key | Type | Meaning |
+|--------|------|-------------|
+| `issuer` | `String` | The IdP's issuer URL — `<issuer>/.well-known/openid-configuration` is discovered for the authorization/token/JWKS endpoints. Any compliant IdP (Google, Microsoft, Okta, Keycloak, …). |
+| `client_id` | `String` | The OAuth client id registered with the IdP. |
+| `redirect_uri` | `String` | The server's own `…/auth/oidc/callback` URL, registered with the IdP. |
+| `post_login_url` | `String` | Where the browser lands after a successful login; the minted tokens arrive in the URL **fragment** (`#access_token=…&refresh_token=…`) for the SPA to read. |
+
+The client **secret** comes from the `KIGUMI_OIDC_CLIENT_SECRET` env var, never this file. On first login an unknown (verified) email is provisioned just-in-time with **no groups** (it can authenticate but sees nothing until an admin grants groups) and no usable password; a known email logs into the existing user. Only emails the IdP marks **verified** are accepted.
+
 ## Validation
 
 `Config::validate` performs the cross-checks that the serde schema cannot express:
@@ -202,6 +215,7 @@ Secrets are read only from the environment (never from `kigumi.toml`) via `Secre
 | `KIGUMI_JWT_SECRET_OLD` | No | Previous JWT secret, still **accepted on verify** during a rotation window (rotation by `kid`). |
 | `KIGUMI_SMTP_PASSWORD` | No (*) | SMTP password. (*) Becomes required if `[mail].smtp_host` is configured. |
 | `KIGUMI_ADMIN_TOKEN` | No | Bearer token intended to protect destructive database operations (dump/restore/gc). Optional at boot; when present it is only loaded into `Secrets` and shown redacted by `print` (endpoint-side enforcement is not wired up yet). |
+| `KIGUMI_OIDC_CLIENT_SECRET` | No (*) | OIDC client secret. (*) Becomes required when the `[oidc]` section is configured. |
 
 A variable is considered "unset" both if it is absent and if it is empty (`req`/`opt` filter out empty strings).
 

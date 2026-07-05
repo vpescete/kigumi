@@ -85,6 +85,19 @@ Returns the identity of the authenticated caller, i.e. the `Ctx` derived from th
 }
 ```
 
+### SSO via OpenID Connect
+
+When `[oidc]` is configured (see [configurazione.md](configurazione.md)), two routes add browser-based SSO alongside password login. Absent that config, both routes return `404`.
+
+- **`GET /auth/oidc/start`** — begins the login: a `302` to the IdP's authorization endpoint, carrying PKCE, a nonce, and a one-time `state` (recorded server-side with a 10-minute TTL). It also sets a short-lived `HttpOnly` cookie binding the flow to this browser (the login-CSRF defense; the browser carries it automatically). The SPA opens this URL (full-page or popup).
+- **`GET /auth/oidc/callback?code=…&state=…`** — the IdP redirects the browser back here. The server consumes the `state` (one shot — it cannot be replayed), exchanges the `code`, verifies the `id_token` (JWKS signature, nonce, `iss`/`aud`/`exp`), and requires a **verified** email. It then resolves the user — an existing account by email, or a just-in-time create with **no groups** and no usable password — mints the session, and `302`s to the configured `post_login_url` with the tokens in the URL **fragment**:
+
+  ```
+  https://app.example.com/home#access_token=…&refresh_token=…&token_type=Bearer&expires_in=900
+  ```
+
+  The SPA reads `location.hash`, stores the tokens, and clears the fragment. From here the session is identical to a password login (same access/refresh pair). Failures return a status by class (`400` bad/expired state or missing code, `401` token verification failed, `403` unverified email, `502` IdP unreachable) with a generic message; the upstream detail is logged server-side only. The client secret comes from `KIGUMI_OIDC_CLIENT_SECRET`, never a request or the config file.
+
 ## API keys (machine credentials)
 
 Long-lived, revocable credentials for machines and agents — the stateful sibling of the refresh

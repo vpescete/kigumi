@@ -668,6 +668,7 @@ async fn serve(s: Settings) -> Fallible {
     db.ensure_custom_field_schema().await?;
     db.ensure_view_schema().await?;
     db.ensure_translation_schema().await?;
+    db.ensure_oidc_schema().await?;
     let models: Vec<_> = resolve_all_registered().map_err(|e| e.to_string())?.into_iter().collect();
     let installed_set: std::sync::Arc<std::sync::RwLock<std::collections::HashSet<String>>> =
         std::sync::Arc::new(std::sync::RwLock::new(db.installed_modules().await?.into_iter().collect()));
@@ -821,6 +822,26 @@ async fn serve(s: Settings) -> Fallible {
         }
     };
 
+    // SSO: build the OIDC provider when [oidc] is fully configured (config validated all-or-nothing),
+    // with the client secret from the env — never from kigumi.toml. Absent → the /auth/oidc routes 404.
+    let oidc: Option<std::sync::Arc<kigumi_server::OidcState>> = if s.config.oidc.enabled() {
+        let secret = std::env::var("KIGUMI_OIDC_CLIENT_SECRET")
+            .map_err(|_| "[oidc] is configured but KIGUMI_OIDC_CLIENT_SECRET is not set")?;
+        let o = &s.config.oidc;
+        // enabled() guarantees all four fields are Some, so these unwraps cannot panic.
+        let state = kigumi_server::OidcState::new(
+            o.issuer.as_deref().unwrap(),
+            o.client_id.as_deref().unwrap(),
+            &secret,
+            o.redirect_uri.as_deref().unwrap(),
+            o.post_login_url.as_deref().unwrap(),
+        )
+        .ok_or("[oidc] issuer or redirect_uri is not a valid URL")?;
+        Some(std::sync::Arc::new(state))
+    } else {
+        None
+    };
+
     let app = router_with_data_dynamic_rasterized(
         models,
         installed_set,
@@ -833,6 +854,7 @@ async fn serve(s: Settings) -> Fallible {
         s.secrets.jwt_secret.clone(),
         blobs,
         Some(std::sync::Arc::new(GenpdfRasterizer::new())),
+        oidc,
     );
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;

@@ -55,6 +55,8 @@ pub struct Config {
     pub modules: Modules,
     #[serde(default)]
     pub log: Log,
+    #[serde(default)]
+    pub oidc: Oidc,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +164,41 @@ impl Default for Log {
     }
 }
 
+/// Optional SSO via OpenID Connect (Authorization Code + PKCE). Enabled only when `issuer`, `client_id`,
+/// `redirect_uri` and `post_login_url` are ALL set; the client secret comes from the
+/// `KIGUMI_OIDC_CLIENT_SECRET` env var, never this file. `redirect_uri` is the server's own
+/// `/auth/oidc/callback` URL registered with the IdP; `post_login_url` is where the browser is sent
+/// after a successful login, carrying the freshly minted tokens.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Oidc {
+    #[serde(default)]
+    pub issuer: Option<String>,
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub redirect_uri: Option<String>,
+    #[serde(default)]
+    pub post_login_url: Option<String>,
+}
+
+impl Oidc {
+    /// True when every field is present — the flag that mounts the OIDC endpoints.
+    pub fn enabled(&self) -> bool {
+        self.issuer.is_some()
+            && self.client_id.is_some()
+            && self.redirect_uri.is_some()
+            && self.post_login_url.is_some()
+    }
+    /// True when at least one field is present (used to reject a partial block).
+    fn any_set(&self) -> bool {
+        self.issuer.is_some()
+            || self.client_id.is_some()
+            || self.redirect_uri.is_some()
+            || self.post_login_url.is_some()
+    }
+}
+
 impl Config {
     fn base() -> Figment {
         Figment::from(Serialized::defaults(Config::default()))
@@ -203,6 +240,12 @@ impl Config {
         }
         if self.server.bind.parse::<std::net::SocketAddr>().is_err() {
             return Err(ConfigError::Invalid(format!("server.bind is not a host:port ({})", self.server.bind)));
+        }
+        // OIDC is all-or-nothing: a partial [oidc] block is a misconfiguration, not "half enabled".
+        if self.oidc.any_set() && !self.oidc.enabled() {
+            return Err(ConfigError::Invalid(
+                "an [oidc] block requires issuer, client_id, redirect_uri and post_login_url all set".into(),
+            ));
         }
         Ok(())
     }
@@ -335,6 +378,25 @@ mod tests {
     fn bad_bind_fails_validation() {
         let err = Config::from_toml_str("[storage]\npath=\"/d\"\n[server]\nbind = \"not-a-socket\"\n");
         assert!(matches!(err, Err(ConfigError::Invalid(_))));
+    }
+
+    #[test]
+    fn oidc_is_all_or_nothing() {
+        // A partial [oidc] block is a misconfiguration.
+        let partial = Config::from_toml_str(
+            "[storage]\npath=\"/d\"\n[oidc]\nissuer = \"https://idp.example\"\nclient_id = \"abc\"\n",
+        );
+        assert!(matches!(partial, Err(ConfigError::Invalid(_))));
+        // All four fields present → valid and enabled.
+        let full = Config::from_toml_str(
+            "[storage]\npath=\"/d\"\n[oidc]\nissuer = \"https://idp.example\"\nclient_id = \"abc\"\n\
+             redirect_uri = \"https://app/auth/oidc/callback\"\npost_login_url = \"https://app/home\"\n",
+        )
+        .unwrap();
+        assert!(full.oidc.enabled());
+        // No [oidc] block → valid and disabled.
+        let none = Config::from_toml_str("[storage]\npath=\"/d\"\n").unwrap();
+        assert!(!none.oidc.enabled());
     }
 
     #[test]
