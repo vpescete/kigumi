@@ -5,7 +5,7 @@
 > API live, e ops/deploy. Costruito con una survey reale del codice + planning multi-agente.
 > Stato di partenza: motore ORM, persistenza, migrazioni, engine di sicurezza (ACL/record rule/Ctx),
 > auth JWT, data API + OpenAPI/UI-contract, compute+aggregati, relazioni (read inline + nested
-> create), **config tipizzata (fatto)**, frontend Graphite + theming (su mock data).
+> create), **config tipizzata (fatto)**, frontend Graphite + theming (sulla API live).
 
 Le decisioni che richiedono approvazione sono in fondo (D1–D10) e in memoria `[[v1-open-decisions]]`.
 

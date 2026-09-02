@@ -527,7 +527,7 @@ Language negotiation is deliberately minimal: the first tag's primary subtag, ex
 
 ## OpenAPI document
 
-`GET /openapi.json` returns an **OpenAPI 3.1.0** document generated from the model catalog (`openapi` in `crates/kigumi-schema/src/openapi.rs`). It is pretty-printed, with `info.title = "Kigumi API"` and `info.version = "0.1.0"`. It is meant for generating typed SDKs (TS/Python/Go) with standard tooling (openapi-generator), without hand-written clients.
+`GET /openapi.json` returns an **OpenAPI 3.1.0** document generated from the model catalog (`openapi` in `crates/kigumi-schema/src/openapi.rs`). It is pretty-printed, with `info.title = "Kigumi API"` and `info.version` taken from the framework version (`CARGO_PKG_VERSION`). It is meant for generating typed SDKs (TS/Python/Go) with standard tooling (openapi-generator), without hand-written clients.
 
 For each model it emits:
 

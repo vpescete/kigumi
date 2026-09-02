@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
-import { fmtMoney } from './data'
 import { Badge } from './ui'
 import type { FieldMeta, Row } from './api'
+
+const eur = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'EUR' })
+export const fmtMoney = (n: number) => eur.format(n)
 
 // A human label for a related record (for Many2one pickers): the first present name-ish field,
 // falling back to the id. Avoids per-model code while staying readable for the common models.

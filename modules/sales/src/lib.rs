@@ -1218,7 +1218,7 @@ mod tests {
 
     #[test]
     fn manifest_compatible_with_framework() {
-        // The framework declares FRAMEWORK_VERSION (0.1.0); the module accepts ">=0.1, <0.2".
+        // The framework declares FRAMEWORK_VERSION (0.1.1); the module accepts ">=0.1, <0.2".
         assert!(check_compat(&MANIFEST, FRAMEWORK_VERSION).is_ok());
     }
 

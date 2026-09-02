@@ -212,7 +212,7 @@ Secrets are read only from the environment (never from `kigumi.toml`) via `Secre
 |-----------|--------------|-------------|
 | `DATABASE_URL` | Yes | Full Postgres DSN: the sole source of the connection identity (host, port, db, user, password, sslmode). It must be a parseable URL with the `postgres` or `postgresql` scheme, otherwise the error `DATABASE_URL is not a valid postgres:// URL`. |
 | `KIGUMI_JWT_SECRET` | Yes | HS256 signing secret for access and refresh tokens. |
-| `KIGUMI_JWT_SECRET_OLD` | No | Previous JWT secret, still **accepted on verify** during a rotation window (rotation by `kid`). |
+| `KIGUMI_JWT_SECRET_OLD` | No | Previous JWT secret, **reserved** for rotation: loaded into `Secrets` and shown redacted by `print`, but `Authenticator` still takes a single secret, so verification with the old secret is **not active**. Not in `.env.example` for that reason. |
 | `KIGUMI_SMTP_PASSWORD` | No (*) | SMTP password. (*) Becomes required if `[mail].smtp_host` is configured. |
 | `KIGUMI_ADMIN_TOKEN` | No | Bearer token intended to protect destructive database operations (dump/restore/gc). Optional at boot; when present it is only loaded into `Secrets` and shown redacted by `print` (endpoint-side enforcement is not wired up yet). |
 | `KIGUMI_OIDC_CLIENT_SECRET` | No (*) | OIDC client secret. (*) Becomes required when the `[oidc]` section is configured. |
@@ -226,12 +226,8 @@ Example (see `.env.example`):
 DATABASE_URL=postgres://kigumi:CHANGE_ME@127.0.0.1:5432/kigumi
 # REQUIRED — HS256 signing secret for access/refresh tokens
 KIGUMI_JWT_SECRET=CHANGE_ME_long_random_value
-# OPTIONAL — previous JWT secret, accepted on verify during a rotation window
-# KIGUMI_JWT_SECRET_OLD=
 # OPTIONAL — required only if [mail].smtp_host is configured
 # KIGUMI_SMTP_PASSWORD=
-# OPTIONAL — bearer token gating destructive db ops (dump/restore/gc)
-# KIGUMI_ADMIN_TOKEN=
 ```
 
 When the effective configuration is printed (`kigumi config print` or `kigumi-config print`), every secret is redacted at the field level: the `DATABASE_URL` password is masked (`redact_db_url`) while host/port/db/user remain visible, and the other secrets appear as `set (****)` or `unset`.

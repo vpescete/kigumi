@@ -19,7 +19,7 @@ pub fn openapi(models: &[&ResolvedModel]) -> String {
     }
     let doc = json!({
         "openapi": "3.1.0",
-        "info": { "title": "Kigumi API", "version": "0.1.0" },
+        "info": { "title": "Kigumi API", "version": env!("CARGO_PKG_VERSION") },
         "paths": Value::Object(paths),
         "components": { "schemas": Value::Object(schemas) },
     });

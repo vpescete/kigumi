@@ -1,6 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { AlertTriangle, ArrowDown, ArrowUp } from 'lucide-react'
-import { STATE_LABEL, type OrderState } from './data'
 import { cx, focusRing, focusRingDanger } from './ui/cx'
 
 // Re-export the overlay/feedback primitives so `import { ... } from './ui'` reaches everything.
@@ -128,6 +127,14 @@ export function Badge({ children, tone = 'neutral' }: { children: ReactNode; ton
   )
 }
 
+// The sale-order state vocabulary, the one place StateBadge needs it.
+export type OrderState = 'draft' | 'sent' | 'done' | 'cancel'
+const STATE_LABEL: Record<OrderState, string> = {
+  draft: 'Draft',
+  sent: 'Quotation Sent',
+  done: 'Confirmed',
+  cancel: 'Cancelled',
+}
 const STATE_TONE: Record<OrderState, Tone> = {
   draft: 'neutral',
   sent: 'warning',

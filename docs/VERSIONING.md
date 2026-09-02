@@ -37,7 +37,7 @@ compile time. È il meglio dei due mondi.
 
 ### 2.2 Versione del framework
 
-- **SemVer puro**, Cargo-native. Oggi `0.1.0` (workspace `Cargo.toml`). Esposta come
+- **SemVer puro**, Cargo-native. Oggi `0.1.1` (workspace `Cargo.toml`). Esposta come
   `kigumi_core::FRAMEWORK_VERSION`.
 - Pre-1.0: minor = possibili breaking. Dopo 1.0: major = breaking, minor = additivo, patch = fix.
 - **Stabilità community**: a 1.0 si dichiara un contratto di stabilità del metamodello e delle
@@ -77,7 +77,7 @@ Differenze con Odoo, tutte verificabili:
 
 | Aspetto | Odoo 19 | Kigumi |
 |---|---|---|
-| Versione framework | serie `19.0` | SemVer (`0.1.0`), LTS a 1.0 |
+| Versione framework | serie `19.0` | SemVer (`0.1.1`), LTS a 1.0 |
 | Versione modulo | lockstep `19.0.x.y.z` | SemVer indipendente + range di compat |
 | Compat framework↔modulo | implicita (per serie) | range **verificato** (`check_compat`) |
 | Dipendenze tra moduli | nomi, **senza versione** | range SemVer (resolver, fase 3) |

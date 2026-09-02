@@ -73,7 +73,7 @@ Un modulo è **disponibile** quando la sua crate è linkata nel binario (compile
 
 ## Il controllo di compatibilità con il framework
 
-Prima di qualunque risoluzione, ogni manifest viene confrontato con la versione del framework dalla funzione `check_compat` (in `crates/kigumi-core/src/manifest.rs`). La versione del framework è la costante `FRAMEWORK_VERSION`, derivata da `CARGO_PKG_VERSION` di `kigumi-core` (definita in `crates/kigumi-core/src/lib.rs`) — al momento `0.1.0`. Tutti i moduli inclusi dichiarano `framework = ">=0.1, <0.2"`, quindi sono compatibili con questa linea.
+Prima di qualunque risoluzione, ogni manifest viene confrontato con la versione del framework dalla funzione `check_compat` (in `crates/kigumi-core/src/manifest.rs`). La versione del framework è la costante `FRAMEWORK_VERSION`, derivata da `CARGO_PKG_VERSION` di `kigumi-core` (definita in `crates/kigumi-core/src/lib.rs`) — al momento `0.1.1`. Tutti i moduli inclusi dichiarano `framework = ">=0.1, <0.2"`, quindi sono compatibili con questa linea.
 
 ```rust
 pub fn check_compat(

@@ -42,7 +42,7 @@ serde_json = "1"
 
 Important notes:
 
-- The package `version` is the **module version**, independent of the framework version (SemVer per module). The framework version is shared by all the core crates (`0.1.0` in the workspace).
+- The package `version` is the **module version**, independent of the framework version (SemVer per module). The framework version is shared by all the core crates (`0.1.1` in the workspace).
 - Cargo dependencies on other modules (`kigumi-mod-base`, ...) must mirror the module manifest's `depends`. Keeping the two lists aligned is intentional: a dependency declared in the manifest but not linked as a Cargo crate would not be present in `inventory`.
 - `rust_decimal` is only needed if the module does exact arithmetic (money, quantities); `serde_json` only if it has reports or code that reads the JSON record.
 

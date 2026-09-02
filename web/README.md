@@ -1,7 +1,11 @@
-# Kigumi Web — navigable design-system mockups
+# Kigumi Web — the admin SPA
 
-Five **genuinely distinct** design systems for the Kigumi admin UI, chosen by navigating real
-screens. Each is a complete token set built with anti-slop taste rules: a distinctive **font pairing**
+The contract-driven admin UI, running on the live API: it renders whatever the server's UI contract
+describes (`/api/models`, `/api/:name/view`) with no per-model code — login, dashboard, lists, forms,
+chatter, wizards, reports, access and module management.
+
+It also carries the theme system: five **genuinely distinct** design systems for the Kigumi admin UI,
+chosen by navigating real screens. Each is a complete token set built with anti-slop taste rules: a distinctive **font pairing**
 (never default Inter), a full **type scale per role** (display / h1 / h2 / subtitle / body / label /
 caption / mono — different fonts for headings vs body vs numbers), a **built palette** around one
 deliberate accent hue (no AI-purple), and its own density, radius and materiality — in **light + dark**.
@@ -19,14 +23,16 @@ Contrast was checked (text/bg ≥ 4.5:1) in both modes; the five were verified g
 
 ## Run
 
+Needs a running backend. In dev the SPA and the Rust API are separate processes; Vite proxies `/api`,
+`/auth` and `/openapi.json` to the server, so the browser stays same-origin and no CORS is needed.
+
 ```bash
+cargo run -p kigumi-cli -- serve   # one terminal — binds 127.0.0.1:8099
+
 cd web
 npm install
-npm run dev      # http://localhost:5180
+npm run dev      # http://localhost:5180 — log in with your instance's admin
 ```
-
-No backend needed — screens run on in-memory mock data shaped like the real API (a Sales Order with
-**inlined line items** = `find_one_secured`, computed `amount_total` = the aggregate compute).
 
 ## What to look at
 
@@ -34,7 +40,8 @@ No backend needed — screens run on in-memory mock data shaped like the real AP
   toggles light/dark. Everything restyles — colors AND the whole type system — with zero per-theme
   code. Components only read semantic CSS variables and `.t-*` type roles.
 - **Dashboard → Sales Orders → click a row → Order detail**: the master-detail screen (header record
-  + inline order lines + computed total) is the one to judge — the core ERP shape.
+  + inline order lines + computed total) is the one to judge — the core ERP shape. Needs the ERP
+  modules installed on the instance (`sales` and its dependency closure).
 
 ## Community theming
 

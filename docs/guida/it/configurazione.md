@@ -212,7 +212,7 @@ I segreti sono letti solo dall'ambiente (mai da `kigumi.toml`) tramite `Secrets:
 |-----------|--------------|-------------|
 | `DATABASE_URL` | Sì | DSN Postgres completo: l'unica fonte dell'identità di connessione (host, porta, db, utente, password, sslmode). Deve essere un URL con schema `postgres` o `postgresql` parsabile, altrimenti errore `DATABASE_URL is not a valid postgres:// URL`. |
 | `KIGUMI_JWT_SECRET` | Sì | Segreto di firma HS256 per access e refresh token. |
-| `KIGUMI_JWT_SECRET_OLD` | No | Segreto JWT precedente, ancora **accettato in verifica** durante una finestra di rotazione (rotazione per `kid`). |
+| `KIGUMI_JWT_SECRET_OLD` | No | Segreto JWT precedente, **riservato** alla rotazione: caricato in `Secrets` e mostrato redatto da `print`, ma l'`Authenticator` accetta ancora un solo segreto, quindi la verifica col segreto vecchio **non è attiva**. Per questo non compare in `.env.example`. |
 | `KIGUMI_SMTP_PASSWORD` | No (*) | Password SMTP. (*) Diventa obbligatoria se `[mail].smtp_host` è configurato. |
 | `KIGUMI_ADMIN_TOKEN` | No | Bearer token destinato a proteggere operazioni distruttive sul database (dump/restore/gc). Opzionale al boot; quando presente viene solo caricato in `Secrets` e mostrato redatto da `print` (l'enforcement lato endpoint non è ancora cablato). |
 | `KIGUMI_OIDC_CLIENT_SECRET` | No (*) | Secret del client OIDC. (*) Diventa obbligatorio quando la sezione `[oidc]` è configurata. |
@@ -226,12 +226,8 @@ Esempio (vedi `.env.example`):
 DATABASE_URL=postgres://kigumi:CHANGE_ME@127.0.0.1:5432/kigumi
 # REQUIRED — HS256 signing secret for access/refresh tokens
 KIGUMI_JWT_SECRET=CHANGE_ME_long_random_value
-# OPTIONAL — previous JWT secret, accepted on verify during a rotation window
-# KIGUMI_JWT_SECRET_OLD=
 # OPTIONAL — required only if [mail].smtp_host is configured
 # KIGUMI_SMTP_PASSWORD=
-# OPTIONAL — bearer token gating destructive db ops (dump/restore/gc)
-# KIGUMI_ADMIN_TOKEN=
 ```
 
 Quando la configurazione effettiva viene stampata (`kigumi config print` o `kigumi-config print`), ogni segreto è redatto a livello di campo: la password del `DATABASE_URL` è mascherata (`redact_db_url`) mentre host/porta/db/utente restano visibili, e gli altri segreti compaiono come `set (****)` o `unset`.

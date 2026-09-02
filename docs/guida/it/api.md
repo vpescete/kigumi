@@ -528,7 +528,7 @@ La negoziazione della lingua è volutamente minima: il subtag primario del primo
 
 ## Documento OpenAPI
 
-`GET /openapi.json` restituisce un documento **OpenAPI 3.1.0** generato dal catalogo dei modelli (`openapi` in `crates/kigumi-schema/src/openapi.rs`). È pretty-printed, con `info.title = "Kigumi API"` e `info.version = "0.1.0"`. È pensato per generare SDK tipizzati (TS/Python/Go) con tooling standard (openapi-generator), senza client scritti a mano.
+`GET /openapi.json` restituisce un documento **OpenAPI 3.1.0** generato dal catalogo dei modelli (`openapi` in `crates/kigumi-schema/src/openapi.rs`). È pretty-printed, con `info.title = "Kigumi API"` e `info.version` preso dalla versione del framework (`CARGO_PKG_VERSION`). È pensato per generare SDK tipizzati (TS/Python/Go) con tooling standard (openapi-generator), senza client scritti a mano.
 
 Per ogni modello emette:
 

@@ -30,7 +30,7 @@ Tutti i crate del framework condividono la versione dichiarata in `[workspace.pa
 
 ```toml
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/vpescete/kigumi"

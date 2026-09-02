@@ -982,7 +982,7 @@ async fn refresh_installed(installed: &Arc<RwLock<HashSet<String>>>, backend: &D
 }
 
 /// Uninstalls a module (marks the ledger; its tables and data are kept). Refuses `base` and any module
-/// an installed module still depends on. Applies on restart. Admin only.
+/// an installed module still depends on. Applies live (the installed set refreshes). Admin only.
 async fn module_uninstall_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> Response {
     let backend = state.data.as_ref().expect("data backend present on data routes");
     let ctx = match authenticate(backend, &headers).await {
