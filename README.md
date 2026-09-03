@@ -12,7 +12,7 @@ Business apps rarely die of a bad framework. They die of the same truth written 
 migration, an ORM class, a serializer, a form, a permission check — kept aligned by hand.
 Kigumi's whole pitch: one definition, or five copies drifting apart.
 
-**Site & docs**: https://vpescete.github.io/kigumi-site/ · **Status**: pre-1.0, built in the open.
+**Site & docs**: https://vpescete.github.io/kigumi-site/ · **[Changelog](https://vpescete.github.io/kigumi-site/changelog/en/)** · **Status**: pre-1.0, built in the open.
 
 ## Quickstart
 
@@ -30,6 +30,27 @@ cargo run -p app -- mcp admin  # the same app over MCP, ACLs enforced on every t
 
 The generated workspace is born agent-ready: `AGENTS.md`, a Claude Code skill and a
 module-author agent ship with it.
+
+## Releases
+
+Current line: **framework 0.2.0** · ERP modules **2.0.0** · `kigumi-cli` **0.2.0**. Every released
+version — with its breaking changes named rather than buried — is on the
+**[changelog](https://vpescete.github.io/kigumi-site/changelog/en/)**.
+
+Coming from 0.1? Four things changed under you:
+
+- **The catalog is no longer anonymous.** `/openapi.json`, `/api/models` and `/api/:name/view`
+  follow the same ACLs as the data they describe. Mind the shape: a request with no token is not
+  rejected, it *succeeds as the guest* and returns only what a `public` Read ACL exposes — so a
+  client that keys "please log in" off a `401` must react to an empty catalog instead.
+- **`ServeOptions` is `#[non_exhaustive]`.** Build it with `ServeOptions::new(jwt_secret)` and
+  assign the fields you need; a struct literal no longer compiles, which is the point — the next
+  field the framework adds is a recompile, not a breakage.
+- **OpenAPI paths moved to the model name** (`/api/sale.order`, not `/api/sale_order`). The old
+  spec described paths that 404. Regenerate any SDK built from it.
+- **Modules require framework `>=0.2, <0.3`**, which is why they went to 2.0.0 rather than 1.1.0:
+  an out-of-range module refuses to boot, so a minor bump would have let Cargo pick a version that
+  cannot run.
 
 ## One definition, everything derived
 
