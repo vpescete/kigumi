@@ -60,7 +60,7 @@ use kigumi_schema::to_ddl;
 use serde_json::{Map, Value as Json};
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use sqlx::query::{Query, QueryScalar};
-use sqlx::{PgPool, Postgres, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use std::collections::BTreeMap;
 
 #[derive(Debug)]
@@ -1410,11 +1410,15 @@ impl Db {
         }
         // Capture the parents this child points to before it is gone, to recompute them after.
         let parents = self.parent_targets(model, id).await?;
-        // Snapshot company_id before the row is gone (for the best-effort delete event below).
+        // ONE transaction for the delete, the polymorphic cleanups and the event. Previously the
+        // DELETE was autocommit and the rest followed it on separate connections: a crash in between
+        // orphaned a record's attachments/thread rows, or lost the delete event entirely.
+        let mut tx = self.pool.begin().await?;
+        // Snapshot company_id before the row is gone (the delete event carries it).
         let pre_company: Option<i64> = if model.fields.iter().any(|f| f.name == "company_id") {
             sqlx::query_scalar::<_, Option<i64>>(&format!("SELECT company_id FROM {} WHERE id = $1", model.table))
                 .bind(id)
-                .fetch_optional(&self.pool)
+                .fetch_optional(&mut *tx)
                 .await?
                 .flatten()
         } else {
@@ -1431,32 +1435,34 @@ impl Db {
         for v in &params {
             q = bind_query(q, v);
         }
-        let affected = q.execute(&self.pool).await?.rows_affected();
+        let affected = q.execute(&mut *tx).await?.rows_affected();
         // Polymorphic-integrity fix: a record's attachments and (if mailed) its thread are linked by
         // (res_model, res_id), which the metamodel can't express as an FK. Clean them on this — Kigumi's
         // ONLY delete path (unlike Odoo, where bulk SQL orphans them).
         if affected > 0 {
-            self.cleanup_attachments(model.name, id).await?;
+            Self::cleanup_attachments_in_tx(&mut tx, model.name, id).await?;
             if is_mailed(model.name) {
-                self.cleanup_thread(model.name, id).await?;
+                Self::cleanup_thread_in_tx(&mut tx, model.name, id).await?;
             }
-            // Best-effort post-commit delete event (DELETE is autocommit, not a tx — at-least-once,
-            // loseable in the crash window until the Phase-4 transactional wrapping). Never fail the
-            // delete on an enqueue error.
-            if let Err(e) = self
-                .enqueue_event(&OutboxEvent {
+            // On the SAME transaction now, so the event exists exactly when the delete does: no
+            // crash window, and a rolled-back delete enqueues nothing.
+            self.enqueue_event_in_tx(
+                &mut tx,
+                &OutboxEvent {
                     event_type: "model.deleted".to_string(),
                     model: model.name.to_string(),
                     record_id: id,
                     author_uid: Some(ctx.uid),
                     company_id: pre_company,
                     change_summary: serde_json::json!({}),
-                })
-                .await
-            {
-                eprintln!("kigumi: delete event enqueue failed for {}#{id}: {e:?}", model.name);
-            }
+                },
+            )
+            .await?;
         }
+        tx.commit().await?;
+        // Parent aggregates are recomputed AFTER the commit, so between the two a parent's stored
+        // total can be briefly stale. Deliberate: pulling them in would widen the transaction to
+        // every ancestor of every delete. `acquire_agg_locks_ordered` is the upgrade if it matters.
         for (parent, pid) in parents {
             self.recompute_parent(&parent, pid).await?;
         }
@@ -1477,16 +1483,17 @@ impl Db {
 
     /// Deletes a record's mail thread across all thread tables. Tolerates a thread table not being
     /// migrated yet (the mail module may be linked but not installed) — nothing to clean, not an error.
-    async fn cleanup_thread(&self, model_name: &str, id: i64) -> Result<(), DbError> {
+    async fn cleanup_thread_in_tx(tx: &mut Transaction<'_, Postgres>, model_name: &str, id: i64) -> Result<(), DbError> {
         // mail_tracking is keyed by message_id (not res_model/res_id): remove the record's tracking
         // rows via its messages first, then the (res_model, res_id)-keyed thread tables.
-        self.exec_tolerant(
+        Self::exec_tolerant_in_tx(
+            tx,
             "DELETE FROM mail_tracking WHERE message_id IN (SELECT id FROM mail_message WHERE res_model = $1 AND res_id = $2)",
             model_name, id,
         ).await?;
         for table in THREAD_TABLES {
             let sql = format!("DELETE FROM {table} WHERE res_model = $1 AND res_id = $2");
-            self.exec_tolerant(&sql, model_name, id).await?;
+            Self::exec_tolerant_in_tx(tx, &sql, model_name, id).await?;
         }
         Ok(())
     }
@@ -1495,8 +1502,9 @@ impl Db {
     /// NOT reclaimed here: a content-addressed blob can be shared across records by dedup, so freeing it
     /// is a separate mark-sweep GC (deferred to the operations milestone). Tolerates the attachment
     /// table not being migrated. Runs on EVERY delete (any record may carry attachments), not just mailed.
-    async fn cleanup_attachments(&self, model_name: &str, id: i64) -> Result<(), DbError> {
-        self.exec_tolerant(
+    async fn cleanup_attachments_in_tx(tx: &mut Transaction<'_, Postgres>, model_name: &str, id: i64) -> Result<(), DbError> {
+        Self::exec_tolerant_in_tx(
+            tx,
             "DELETE FROM kigumi_attachment WHERE res_model = $1 AND res_id = $2",
             model_name,
             id,
@@ -1504,12 +1512,30 @@ impl Db {
         .await
     }
 
-    /// Runs a `(res_model, res_id)`-parameterized DELETE, tolerating a missing table (42P01 →
-    /// nothing to clean). Any other error propagates.
-    async fn exec_tolerant(&self, sql: &str, model_name: &str, id: i64) -> Result<(), DbError> {
-        match sqlx::query(sql).bind(model_name).bind(id).execute(&self.pool).await {
-            Ok(_) => Ok(()),
-            Err(e) if is_undefined_table(&e) => Ok(()),
+    /// Runs a `(res_model, res_id)`-parameterized DELETE on the caller's transaction, tolerating a
+    /// missing table (42P01 → the owning module is not migrated → nothing to clean).
+    ///
+    /// The SAVEPOINT is not decoration. Postgres aborts the WHOLE transaction on a failed statement,
+    /// so "swallow 42P01 and carry on" — which is exactly what this did outside a transaction — would
+    /// leave the caller holding a poisoned tx that fails on its next statement with a completely
+    /// unrelated error. The savepoint is what makes the tolerance true in-tx.
+    async fn exec_tolerant_in_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        sql: &str,
+        model_name: &str,
+        id: i64,
+    ) -> Result<(), DbError> {
+        sqlx::query("SAVEPOINT kigumi_tolerant").execute(&mut **tx).await?;
+        match sqlx::query(sql).bind(model_name).bind(id).execute(&mut **tx).await {
+            Ok(_) => {
+                sqlx::query("RELEASE SAVEPOINT kigumi_tolerant").execute(&mut **tx).await?;
+                Ok(())
+            }
+            Err(e) if is_undefined_table(&e) => {
+                sqlx::query("ROLLBACK TO SAVEPOINT kigumi_tolerant").execute(&mut **tx).await?;
+                Ok(())
+            }
+            // Anything else is a real failure: the caller rolls the whole transaction back.
             Err(e) => Err(e.into()),
         }
     }

@@ -100,6 +100,7 @@ impl Db {
         tx: &mut Transaction<'_, Postgres>,
         ev: &OutboxEvent,
     ) -> Result<(), DbError> {
+        sqlx::query("SAVEPOINT kigumi_enqueue").execute(&mut **tx).await?;
         let r = sqlx::query(
             "INSERT INTO event_outbox (event_type, model, record_id, author_uid, company_id, change_summary) \
              VALUES ($1, $2, $3, $4, $5, $6)",
@@ -113,15 +114,25 @@ impl Db {
         .execute(&mut **tx)
         .await;
         match r {
-            Ok(_) => Ok(()),
-            Err(e) if is_undefined_table(&e) => Ok(()),
+            Ok(_) => {
+                sqlx::query("RELEASE SAVEPOINT kigumi_enqueue").execute(&mut **tx).await?;
+                Ok(())
+            }
+            // Same reasoning as exec_tolerant_in_tx: swallowing the error without rolling back to a
+            // savepoint would return Ok on a transaction Postgres has already aborted, and the
+            // caller's next statement would fail with something unrelated.
+            Err(e) if is_undefined_table(&e) => {
+                sqlx::query("ROLLBACK TO SAVEPOINT kigumi_enqueue").execute(&mut **tx).await?;
+                Ok(())
+            }
             Err(e) => Err(e.into()),
         }
     }
 
     /// Best-effort post-commit enqueue (its own connection) for the seams that are NOT a single
-    /// transaction (delete_secured / post_move / register_payment as the code stands) — at-least-once but
-    /// loseable in the commit→INSERT crash window until the Phase-4 transactional wrapping. Documented per
+    /// transaction — at-least-once but loseable in the commit→INSERT crash window. `delete_secured`
+    /// has since moved to the in-tx path; the remaining users are the module-owned `post_move` and
+    /// `register_payment` service seams, whose atomicity is F3 work on the module side. Documented per
     /// seam; never silently mixed with the in-tx path.
     pub async fn enqueue_event(&self, ev: &OutboxEvent) -> Result<(), DbError> {
         let r = sqlx::query(
