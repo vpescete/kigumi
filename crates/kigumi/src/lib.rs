@@ -33,7 +33,7 @@ pub mod prelude {
     // `DbError` is the service result's error type, so a module needs no direct kigumi-db dependency.
     pub use kigumi_db::{
         job_for, ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
-        validate_routes, write_triggers_for, BoxServiceFut, DbError, LedgerReportFn,
+        validate_registrations, validate_routes, write_triggers_for, BoxServiceFut, DbError, LedgerReportFn,
         LedgerReportRegistration, JobFn, JobRegistration, RouteFn, RouteInput, RouteMethod, RouteOutput,
         RouteRegistration, DataMigrationFn, DataMigrationRegistration, SeedFn, SeedRegistration,
         ServiceCtx, ServiceFn, ServiceInput,

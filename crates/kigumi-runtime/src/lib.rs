@@ -139,6 +139,9 @@ pub struct ServeOptions {
     pub jwt_secret: String,
     /// Root directory of the filesystem blob store.
     pub blob_root: std::path::PathBuf,
+    /// Browser origins allowed to call the API cross-origin. Empty (the default) mounts no CORS
+    /// layer: same-origin only. `["*"]` allows any origin.
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl ServeOptions {
@@ -149,6 +152,7 @@ impl ServeOptions {
             bind: "127.0.0.1:8600".to_string(),
             jwt_secret: jwt_secret.into(),
             blob_root: std::path::PathBuf::from("./blobs"),
+            cors_allowed_origins: Vec::new(),
         }
     }
 }
@@ -172,6 +176,10 @@ pub async fn serve(db: Db, opts: ServeOptions) -> Result<(), Box<dyn std::error:
     let blobs: Arc<dyn kigumi_storage::BlobStore> = Arc::new(kigumi_storage::FsBlobStore::new(opts.blob_root));
     spawn_workers(&db);
     let app = kigumi_server::router_with_data(models, db, acls, rules, opts.jwt_secret, blobs);
+    let app = match kigumi_server::cors_layer(&opts.cors_allowed_origins) {
+        Some(cors) => app.layer(cors),
+        None => app,
+    };
     let listener = tokio::net::TcpListener::bind(&opts.bind).await?;
     println!("kigumi serving on http://{}", opts.bind);
     axum::serve(listener, app).await?;

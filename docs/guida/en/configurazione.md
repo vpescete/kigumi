@@ -22,6 +22,10 @@ name = "acme-prod"
 bind = "0.0.0.0:8099"
 workers = 8
 proxy_mode = true              # trust X-Forwarded-* behind a reverse proxy
+# Browser origins allowed to call the API cross-origin. Omitted/empty = no CORS layer at all
+# (same-origin only). ["*"] allows any origin — fine for a public read API, not for one a
+# browser session can reach.
+# cors_allowed_origins = ["https://app.example.com"]
 
 [database]                     # TUNING ONLY — the connection identity is the DATABASE_URL env var
 pool_max = 10
@@ -74,6 +78,7 @@ A note on defaults: the default `Config` is complete but **not** automatically v
 | `bind` | `String` | `"127.0.0.1:8099"` | `host:port` address the server listens on. It must be parseable as a `SocketAddr`, otherwise validation fails. |
 | `workers` | `usize` | `4` | Number of workers. |
 | `proxy_mode` | `bool` | `false` | When `true`, the instance trusts the `X-Forwarded-*` headers behind a reverse proxy. |
+| `cors_allowed_origins` | `[string]` | `[]` | Browser origins allowed to call the API cross-origin. Empty mounts **no CORS layer**: same-origin only, which is what a reverse proxy (or the dev Vite proxy) already gives you. `["*"]` allows any origin. Credentials are Bearer tokens in a header, never cookies, so `allow_credentials` is off and `*` stays legitimate for a public read API. An entry that is not a valid origin fails the boot rather than being dropped silently. |
 
 ### `[database]` (tuning only)
 
@@ -188,6 +193,7 @@ Every boot key can be overridden from the environment with the `KIGUMI_CONF_` pr
 | `[server] bind` | `KIGUMI_CONF_SERVER__BIND` |
 | `[server] workers` | `KIGUMI_CONF_SERVER__WORKERS` |
 | `[server] proxy_mode` | `KIGUMI_CONF_SERVER__PROXY_MODE` |
+| `[server] cors_allowed_origins` | `KIGUMI_CONF_SERVER__CORS_ALLOWED_ORIGINS` |
 | `[storage] backend` | `KIGUMI_CONF_STORAGE__BACKEND` |
 | `[storage] path` | `KIGUMI_CONF_STORAGE__PATH` |
 | `[auth] access_ttl` | `KIGUMI_CONF_AUTH__ACCESS_TTL` |

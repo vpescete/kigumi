@@ -92,6 +92,73 @@ impl Db {
     }
 }
 
+/// Retention windows for the queue tables. Constants, not config: every one is a "how much history
+/// do you keep" question with a defensible default, and no operator has asked for different numbers.
+/// ponytail: fixed windows; a `[retention]` config section if one ever does.
+const RETAIN_DELIVERY_SENT: &str = "7 days";
+/// A `dead` delivery is the forensic record of an endpoint that never accepted the payload — the row
+/// someone reads months later to explain a missing integration. Kept far longer than a success.
+const RETAIN_DELIVERY_DEAD: &str = "90 days";
+const RETAIN_OUTBOX_DISPATCHED: &str = "30 days";
+/// Undispatched rows are kept LONGER because in an adopter runtime they are the only record there
+/// is: the webhook fan-out task is spawned by the CLI binary alone, so `kigumi_runtime::serve`
+/// never marks anything dispatched and every row lands in this bucket.
+const RETAIN_OUTBOX_UNDISPATCHED: &str = "90 days";
+const RETAIN_JOB_DONE: &str = "7 days";
+const RETAIN_JOB_DEAD: &str = "90 days";
+const RETAIN_REFRESH: &str = "30 days";
+
+impl Db {
+    /// Bounds the four queue tables. Public so it is testable without the cron ledger; the
+    /// `gc_queues` job is a thin wrapper.
+    ///
+    /// ORDER IS LOAD-BEARING. `webhook_delivery.outbox_id` is `ON DELETE CASCADE`, so deleting an
+    /// outbox row takes its deliveries with it — including `pending` ones, which legitimately wait
+    /// days between retries. Deliveries are therefore pruned FIRST, on their own state and age, and
+    /// an outbox row leaves only once nothing references it any more.
+    ///
+    /// Consequence to know: `event_outbox` is also what the SSE stream reads, so a `Last-Event-ID`
+    /// older than the retention window resumes from the oldest surviving row instead of replaying
+    /// what was pruned. That is inside the events-are-hints contract, and it is documented in the
+    /// API guide rather than left to be discovered.
+    pub async fn prune_queues(&self) -> Result<(), DbError> {
+        let statements = [
+            format!("DELETE FROM webhook_delivery WHERE state = 'sent' AND created_at < now() - interval '{RETAIN_DELIVERY_SENT}'"),
+            format!("DELETE FROM webhook_delivery WHERE state = 'dead' AND created_at < now() - interval '{RETAIN_DELIVERY_DEAD}'"),
+            // NOT EXISTS, not a join: an outbox row with ANY surviving delivery — pending, leased,
+            // or simply young enough to be kept above — must outlive this sweep.
+            format!(
+                "DELETE FROM event_outbox e WHERE e.dispatched AND e.occurred_at < now() - interval '{RETAIN_OUTBOX_DISPATCHED}'                  AND NOT EXISTS (SELECT 1 FROM webhook_delivery d WHERE d.outbox_id = e.id)"
+            ),
+            format!(
+                "DELETE FROM event_outbox e WHERE NOT e.dispatched AND e.occurred_at < now() - interval '{RETAIN_OUTBOX_UNDISPATCHED}'                  AND NOT EXISTS (SELECT 1 FROM webhook_delivery d WHERE d.outbox_id = e.id)"
+            ),
+            format!("DELETE FROM kigumi_job WHERE state = 'done' AND created_at < now() - interval '{RETAIN_JOB_DONE}'"),
+            format!("DELETE FROM kigumi_job WHERE state = 'dead' AND created_at < now() - interval '{RETAIN_JOB_DEAD}'"),
+            // Safe by construction: `refresh_user` requires the row to be PRESENT, so a pruned token
+            // is a rejected token. Revoked-but-unexpired rows are left to die of old age.
+            format!("DELETE FROM kigumi_refresh WHERE expires_at < now() - interval '{RETAIN_REFRESH}'"),
+        ];
+        for sql in &statements {
+            match sqlx::query(sql).execute(&self.pool).await {
+                Ok(_) => {}
+                // The integration/job/auth schema may not be migrated on this instance.
+                Err(e) if is_missing_table_or_column(&e) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Builtin job: bound the queue tables (outbox, webhook deliveries, jobs, refresh tokens). Daily.
+fn gc_queues(db: &Db) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + '_>> {
+    Box::pin(async move { db.prune_queues().await })
+}
+kigumi_core::inventory::submit! {
+    CronRegistration { name: "gc_queues", interval_secs: 86_400, func: gc_queues }
+}
+
 /// Builtin job: prune done (`active = false`) mail activities whose deadline is long past, bounding
 /// the table. Tolerates an unmigrated `mail_activity` (no-op). Runs daily.
 fn gc_done_activities(db: &Db) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + '_>> {

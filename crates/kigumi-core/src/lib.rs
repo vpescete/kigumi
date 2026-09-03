@@ -34,6 +34,7 @@ pub use registry::{
     registered_group_names, registered_model_names, registered_rules, registered_sequences,
     related_path,
     resolve_all_registered, resolve_modules, resolve_registered, tracked_fields, transient_models,
+    validate_core_registrations,
     AclRegistration, DelegatedField, ExternalTable, FieldExtension, InheritsRegistration,
     MailedRegistration, MigrationTarget, ModelRegistration, ModuleRegistration, ReadonlyFieldRegistration,
     RecordRuleRegistration, RelatedRegistration, SequenceRegistration, TransientRegistration,

@@ -322,6 +322,8 @@ Bespoke module endpoints registered with `register_route!` (webhook receivers, c
 
 Server-sent events for every committed write, filtered per caller: an event is delivered only if the caller can read the record now (ACLs + record rules re-checked per batch), changed-field names are filtered by field-group visibility, and delete events are suppressed where a read record rule applies. Each event carries an id of the form `txn:id`; reconnect with `Last-Event-ID` for an exact, gap-free resume (the cursor is the pair, so no committed event is skipped or duplicated). Streams are bounded to 15 minutes — clients reconnect and the resume is seamless; access revocation is therefore never stale for longer than one batch.
 
+> **Retention:** the stream reads `event_outbox`, which the daily `gc_queues` job bounds — dispatched rows after 30 days, undispatched ones after 90 (longer, because an adopter runtime never runs the webhook fan-out, so those rows are its only record). A `Last-Event-ID` older than the window resumes from the oldest surviving event instead of replaying what was pruned. This is inside the events-are-hints contract: an event tells you *something changed*, and the record itself is the source of truth. A consumer that must not miss anything should reconcile against the records, not rely on an unbounded replay. Pruning never removes an outbox row that still has a pending webhook delivery.
+
 ```
 event: message
 id: 668129:15

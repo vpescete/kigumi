@@ -22,6 +22,10 @@ name = "acme-prod"
 bind = "0.0.0.0:8099"
 workers = 8
 proxy_mode = true              # trust X-Forwarded-* behind a reverse proxy
+# Browser origins allowed to call the API cross-origin. Omitted/empty = no CORS layer at all
+# (same-origin only). ["*"] allows any origin — fine for a public read API, not for one a
+# browser session can reach.
+# cors_allowed_origins = ["https://app.example.com"]
 
 [database]                     # TUNING ONLY — the connection identity is the DATABASE_URL env var
 pool_max = 10
@@ -74,6 +78,7 @@ Nota sui default: la `Config` di default è completa ma **non** automaticamente 
 | `bind` | `String` | `"127.0.0.1:8099"` | Indirizzo `host:port` su cui il server ascolta. Deve essere parsabile come `SocketAddr`, altrimenti la validazione fallisce. |
 | `workers` | `usize` | `4` | Numero di worker. |
 | `proxy_mode` | `bool` | `false` | Quando `true`, l'istanza si fida degli header `X-Forwarded-*` dietro un reverse proxy. |
+| `cors_allowed_origins` | `[string]` | `[]` | Origini browser autorizzate a chiamare l'API cross-origin. Vuoto non monta **alcun layer CORS**: solo same-origin, che è quello che già danno un reverse proxy (o il proxy Vite in dev). `["*"]` autorizza qualunque origine. Le credenziali sono token Bearer in header, mai cookie, quindi `allow_credentials` resta spento e `*` resta legittimo per un'API pubblica in sola lettura. Una voce che non è un'origine valida fa fallire il boot invece di essere scartata in silenzio. |
 
 ### `[database]` (solo tuning)
 
@@ -188,6 +193,7 @@ Ogni chiave di boot è sovrascrivibile dall'ambiente con il prefisso `KIGUMI_CON
 | `[server] bind` | `KIGUMI_CONF_SERVER__BIND` |
 | `[server] workers` | `KIGUMI_CONF_SERVER__WORKERS` |
 | `[server] proxy_mode` | `KIGUMI_CONF_SERVER__PROXY_MODE` |
+| `[server] cors_allowed_origins` | `KIGUMI_CONF_SERVER__CORS_ALLOWED_ORIGINS` |
 | `[storage] backend` | `KIGUMI_CONF_STORAGE__BACKEND` |
 | `[storage] path` | `KIGUMI_CONF_STORAGE__PATH` |
 | `[auth] access_ttl` | `KIGUMI_CONF_AUTH__ACCESS_TTL` |

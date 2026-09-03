@@ -857,6 +857,11 @@ async fn serve(s: Settings) -> Fallible {
         oidc,
     );
 
+    let app = match kigumi_server::cors_layer(&s.config.server.cors_allowed_origins) {
+        Some(cors) => app.layer(cors),
+        None => app,
+    };
+
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("kigumi serving on http://{bind}  ({} models)", registered_model_names().len());
     axum::serve(listener, app).await?;

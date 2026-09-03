@@ -18,7 +18,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::{delete, get, post},
     Json, Router,
@@ -31,12 +31,45 @@ use kigumi_core::{
     Domain, FieldDef, FieldKind, Operation, Operator, RecordRule, ResolvedModel, Value, WizardContext,
     PUBLIC_GROUP,
 };
-use kigumi_db::{custom_scalar_kind, is_safe_ident, route_for, route_methods, validate_routes, Db, DbError, RouteInput, RouteMethod, RouteOutput, StoredEvent, Translation, ViewOverride};
+use kigumi_db::{custom_scalar_kind, is_safe_ident, route_for, route_methods, validate_registrations, validate_routes, Db, DbError, RouteInput, RouteMethod, RouteOutput, StoredEvent, Translation, ViewOverride};
 use kigumi_schema::{openapi, pg_column_type, to_ui_contract};
 use kigumi_storage::{sha256_hex, BlobStore};
 
 // Re-exported so hosts (the CLI) and tests can construct a store without a direct kigumi-storage dep.
 pub use kigumi_storage::FsBlobStore;
+
+/// Builds the CORS layer for `origins`, or `None` when the list is empty — in which case no layer is
+/// mounted and the API stays same-origin, exactly as before this existed.
+///
+/// The policy is shaped for THIS API: credentials are Bearer tokens in a header, never cookies, so
+/// `allow_credentials` stays off and `["*"]` remains a legitimate (if wide) choice for a public read
+/// API. Methods and headers cover the data routes plus the preflight they trigger.
+pub fn cors_layer(origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
+    use tower_http::cors::{Any, CorsLayer};
+    if origins.is_empty() {
+        return None;
+    }
+    let layer = CorsLayer::new()
+        .allow_methods([
+            Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS,
+        ])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::ACCEPT_LANGUAGE,
+        ]);
+    Some(if origins.iter().any(|o| o == "*") {
+        layer.allow_origin(Any)
+    } else {
+        // A value that is not a valid origin is a config typo; failing the boot beats a silently
+        // dropped entry that shows up as a CORS error in someone's browser weeks later.
+        let parsed: Vec<_> = origins
+            .iter()
+            .map(|o| o.parse().unwrap_or_else(|_| panic!("kigumi-server: [server].cors_allowed_origins contains an invalid origin: {o:?}")))
+            .collect();
+        layer.allow_origin(parsed)
+    })
+}
 
 /// Rasterizes a rendered HTML report into PDF bytes. The seam for PDF output: a concrete backend
 /// (e.g. typst- or headless-Chromium-based) plugs in via `router_with_data_rasterized`. When none is
@@ -506,6 +539,11 @@ fn build_data_router(
     // Module route registrations are compile-time-authored; an invalid one (slash in the name, a
     // duplicate (name, method)) is a bug that must fail the boot, not surface as a puzzling 404.
     if let Err(e) = validate_routes() {
+        panic!("kigumi-server: {e}");
+    }
+    // Same reasoning, every other first-match registry: a duplicate service/job/report/action/view
+    // resolves by crate LINK ORDER, so an unrelated dependency change can silently swap behavior.
+    if let Err(e) = validate_registrations() {
         panic!("kigumi-server: {e}");
     }
     let db = Arc::new(db);
@@ -3024,6 +3062,48 @@ mod tests {
         let status = resp.status();
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         (status, String::from_utf8(bytes.to_vec()).unwrap())
+    }
+
+    #[tokio::test]
+    async fn cors_is_absent_by_default_and_answers_a_preflight_when_configured() {
+        // Empty list: no layer at all, so a browser gets no allow-origin and stays same-origin.
+        assert!(cors_layer(&[]).is_none());
+
+        let origin = "https://app.example.com";
+        let app = router(models()).layer(cors_layer(&[origin.to_string()]).expect("layer"));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/api/models")
+                    .header("origin", origin)
+                    .header("access-control-request-method", "GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.headers().get("access-control-allow-origin").map(|v| v.to_str().unwrap()),
+            Some(origin),
+            "the configured origin is echoed on the preflight"
+        );
+
+        // An origin that was not configured gets no allow-origin header back.
+        let app = router(models()).layer(cors_layer(&[origin.to_string()]).expect("layer"));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/api/models")
+                    .header("origin", "https://evil.example.com")
+                    .header("access-control-request-method", "GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(resp.headers().get("access-control-allow-origin").is_none());
     }
 
     #[tokio::test]

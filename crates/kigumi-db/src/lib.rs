@@ -34,7 +34,7 @@ pub use jobs::{job_for, JobFn, JobRegistration};
 pub use module_store::{DataMigrationFn, DataMigrationRegistration, SeedFn, SeedRegistration};
 pub use service::{
     ledger_report_for, ledger_report_names, route_for, route_methods, service_for, services_for,
-    validate_routes, write_triggers_for, BoxServiceFut, LedgerReportFn, LedgerReportRegistration,
+    validate_registrations, validate_routes, write_triggers_for, BoxServiceFut, LedgerReportFn, LedgerReportRegistration,
     RouteFn, RouteInput, RouteMethod, RouteOutput, RouteRegistration, ServiceCtx, ServiceFn,
     ServiceInput, ServiceOutput, ServiceRegistration, WriteTriggerFn, WriteTriggerRegistration,
 };

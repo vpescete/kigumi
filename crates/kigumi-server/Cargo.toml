@@ -23,7 +23,7 @@ genpdf = "0.2"
 # init driven by [log]. Metadata only — never request/response bodies.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
 # SSO / OpenID Connect: the protocol (discovery, JWKS, PKCE, nonce, id_token verification) — never
 # hand-rolled. rustls, not native-tls, to avoid a system OpenSSL dependency.
 openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }

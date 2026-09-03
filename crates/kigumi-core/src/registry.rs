@@ -501,3 +501,37 @@ pub fn resolve_registered(model: &str) -> Result<ResolvedModel, String> {
     validate_depends_with_extra(&m, &delegated_names)?;
     Ok(m)
 }
+
+/// Fails the boot on a DUPLICATE registration in any registry whose lookup is first-match.
+///
+/// `action_for`, `view_for` and `report_for` are all `.find()` over the inventory: two modules
+/// registering the same key does not error, one of them silently wins, and WHICH one depends on
+/// crate link order — so the same source tree can behave differently after an unrelated dependency
+/// change. Compile-time-authored registrations are code, and a collision in them is a bug that must
+/// stop the process, exactly like `validate_routes` already does for module routes.
+///
+/// Deliberately NOT an override mechanism: nothing needs to override a registration yet. When F3's
+/// localization modules do, the semantics get designed then — a silent first-match is not a design.
+pub fn validate_core_registrations() -> Result<(), String> {
+    let mut actions = std::collections::BTreeSet::new();
+    for a in inventory::iter::<crate::ActionRegistration> {
+        if !actions.insert((a.model, a.name)) {
+            return Err(format!("duplicate action registration: {}.{}", a.model, a.name));
+        }
+    }
+    let mut reports = std::collections::BTreeSet::new();
+    for r in inventory::iter::<crate::ReportRegistration> {
+        if !reports.insert((r.model, r.name)) {
+            return Err(format!("duplicate report registration: {} on {}", r.name, r.model));
+        }
+    }
+    // A form view is keyed by model alone — a second one for the same model is not an extension,
+    // it is a shadow that `view_for` will never return.
+    let mut views = std::collections::BTreeSet::new();
+    for v in inventory::iter::<crate::FormView> {
+        if !views.insert(v.model) {
+            return Err(format!("duplicate form view registration for model {}", v.model));
+        }
+    }
+    Ok(())
+}

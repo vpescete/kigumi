@@ -322,6 +322,8 @@ Gli endpoint su misura registrati con `register_route!` (receiver di webhook, ri
 
 Server-sent events per ogni scrittura committata, filtrati per chiamante: un evento è consegnato solo se il chiamante può leggere il record adesso (ACL + record rule riverificate a ogni batch), i nomi dei campi modificati sono filtrati per visibilità dei field group, e gli eventi di cancellazione sono soppressi dove si applica una record rule di lettura. Ogni evento porta un id nella forma `txn:id`; riconnettiti con `Last-Event-ID` per una ripresa esatta senza buchi (il cursore è la coppia, quindi nessun evento committato viene saltato o duplicato). Gli stream sono limitati a 15 minuti — i client si riconnettono e la ripresa è trasparente; la revoca degli accessi non resta quindi mai stantia oltre un batch.
 
+> **Retention:** lo stream legge `event_outbox`, che il job giornaliero `gc_queues` mantiene limitato — righe dispatchate dopo 30 giorni, non dispatchate dopo 90 (più a lungo, perché un runtime adopter non esegue mai il fan-out dei webhook e quelle righe sono il suo unico registro). Un `Last-Event-ID` più vecchio della finestra riprende dall'evento più vecchio sopravvissuto invece di riprodurre ciò che è stato potato. Rientra nel contratto events-are-hints: un evento dice *qualcosa è cambiato*, e il record stesso è la fonte di verità. Un consumatore che non può permettersi di perdere nulla deve riconciliare sui record, non affidarsi a un replay illimitato. Il pruning non rimuove mai una riga outbox che abbia ancora una delivery webhook pendente.
+
 ```
 event: message
 id: 668129:15

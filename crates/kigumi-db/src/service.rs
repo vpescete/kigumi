@@ -245,6 +245,29 @@ pub fn validate_routes() -> Result<(), String> {
     Ok(())
 }
 
+/// Fails the boot on a duplicate registration in the db-owned first-match registries, and runs
+/// [`kigumi_core::validate_core_registrations`] for the core ones. The sibling of `validate_routes`:
+/// `service_for`, `job_for` and `ledger_report_for` are all `.find()`, so a collision silently
+/// resolves by crate link order instead of erroring.
+pub fn validate_registrations() -> Result<(), String> {
+    kigumi_core::validate_core_registrations()?;
+    let mut services = std::collections::BTreeSet::new();
+    for s in kigumi_core::inventory::iter::<ServiceRegistration> {
+        if !services.insert((s.model, s.name)) {
+            return Err(format!("duplicate service registration: {}.{}", s.model, s.name));
+        }
+    }
+    // Jobs are NOT checked here: `ensure_job_schema` already rejects a duplicate name, and it runs on
+    // `migrate` too — a path that builds no router, so it is the wider of the two checks.
+    let mut reports = std::collections::BTreeSet::new();
+    for r in kigumi_core::inventory::iter::<LedgerReportRegistration> {
+        if !reports.insert(r.name) {
+            return Err(format!("duplicate ledger report registration: {}", r.name));
+        }
+    }
+    Ok(())
+}
+
 /// An in-tx WRITE TRIGGER — a module hook that runs on the caller's transaction AFTER a secured write to
 /// `model`, when one of `watch`ed columns changed (empty = any). The framework's own `depends`-driven
 /// recompute handles same-record + child aggregates; this seam covers the effects it can't express on read

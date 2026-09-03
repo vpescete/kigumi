@@ -76,10 +76,16 @@ pub struct Server {
     pub bind: String,
     pub workers: usize,
     pub proxy_mode: bool,
+    /// Browser origins allowed to call the API cross-origin, e.g. ["https://app.example.com"].
+    /// EMPTY (the default) mounts no CORS layer at all — same-origin only, which is what a reverse
+    /// proxy or the dev Vite proxy already gives you. `["*"]` allows any origin: legitimate for a
+    /// public read API, wrong for anything a browser session can reach.
+    #[serde(default)]
+    pub cors_allowed_origins: Vec<String>,
 }
 impl Default for Server {
     fn default() -> Self {
-        Self { bind: "127.0.0.1:8099".into(), workers: 4, proxy_mode: false }
+        Self { bind: "127.0.0.1:8099".into(), workers: 4, proxy_mode: false, cors_allowed_origins: Vec::new() }
     }
 }
 
