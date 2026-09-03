@@ -41,16 +41,25 @@ for crate in "${ORDER[@]}"; do
     exit 1
   fi
   version=$(version_of "$manifest")
-  code=$(curl -s -o /dev/null -w '%{http_code}' -A "$UA" "https://crates.io/api/v1/crates/$crate/$version")
+  # crates.io throttles this endpoint mid-run (a dozen publishes in a row will do it) and an
+  # unbounded curl then HANGS rather than erroring, so: bounded, and retried before giving up.
+  check=0
+  while true; do
+    check=$((check + 1))
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -A "$UA" "https://crates.io/api/v1/crates/$crate/$version")
+    [ "$code" = "200" ] || [ "$code" = "404" ] && break
+    if [ $check -ge 5 ]; then
+      # Anything but a clean 200/404 is not evidence either way: publishing on a guess would abort
+      # the run on the "already uploaded" error a few seconds later.
+      echo "== FATAL: crates.io answered $code for $crate/$version after $check tries — not publishing on a guess"
+      exit 1
+    fi
+    echo "== crates.io answered $code for $crate/$version; retrying the check in 20s ($check/5)"
+    sleep 20
+  done
   if [ "$code" = "200" ]; then
     echo "== $crate $version: already on crates.io, skipping"
     continue
-  fi
-  # Anything but a clean 404 (network flake, 5xx) is not evidence the version is missing: publishing
-  # on a guess would abort the whole run on the "already uploaded" error a few seconds later.
-  if [ "$code" != "404" ]; then
-    echo "== FATAL: crates.io answered $code for $crate/$version — not publishing on a guess"
-    exit 1
   fi
   attempt=0
   while true; do
