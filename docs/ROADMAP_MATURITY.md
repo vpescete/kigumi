@@ -27,7 +27,15 @@
 
 ---
 
-## F0 — Igiene di rilascio (subito, ~1 giorno)
+## F0 — Igiene di rilascio — **FATTA** (2026-09-02/03)
+
+> Commit 9c6ba18 + f7f4c14, tag `v0.1.1` / `kigumi-cli-v0.1.2` (più i retro `v0.1.0`,
+> `modules-v1.0.0`, `kigumi-cli-v0.1.1`). Framework 0.1.1 e cli 0.1.2 su crates.io,
+> `cargo install kigumi-cli` verificato. I 5 moduli NON ripubblicati: `src` identico al 1.0.0.
+> Il check per-versione di `publish-all.sh` si è poi rivelato fragile (crates.io throttla e curl
+> senza timeout si pianta) → `--max-time` + 5 retry in f7f4c14.
+
+## F0 (originale) — Igiene di rilascio (~1 giorno)
 
 **Problema:** i crate su crates.io sono del 2-3/07 e mancano di **~14 commit** fino a HEAD:
 non solo l'ondata Tier-2 (tracing e53f014, i18n e08d591, portal b11bb65, SSO e94ecf8) ma anche
@@ -54,7 +62,31 @@ una build senza tutto questo. Nessun git tag esiste.
 **Exit:** `cargo install kigumi-cli` installa HEAD; ogni versione su crates.io ha un tag; nessun
 doc descrive comportamenti inesistenti.
 
-## F1 — Correttezza e superficie API (≈1-2 settimane → release 0.2.0)
+## F1 — Correttezza e superficie API — **FATTA** (2026-09-03, release 0.2.0)
+
+> Tutti e 8 i punti, ognuno con la sua guardia runnable. Commit 9bd4e7e, d22fcac, 2e91bea,
+> ecc851f, af5765f. 271 test verdi. DM2 deciso dall'owner: catalogo ACL-driven.
+>
+> **Due deviazioni dal piano scritto qui sotto, entrambe verificate empiricamente:**
+> 1. `#[non_exhaustive]` + `..Default::default()` **non compila** cross-crate (E0639: il
+>    non_exhaustive vieta le struct expression, functional-update inclusa). Il pattern corretto è
+>    costruttore + assegnazione dei campi pubblici; provato su un workspace a due crate, e provato
+>    che aggiungere un campo lascia il consumer intatto.
+> 2. La tolleranza 42P01 dei cleanup era **una bugia dentro una transazione**: Postgres aborta
+>    tutta la tx allo statement fallito, quindi "ingoia e prosegui" restituiva Ok su una tx morta.
+>    Risolto con SAVEPOINT, sia nei cleanup sia in `enqueue_event_in_tx` (stesso bug latente su
+>    ogni seam in-tx, non solo il delete).
+>
+> **Ridotto rispetto al piano:** niente meccanismo di override sui servizi (duplicato = errore a
+> boot; F3 progetterà l'override quando avrà un requisito vero). I job non entrano in
+> `validate_registrations`: `ensure_job_schema` già li controlla e gira anche su `migrate`.
+> **Esteso rispetto al piano:** la validazione duplicati copre tutti e 5 i registry first-match
+> (azioni, form view, report, servizi, ledger report), non solo i servizi.
+>
+> Treno di rilascio: moduli a **2.0.0** (major, non minor — vedi af5765f per il perché).
+> **Pubblicazione su crates.io ancora da fare.**
+
+## F1 (originale) — Correttezza e superficie API (≈1-2 settimane → release 0.2.0)
 
 Fix piccoli ma reali; alcuni breaking → si raccolgono in una **0.2.0**. Il treno di rilascio è
 più di una riga: riscrittura dei range `framework` nei 5 manifest (`>=0.2, <0.3`), **e** bump +
