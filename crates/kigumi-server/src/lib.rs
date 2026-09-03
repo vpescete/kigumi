@@ -733,6 +733,38 @@ fn resolve_model(state: &AppState, name: &str) -> Result<ResolvedModel, Response
     Ok(model)
 }
 
+/// Identity for a CATALOG request (`/openapi.json`, `/api/models`, `/api/:name/view`). The catalog
+/// follows the same ACLs as the data it describes rather than carrying a switch of its own.
+///
+/// - `Ok(None)` = the metadata-only `router()`: no data backend, so no user store and no ACL rows to
+///   consult. It serves exactly the models it was handed — that IS its documented contract.
+/// - No `authorization` header = the reserved guest identity (uid −1, `PUBLIC_GROUP` only), the same
+///   one `auth: false` module routes get. It sees a model only where a `public` Read ACL exists.
+/// - Credentials that do NOT verify = 401, never a silent downgrade to guest: a client holding an
+///   expired token must be told so instead of watching the catalog turn up empty.
+async fn catalog_ctx(state: &AppState, headers: &HeaderMap) -> Result<Option<Ctx>, Response> {
+    let Some(backend) = state.data.as_ref() else {
+        return Ok(None);
+    };
+    if headers.get("authorization").is_none() {
+        return Ok(Some(Ctx::new(-1, vec![PUBLIC_GROUP.to_string()])));
+    }
+    authenticate(backend, headers).await.map(Some)
+}
+
+/// Whether `model` belongs in the catalog served to `ctx`: installed AND readable. A caller who
+/// cannot read it is answered exactly like one asking for a model that does not exist, so the gate
+/// leaks no names.
+fn catalog_readable(state: &AppState, ctx: Option<&Ctx>, model: &str) -> bool {
+    if !is_served(state, model) {
+        return false;
+    }
+    match (ctx, state.data.as_ref()) {
+        (Some(c), Some(backend)) => check_access(Operation::Read, model, c, &backend.acls()),
+        _ => true,
+    }
+}
+
 /// The structured error envelope every DbError-mapped response carries:
 /// `{"error": {"code": "<kebab>", "message": "...", "fields": {"<field>": ["<msg>", …]}}}`.
 /// `fields` is present only when the failure is attributable to specific fields (a form renders
@@ -767,20 +799,33 @@ fn write_error(context: &str, e: DbError) -> Response {
     }
 }
 
-async fn openapi_handler(State(state): State<AppState>) -> Response {
-    let refs: Vec<&ResolvedModel> = state.models.iter().collect();
+async fn openapi_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let ctx = match catalog_ctx(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    // Only models this caller can read, and only ones actually served: a path in the spec has to be
+    // a path the server answers, so an uninstalled model must not be documented either.
+    let refs: Vec<&ResolvedModel> = state
+        .models
+        .iter()
+        .filter(|m| catalog_readable(&state, ctx.as_ref(), m.name))
+        .collect();
     json_response(openapi(&refs))
 }
 
-async fn models_handler(State(state): State<AppState>) -> Json<Vec<String>> {
-    Json(
-        state
-            .models
-            .iter()
-            .filter(|m| is_served(&state, m.name))
-            .map(|m| m.name.to_string())
-            .collect(),
-    )
+async fn models_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let ctx = match catalog_ctx(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let names: Vec<String> = state
+        .models
+        .iter()
+        .filter(|m| catalog_readable(&state, ctx.as_ref(), m.name))
+        .map(|m| m.name.to_string())
+        .collect();
+    Json(names).into_response()
 }
 
 /// Logs the detail server-side and returns an opaque 500 — internal schema/SQL detail must never
@@ -1086,10 +1131,17 @@ async fn add_field_handler(State(state): State<AppState>, Path(name): Path<Strin
 }
 
 async fn view_handler(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> Response {
+    let ctx = match catalog_ctx(&state, &headers).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
     let model = match resolve_model(&state, &name) {
         Ok(m) => m,
         Err(r) => return r,
     };
+    if !catalog_readable(&state, ctx.as_ref(), &name) {
+        return (StatusCode::NOT_FOUND, format!("unknown model: {name}")).into_response();
+    }
     let json = match to_ui_contract(&model, &[]) {
         Ok(j) => j,
         Err(e) => return internal_error("view", e),

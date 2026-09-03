@@ -147,9 +147,19 @@ spends the same work regardless, so timing does not reveal which keys exist.
 
 All routes under `/api/:name` require an access token and apply the ACL + record rule + multi-company scope engine in the `kigumi-db` layer (the `*_secured` methods). Authorization is **not** in the server: the handler authenticates, shapes the response, and maps errors.
 
+### Catalog visibility
+
+`GET /openapi.json`, `GET /api/models` and `GET /api/:name/view` are the **catalog**: they describe the models rather than returning records. They follow the same ACLs as the data they describe — there is no separate switch:
+
+- a request **with no `Authorization` header** runs as the reserved guest (`uid = -1`, group `public`), and sees a model only where a `public` Read ACL exists — the same primitive public portals are built on (see [sicurezza.md](sicurezza.md));
+- a request **with credentials that do not verify** gets `401`, never a silent downgrade to guest: a client holding an expired token is told so instead of watching the catalog turn up empty;
+- a model the caller cannot read is answered exactly like one that does not exist (`404`), so the gate leaks no model names.
+
+The metadata-only `router(models)` is the exception: with no database there is no user store and no ACL rows to consult, so it serves exactly the models it was handed. Do not mount it on a public interface.
+
 | Route | Method | What it does |
 |---|---|---|
-| `/api/models` | GET | JSON array of the names of the served models |
+| `/api/models` | GET | JSON array of the names of the served models the caller may read |
 | `/api/:name/view` | GET | UI contract of the model (see below) |
 | `/api/:name` | GET | paginated list (envelope `data/total/limit/offset`) |
 | `/api/:name` | POST | creates a record, returns `{ "id": <n> }` with `201` |
@@ -534,10 +544,14 @@ For each model it emits:
 - in `components.schemas`, a model-name-keyed object schema (e.g. `sale.order`) with `id` (`int64`, `readOnly`) and one property per field. Decimals are `string` with `format: decimal` (to preserve NUMERIC precision), dates are `format: date`/`date-time`, `One2many` are arrays of child objects (`$ref` to the child model), `Many2many` are arrays of `int64` ids, computed fields are `readOnly`.
 - in `paths`, `GET /api/<table>` (list) and `GET /api/<table>/{id}` (get-one), with `operationId` `list_<table>` and `get_<table>`.
 
-> **Caution — divergence between the spec and the real routes:** the OpenAPI uses the underscored **table name** (`m.table`, e.g. `/api/sale_order`), whereas the data routes actually mounted by the server use the **dotted model name** (`m.name`, e.g. `/api/sale.order`). Moreover, the OpenAPI 3.1 generated in this version documents only `GET` list and `GET` get-one; it does not yet describe the create/update/delete, auth, service-method, attachment, or chatter endpoints. For the complete list refer to this page, not just to the spec.
+Paths are keyed on the **dotted model name** (`/api/sale.order`), matching the routes the server actually mounts. `operationId` stays table-derived (`list_sale_order`), because it has to be a valid identifier for code generators.
+
+> **Note — the spec is a subset:** the OpenAPI 3.1 generated in this version documents only `GET` list and `GET` get-one; it does not yet describe the create/update/delete, auth, service-method, attachment, or chatter endpoints. For the complete list refer to this page, not just to the spec.
+
+The spec describes only what the **caller** can read (see [Catalog visibility](#catalog-visibility)), so fetch it with a token:
 
 ```bash
-curl -s http://127.0.0.1:8099/openapi.json | head -40
+curl -s http://127.0.0.1:8099/openapi.json -H "Authorization: Bearer $TOKEN" | head -40
 ```
 
 ## Error format and status codes

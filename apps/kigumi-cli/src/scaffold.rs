@@ -354,15 +354,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
         }
         Some("serve") => {
-            kigumi_runtime::serve(
-                db,
-                kigumi_runtime::ServeOptions {
-                    bind: std::env::var("KIGUMI_BIND").unwrap_or_else(|_| "127.0.0.1:8600".to_string()),
-                    jwt_secret: std::env::var("KIGUMI_JWT_SECRET").map_err(|_| "KIGUMI_JWT_SECRET is required")?,
-                    blob_root: "./blobs".into(),
-                },
-            )
-            .await
+            // ServeOptions is #[non_exhaustive]: build it with new() and assign what you need, so a
+            // field added by a future framework release never breaks this file.
+            let mut opts = kigumi_runtime::ServeOptions::new(
+                std::env::var("KIGUMI_JWT_SECRET").map_err(|_| "KIGUMI_JWT_SECRET is required")?,
+            );
+            if let Ok(bind) = std::env::var("KIGUMI_BIND") {
+                opts.bind = bind;
+            }
+            kigumi_runtime::serve(db, opts).await
         }
         // MCP over stdio: an AI agent operates this app AS the given user - ACLs and record
         // rules enforced on every tool by the data layer.
@@ -411,7 +411,8 @@ curl -s -X POST localhost:8600/api/__APP__.ticket/1/action/close -H "Authorizati
 curl -s -X POST localhost:8600/api/__APP__.ticket/1/message \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"body":"On it."}'
 curl -sN localhost:8600/api/events/stream -H "Authorization: Bearer $TOKEN"   # SSE
-curl -s localhost:8600/openapi.json
+# The catalog follows the ACLs too: without a token you see only what the `public` group may read.
+curl -s localhost:8600/openapi.json -H "Authorization: Bearer $TOKEN"
 curl -s localhost:8600/api/__APP__.ticket/view -H "Authorization: Bearer $TOKEN"  # UI contract
 ```
 
@@ -557,6 +558,21 @@ mod tests {
         let toml = std::fs::read_to_string(dest.join("app/Cargo.toml")).unwrap();
         assert!(toml.contains("kigumi = \"0.1\""), "framework crates pinned to 0.1: {toml}");
         assert!(toml.contains("kigumi-mod-sales = \"1.0\""), "modules pinned to 1.0");
+        std::fs::remove_dir_all(&dest).unwrap();
+    }
+
+    /// The scaffolded main must never construct ServeOptions as a struct literal: the struct is
+    /// #[non_exhaustive], so a literal does not even compile from the generated crate (E0639), and
+    /// the whole point of the constructor is that a field added by a later framework release is a
+    /// no-op here instead of a compile error in every adopter binary.
+    #[test]
+    fn scaffolded_main_builds_serve_options_through_the_constructor() {
+        let dest = std::env::temp_dir().join(format!("kigumi_new_so_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        scaffold(&dest, &opts("demoapp", &["sales"])).unwrap();
+        let main_rs = std::fs::read_to_string(dest.join("app/src/main.rs")).unwrap();
+        assert!(main_rs.contains("ServeOptions::new("), "constructed via new(): {main_rs}");
+        assert!(!main_rs.contains("ServeOptions {"), "no exhaustive struct literal: {main_rs}");
         std::fs::remove_dir_all(&dest).unwrap();
     }
 

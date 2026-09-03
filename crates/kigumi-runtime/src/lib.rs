@@ -6,7 +6,9 @@
 //! let db = Db::connect(&url).await?;
 //! kigumi_runtime::migrate(&db).await?;
 //! kigumi_runtime::bootstrap_admin(&db, &password).await?;
-//! kigumi_runtime::serve(db, ServeOptions { bind, jwt_secret, blob_root }).await?;
+//! let mut opts = ServeOptions::new(jwt_secret);
+//! opts.bind = bind;
+//! kigumi_runtime::serve(db, opts).await?;
 //! ```
 //!
 //! kigumi-cli predates this crate and keeps its own dynamic wiring (live install, runtime custom
@@ -124,12 +126,31 @@ pub fn spawn_workers(db: &Db) {
     });
 }
 
+/// Everything `serve` needs. `#[non_exhaustive]`: adopters build it with [`ServeOptions::new`] and
+/// assign the fields they care about, so a field added later (a `[telemetry]` section, a `ui` flag)
+/// is a recompile and not a compile ERROR in every adopter binary in existence.
+///
+/// Note the constructor is the only entry point on purpose: `#[non_exhaustive]` rejects struct
+/// expressions from other crates outright, functional-update `..Default::default()` included (E0639).
+#[non_exhaustive]
 pub struct ServeOptions {
     /// e.g. "127.0.0.1:8600".
     pub bind: String,
     pub jwt_secret: String,
     /// Root directory of the filesystem blob store.
     pub blob_root: std::path::PathBuf,
+}
+
+impl ServeOptions {
+    /// The signing secret is the one input with no sane default; everything else starts at the value
+    /// the scaffolded app used to hardcode. Override by assignment: `opts.bind = "0.0.0.0:80".into()`.
+    pub fn new(jwt_secret: impl Into<String>) -> Self {
+        Self {
+            bind: "127.0.0.1:8600".to_string(),
+            jwt_secret: jwt_secret.into(),
+            blob_root: std::path::PathBuf::from("./blobs"),
+        }
+    }
 }
 
 /// Serves the full secured API (data, auth, actions/services, module routes, reports, SSE,

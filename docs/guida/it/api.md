@@ -147,9 +147,19 @@ quali key esistono.
 
 Tutte le route sotto `/api/:name` richiedono un access token e applicano il motore ACL + record rule + scope multi-azienda nello strato `kigumi-db` (i metodi `*_secured`). L'autorizzazione **non** è nel server: l'handler autentica, modella la risposta e mappa gli errori.
 
+### Visibilità del catalogo
+
+`GET /openapi.json`, `GET /api/models` e `GET /api/:name/view` sono il **catalogo**: descrivono i modelli invece di restituire record. Seguono le stesse ACL dei dati che descrivono — non c'è un interruttore separato:
+
+- una richiesta **senza header `Authorization`** gira come guest riservato (`uid = -1`, gruppo `public`) e vede un modello solo dove esiste una ACL di Read per `public` — lo stesso primitivo su cui si costruiscono i portali pubblici (vedi [sicurezza.md](sicurezza.md));
+- una richiesta **con credenziali che non verificano** riceve `401`, mai una degradazione silenziosa a guest: a un client con token scaduto va detto, invece di fargli vedere un catalogo misteriosamente vuoto;
+- un modello che il chiamante non può leggere risponde esattamente come uno inesistente (`404`), così il gate non fa trapelare nomi di modelli.
+
+Il router metadata-only `router(models)` è l'eccezione: senza database non c'è né anagrafica utenti né righe ACL da consultare, quindi serve esattamente i modelli che gli sono stati passati. Non montarlo su un'interfaccia pubblica.
+
 | Route | Metodo | Cosa fa |
 |---|---|---|
-| `/api/models` | GET | array JSON dei nomi dei modelli serviti |
+| `/api/models` | GET | array JSON dei nomi dei modelli serviti che il chiamante può leggere |
 | `/api/:name/view` | GET | contratto-UI del modello (vedi sotto) |
 | `/api/:name` | GET | lista paginata (envelope `data/total/limit/offset`) |
 | `/api/:name` | POST | crea un record, ritorna `{ "id": <n> }` con `201` |
@@ -535,10 +545,14 @@ Per ogni modello emette:
 - in `components.schemas`, uno schema oggetto chiave-nome-modello (es. `sale.order`) con `id` (`int64`, `readOnly`) e una proprietà per campo. I decimali sono `string` con `format: decimal` (per preservare la precisione NUMERIC), le date sono `format: date`/`date-time`, i `One2many` sono array di oggetti figlio (`$ref` al modello child), i `Many2many` array di id `int64`, i campi computed sono `readOnly`.
 - in `paths`, `GET /api/<table>` (lista) e `GET /api/<table>/{id}` (get-one), con `operationId` `list_<table>` e `get_<table>`.
 
-> **Attenzione — divergenza tra spec e route reali:** l'OpenAPI usa il **nome di tabella** sottolineato (`m.table`, es. `/api/sale_order`), mentre le route dati realmente montate dal server usano il **nome puntato** del modello (`m.name`, es. `/api/sale.order`). Inoltre l'OpenAPI 3.1 generato in questa versione documenta solo `GET` list e `GET` get-one; non descrive ancora gli endpoint di create/update/delete, auth, metodi di servizio, allegati o chatter. Per la lista completa fai riferimento a questa pagina, non solo allo spec.
+I path sono chiavati sul **nome puntato** del modello (`/api/sale.order`), coerenti con le route realmente montate dal server. L'`operationId` resta derivato dalla tabella (`list_sale_order`), perché deve essere un identificatore valido per i generatori di codice.
+
+> **Nota — lo spec è un sottoinsieme:** l'OpenAPI 3.1 generato in questa versione documenta solo `GET` list e `GET` get-one; non descrive ancora gli endpoint di create/update/delete, auth, metodi di servizio, allegati o chatter. Per la lista completa fai riferimento a questa pagina, non solo allo spec.
+
+Lo spec descrive solo ciò che il **chiamante** può leggere (vedi [Visibilità del catalogo](#visibilità-del-catalogo)), quindi va richiesto con un token:
 
 ```bash
-curl -s http://127.0.0.1:8099/openapi.json | head -40
+curl -s http://127.0.0.1:8099/openapi.json -H "Authorization: Bearer $TOKEN" | head -40
 ```
 
 ## Formato degli errori e status code

@@ -13,7 +13,9 @@ pub fn openapi(models: &[&ResolvedModel]) -> String {
     let mut paths = Map::new();
     for m in models {
         schemas.insert(m.name.to_string(), model_schema(m));
-        let base = format!("/api/{}", m.table);
+        // The data routes resolve by model NAME (`/api/sale.order`), not by table: keying the spec on
+        // m.table published paths that 404 against the very server the spec describes.
+        let base = format!("/api/{}", m.name);
         paths.insert(base.clone(), json!({ "get": list_op(m) }));
         paths.insert(format!("{base}/{{id}}"), json!({ "get": get_op(m) }));
     }
@@ -131,9 +133,10 @@ mod tests {
         let v: Value = serde_json::from_str(&spec).unwrap();
         assert_eq!(v["openapi"], "3.1.0");
         assert!(v["components"]["schemas"]["sale.order"]["properties"]["state"]["enum"].is_array());
-        assert!(v["paths"]["/api/sale_order"]["get"].is_object());
+        assert!(v["paths"]["/api/sale.order"]["get"].is_object());
+        // operationId stays table-derived: it is a codegen IDENTIFIER, and `get_sale.order` is not one.
         assert_eq!(
-            v["paths"]["/api/sale_order/{id}"]["get"]["operationId"],
+            v["paths"]["/api/sale.order/{id}"]["get"]["operationId"],
             "get_sale_order"
         );
         // One2many is schema'd as an array of the CHILD object (matches the inlined get-one read).
@@ -141,5 +144,25 @@ mod tests {
             v["components"]["schemas"]["sale.order"]["properties"]["line_ids"]["items"]["$ref"],
             "#/components/schemas/sale.order.line"
         );
+    }
+
+    /// The spec is the integration contract: a path in it has to be a path the server actually
+    /// serves. The data routes match on model NAME (`/api/:name` -> "sale.order"), so a spec keyed
+    /// on `m.table` published `/api/sale_order` — a 404 for every model whose table differs from
+    /// its name, which is all of them with a dotted name.
+    #[test]
+    fn paths_are_keyed_by_model_name_not_table() {
+        let m = resolve(&M, &[]).unwrap();
+        assert_ne!(m.name, m.table, "the fixture must exercise name != table");
+        let v: Value = serde_json::from_str(&openapi(&[&m])).unwrap();
+        let paths: Vec<&String> = v["paths"].as_object().unwrap().keys().collect();
+        assert_eq!(
+            paths.iter().filter(|p| p.contains(m.table)).count(),
+            0,
+            "no path may be keyed on the table: {paths:?}"
+        );
+        for want in [format!("/api/{}", m.name), format!("/api/{}/{{id}}", m.name)] {
+            assert!(v["paths"][&want].is_object(), "missing {want}: {paths:?}");
+        }
     }
 }
