@@ -84,7 +84,7 @@ doc descrive comportamenti inesistenti.
 > (azioni, form view, report, servizi, ledger report), non solo i servizi.
 >
 > Treno di rilascio: moduli a **2.0.0** (major, non minor — vedi af5765f per il perché).
-> **Pubblicazione su crates.io ancora da fare.**
+> Pubblicati tutti e 18 i crate il 2026-09-03; tag `v0.2.0`, `modules-v2.0.0`, `kigumi-cli-v0.2.0`.
 
 ## F1 (originale) — Correttezza e superficie API (≈1-2 settimane → release 0.2.0)
 
