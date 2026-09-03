@@ -12,14 +12,14 @@ type Fut<'a> = Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>>;
 static MANIFEST_A: ModuleManifest = ModuleManifest {
     name: "seedtest_a",
     version: "1.0.0",
-    framework: ">=0.1, <0.2",
+    framework: ">=0.2, <0.3",
     depends: &[ModuleDep { name: "seedtest_b", req: "^1.0" }],
     summary: "seed-order test module A (depends on B)",
 };
 static MANIFEST_B: ModuleManifest = ModuleManifest {
     name: "seedtest_b",
     version: "1.0.0",
-    framework: ">=0.1, <0.2",
+    framework: ">=0.2, <0.3",
     depends: &[],
     summary: "seed-order test module B",
 };

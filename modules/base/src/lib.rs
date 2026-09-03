@@ -13,8 +13,8 @@ pub mod seed;
 /// Module manifest. `base` depends on nothing and anchors the catalog.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "base",
-    version: "1.0.0",
-    framework: ">=0.1, <0.2",
+    version: "2.0.0",
+    framework: ">=0.2, <0.3",
     depends: &[],
     summary: "Foundational models: currency, partner, company",
 };

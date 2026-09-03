@@ -12,9 +12,9 @@ use kigumi::prelude::*;
 /// Module manifest. `mail` depends on `base` (res.users as message author).
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "mail",
-    version: "1.0.0",
-    framework: ">=0.1, <0.2",
-    depends: &[ModuleDep { name: "base", req: "^1.0" }],
+    version: "2.0.0",
+    framework: ">=0.2, <0.3",
+    depends: &[ModuleDep { name: "base", req: "^2.0" }],
     summary: "Headless chatter: messages, tracking, followers, activities",
 };
 kigumi::register_module!(MANIFEST);

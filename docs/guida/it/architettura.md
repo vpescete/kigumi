@@ -30,7 +30,7 @@ Tutti i crate del framework condividono la versione dichiarata in `[workspace.pa
 
 ```toml
 [workspace.package]
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/vpescete/kigumi"
@@ -405,7 +405,7 @@ Tre piani distinti, con confini netti:
   pub static MANIFEST: ModuleManifest = ModuleManifest {
       name: "base",
       version: "1.0.0",
-      framework: ">=0.1, <0.2",
+      framework: ">=0.2, <0.3",
       depends: &[],
       summary: "Foundational models: currency, partner, company",
   };
@@ -459,7 +459,7 @@ manifest (`crates/kigumi-core/src/manifest.rs`):
 pub struct ModuleManifest {
     pub name: &'static str,
     pub version: &'static str,        // SemVer del modulo, es. "1.0.0"
-    pub framework: &'static str,      // range di compatibilità col framework, es. ">=0.1, <0.2"
+    pub framework: &'static str,      // range di compatibilità col framework, es. ">=0.2, <0.3"
     pub depends: &'static [ModuleDep],// dipendenze su altri moduli, con range SemVer
     pub summary: &'static str,
 }

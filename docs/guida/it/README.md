@@ -56,13 +56,13 @@ Ogni modulo dichiara un `MANIFEST` (`ModuleManifest`) con nome, versione, range 
 
 | Modulo | Versione | Dipende da | Summary (dal manifest) |
 |---|---|---|---|
-| `base` | `1.0.0` | — | Foundational models: currency, partner, company |
-| `mail` | `1.0.0` | `base` | Headless chatter: messages, tracking, followers, activities |
-| `sales` | `1.0.0` | `base`, `mail` | Sales order management |
-| `account` | `1.0.0` | `base`, `mail` | Double-entry general ledger |
-| `stock` | `1.0.0` | `base`, `sales`, `mail` | Inventory — locations, quants, pickings and moves |
+| `base` | `2.0.0` | — | Foundational models: currency, partner, company |
+| `mail` | `2.0.0` | `base` | Headless chatter: messages, tracking, followers, activities |
+| `sales` | `2.0.0` | `base`, `mail` | Sales order management |
+| `account` | `2.0.0` | `base`, `mail` | Double-entry general ledger |
+| `stock` | `2.0.0` | `base`, `sales`, `mail` | Inventory — locations, quants, pickings and moves |
 
-`base` è la radice del grafo (nessuna dipendenza) e non può essere disinstallato. Tutti i moduli dichiarano `framework: ">=0.1, <0.2"`. Le dipendenze nella tabella sono quelle dichiarate nel `MANIFEST`; installare un modulo ne risolve la **chiusura transitiva** (ad esempio installare `stock` tira dentro `sales`, e quindi `base` e `mail`).
+`base` è la radice del grafo (nessuna dipendenza) e non può essere disinstallato. Tutti i moduli dichiarano `framework: ">=0.2, <0.3"`. Le dipendenze nella tabella sono quelle dichiarate nel `MANIFEST`; installare un modulo ne risolve la **chiusura transitiva** (ad esempio installare `stock` tira dentro `sales`, e quindi `base` e `mail`).
 
 ### App (`apps/`)
 

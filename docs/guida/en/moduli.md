@@ -11,7 +11,7 @@ pub struct ModuleManifest {
     pub name: &'static str,
     /// SemVer of the module, e.g. "1.0.0".
     pub version: &'static str,
-    /// Compatibility range with the framework, e.g. ">=0.1, <0.2".
+    /// Compatibility range with the framework, e.g. ">=0.2, <0.3".
     pub framework: &'static str,
     /// Dependencies on other modules, with version ranges.
     pub depends: &'static [ModuleDep],
@@ -23,7 +23,7 @@ pub struct ModuleManifest {
 |-------|------|-------------|
 | `name` | `&'static str` | Technical name of the module (e.g. `"sales"`). Must be unique in the catalog. |
 | `version` | `&'static str` | SemVer version of the module, independent of the framework's. |
-| `framework` | `&'static str` | SemVer compatibility range with the framework (e.g. `">=0.1, <0.2"`). |
+| `framework` | `&'static str` | SemVer compatibility range with the framework (e.g. `">=0.2, <0.3"`). |
 | `depends` | `&'static [ModuleDep]` | Dependencies on other modules, each with its own version range. |
 | `summary` | `&'static str` | Short description, shown by `kigumi module list`. |
 
@@ -46,7 +46,7 @@ The manifest alone is not visible to the catalog: the module must register it. T
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "base",
     version: "1.0.0",
-    framework: ">=0.1, <0.2",
+    framework: ">=0.2, <0.3",
     depends: &[],
     summary: "Foundational models: currency, partner, company",
 };
@@ -73,7 +73,7 @@ A module is **available** when its crate is linked into the binary (compile time
 
 ## The framework compatibility check
 
-Before any resolution, every manifest is compared against the framework version by the `check_compat` function (in `crates/kigumi-core/src/manifest.rs`). The framework version is the `FRAMEWORK_VERSION` constant, derived from `kigumi-core`'s `CARGO_PKG_VERSION` (defined in `crates/kigumi-core/src/lib.rs`) — currently `0.1.1`. All bundled modules declare `framework = ">=0.1, <0.2"`, so they are compatible with this line.
+Before any resolution, every manifest is compared against the framework version by the `check_compat` function (in `crates/kigumi-core/src/manifest.rs`). The framework version is the `FRAMEWORK_VERSION` constant, derived from `kigumi-core`'s `CARGO_PKG_VERSION` (defined in `crates/kigumi-core/src/lib.rs`) — currently `0.2.0`. All bundled modules declare `framework = ">=0.2, <0.3"`, so they are compatible with this line.
 
 ```rust
 pub fn check_compat(
@@ -232,7 +232,7 @@ if db.installed_modules().await?.is_empty() {
 
 ## Bundled module catalog
 
-Five modules are bundled and linked into the `kigumi` binary. All declare `version = "1.0.0"` and `framework = ">=0.1, <0.2"`.
+Five modules are bundled and linked into the `kigumi` binary. All declare `version = "2.0.0"` and `framework = ">=0.2, <0.3"`.
 
 | Module | Crate | Depends on (verified by the MANIFEST) |
 |--------|-------|--------------------------------------|

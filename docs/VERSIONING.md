@@ -37,7 +37,7 @@ compile time. È il meglio dei due mondi.
 
 ### 2.2 Versione del framework
 
-- **SemVer puro**, Cargo-native. Oggi `0.1.1` (workspace `Cargo.toml`). Esposta come
+- **SemVer puro**, Cargo-native. Oggi `0.2.0` (workspace `Cargo.toml`). Esposta come
   `kigumi_core::FRAMEWORK_VERSION`.
 - Pre-1.0: minor = possibili breaking. Dopo 1.0: major = breaking, minor = additivo, patch = fix.
 - **Stabilità community**: a 1.0 si dichiara un contratto di stabilità del metamodello e delle
@@ -51,16 +51,16 @@ Ogni modulo dichiara (`ModuleManifest` in `kigumi-core`, oggi usato da `modules/
 ```rust
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "sales",
-    version: "1.0.0",                 // SemVer del modulo, INDIPENDENTE dal framework
-    framework: ">=0.1, <0.2",         // range di compatibilità col framework (VERIFICATO)
+    version: "2.0.0",                 // SemVer del modulo, INDIPENDENTE dal framework
+    framework: ">=0.2, <0.3",         // range di compatibilità col framework (VERIFICATO)
     depends: &[ModuleDep { name: "base", req: "^0.1" }],   // dep con RANGE SemVer
     summary: "Gestione ordini di vendita",
 };
 ```
 
 Differenze con Odoo, tutte verificabili:
-- **Niente lockstep**: la versione del modulo (`1.0.0`) non incorpora la serie del framework.
-  La compatibilità è un **range esplicito** (`framework: ">=0.1, <0.2"`), controllato da
+- **Niente lockstep**: la versione del modulo (`2.0.0`) non incorpora la serie del framework.
+  La compatibilità è un **range esplicito** (`framework: ">=0.2, <0.3"`), controllato da
   `check_compat()` → un modulo fuori range è un **errore**, non un crash a runtime.
 - **Dipendenze con versione**: `ModuleDep.req` è un range SemVer → un resolver può rifiutare
   combinazioni incompatibili a install time (fase 3). Odoo qui non ha nulla.
@@ -77,7 +77,7 @@ Differenze con Odoo, tutte verificabili:
 
 | Aspetto | Odoo 19 | Kigumi |
 |---|---|---|
-| Versione framework | serie `19.0` | SemVer (`0.1.1`), LTS a 1.0 |
+| Versione framework | serie `19.0` | SemVer (`0.2.0`), LTS a 1.0 |
 | Versione modulo | lockstep `19.0.x.y.z` | SemVer indipendente + range di compat |
 | Compat framework↔modulo | implicita (per serie) | range **verificato** (`check_compat`) |
 | Dipendenze tra moduli | nomi, **senza versione** | range SemVer (resolver, fase 3) |

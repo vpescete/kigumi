@@ -13,7 +13,7 @@ type Fut<'a> = Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>>;
 static MANIFEST: ModuleManifest = ModuleManifest {
     name: "upgtest",
     version: "1.2.0",
-    framework: ">=0.1, <0.2",
+    framework: ">=0.2, <0.3",
     depends: &[],
     summary: "upgrade-contract test module",
 };

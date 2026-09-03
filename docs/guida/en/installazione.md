@@ -71,7 +71,7 @@ Check the framework version and the linked modules:
 kigumi version
 ```
 
-The command prints the framework version and, line by line, the linked modules with their version (e.g. `module base 1.0.0`).
+The command prints the framework version and, line by line, the linked modules with their version (e.g. `module base 2.0.0`).
 
 ## Preparing the database
 

@@ -71,7 +71,7 @@ Verifica versione del framework e moduli linkati:
 kigumi version
 ```
 
-Il comando stampa la versione del framework e, riga per riga, i moduli linkati con la loro versione (es. `module base 1.0.0`).
+Il comando stampa la versione del framework e, riga per riga, i moduli linkati con la loro versione (es. `module base 2.0.0`).
 
 ## Predisposizione del database
 

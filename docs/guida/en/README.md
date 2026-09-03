@@ -56,13 +56,13 @@ Each module declares a `MANIFEST` (`ModuleManifest`) with a name, a version, a f
 
 | Module | Version | Depends on | Summary (from the manifest) |
 |---|---|---|---|
-| `base` | `1.0.0` | — | Foundational models: currency, partner, company |
-| `mail` | `1.0.0` | `base` | Headless chatter: messages, tracking, followers, activities |
-| `sales` | `1.0.0` | `base`, `mail` | Sales order management |
-| `account` | `1.0.0` | `base`, `mail` | Double-entry general ledger |
-| `stock` | `1.0.0` | `base`, `sales`, `mail` | Inventory — locations, quants, pickings and moves |
+| `base` | `2.0.0` | — | Foundational models: currency, partner, company |
+| `mail` | `2.0.0` | `base` | Headless chatter: messages, tracking, followers, activities |
+| `sales` | `2.0.0` | `base`, `mail` | Sales order management |
+| `account` | `2.0.0` | `base`, `mail` | Double-entry general ledger |
+| `stock` | `2.0.0` | `base`, `sales`, `mail` | Inventory — locations, quants, pickings and moves |
 
-`base` is the root of the graph (no dependencies) and cannot be uninstalled. All modules declare `framework: ">=0.1, <0.2"`. The dependencies in the table are those declared in the `MANIFEST`; installing a module resolves its **transitive closure** (for example, installing `stock` pulls in `sales`, and therefore `base` and `mail`).
+`base` is the root of the graph (no dependencies) and cannot be uninstalled. All modules declare `framework: ">=0.2, <0.3"`. The dependencies in the table are those declared in the `MANIFEST`; installing a module resolves its **transitive closure** (for example, installing `stock` pulls in `sales`, and therefore `base` and `mail`).
 
 ### Apps (`apps/`)
 

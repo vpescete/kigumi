@@ -20,7 +20,7 @@ Un modulo vive in `modules/NAME/` ed è un normale crate Rust. La sua unica dipe
 name = "kigumi-mod-stock"
 description = "Kigumi stock module: inventory — locations, quants, pickings and moves"
 # MODULE version, independent of the framework (see docs/VERSIONING.md).
-version = "1.0.0"
+version = "2.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -30,20 +30,20 @@ kigumi = { workspace = true }
 # Exact-quantity arithmetic in the quant/move math.
 rust_decimal = "1"
 # Depends on base (company), sales (product.product), and mail (pickings carry a chatter thread).
-kigumi-mod-base = { path = "../base", version = "1.0.0" }
-kigumi-mod-sales = { path = "../sales", version = "1.0.0" }
-kigumi-mod-mail = { path = "../mail", version = "1.0.0" }
+kigumi-mod-base = { path = "../base", version = "2.0.0" }
+kigumi-mod-sales = { path = "../sales", version = "2.0.0" }
+kigumi-mod-mail = { path = "../mail", version = "2.0.0" }
 
 [dev-dependencies]
 kigumi-db = { workspace = true }
-kigumi-mod-sales = { path = "../sales", version = "1.0.0" }
+kigumi-mod-sales = { path = "../sales", version = "2.0.0" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde_json = "1"
 ```
 
 Note importanti:
 
-- Il `version` del package è la **versione del modulo**, indipendente da quella del framework (SemVer per modulo). La versione del framework è condivisa da tutti i crate core (`0.1.1` nel workspace).
+- Il `version` del package è la **versione del modulo**, indipendente da quella del framework (SemVer per modulo). La versione del framework è condivisa da tutti i crate core (`0.2.0` nel workspace).
 - Le dipendenze Cargo verso altri moduli (`kigumi-mod-base`, ...) devono rispecchiare il `depends` del manifest del modulo. Allineare le due liste è intenzionale: una dipendenza dichiarata nel manifest ma non collegata come crate Cargo non sarebbe presente in `inventory`.
 - `rust_decimal` serve solo se il modulo fa aritmetica esatta (denaro, quantità); `serde_json` solo se ha report o codice che legge il record JSON.
 
@@ -223,7 +223,7 @@ Ogni modulo dichiara un `ModuleManifest` statico e lo registra. Da `modules/stoc
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "stock",
     version: "1.0.0",
-    framework: ">=0.1, <0.2",
+    framework: ">=0.2, <0.3",
     depends: &[
         ModuleDep { name: "base", req: "^1.0" },
         ModuleDep { name: "sales", req: "^1.0" },
@@ -234,7 +234,7 @@ pub static MANIFEST: ModuleManifest = ModuleManifest {
 kigumi::register_module!(MANIFEST);
 ```
 
-`ModuleManifest` (`crates/kigumi-core/src/manifest.rs`) ha i campi `name`, `version` (SemVer del modulo), `framework` (range di compatibilità con il framework, es. `">=0.1, <0.2"`), `depends` (slice di `ModuleDep { name, req }` con range SemVer verificati) e `summary`. Il resolver (`resolve_module_set`) valida compatibilità framework, range delle dipendenze, assenza di duplicati, di auto-dipendenze e di cicli, e restituisce i moduli in ordine topologico.
+`ModuleManifest` (`crates/kigumi-core/src/manifest.rs`) ha i campi `name`, `version` (SemVer del modulo), `framework` (range di compatibilità con il framework, es. `">=0.2, <0.3"`), `depends` (slice di `ModuleDep { name, req }` con range SemVer verificati) e `summary`. Il resolver (`resolve_module_set`) valida compatibilità framework, range delle dipendenze, assenza di duplicati, di auto-dipendenze e di cicli, e restituisce i moduli in ordine topologico.
 
 ### `register_acls!` — la struct `Acl`
 
@@ -596,7 +596,7 @@ Mettiamo insieme tutto con un modulo nuovo e minimale: un catalogo di libri.
 [package]
 name = "kigumi-mod-library"
 description = "Kigumi library module: a tiny book catalog"
-version = "1.0.0"
+version = "2.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -604,7 +604,7 @@ repository.workspace = true
 [dependencies]
 kigumi = { workspace = true }
 # Dipende da base per usare res.partner (l'autore) come target di relazione.
-kigumi-mod-base = { path = "../base", version = "1.0.0" }
+kigumi-mod-base = { path = "../base", version = "2.0.0" }
 
 [dev-dependencies]
 kigumi-db = { workspace = true }
@@ -621,7 +621,7 @@ use kigumi::prelude::*;
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "library",
     version: "1.0.0",
-    framework: ">=0.1, <0.2",
+    framework: ">=0.2, <0.3",
     depends: &[ModuleDep { name: "base", req: "^1.0" }],
     summary: "A tiny book catalog",
 };

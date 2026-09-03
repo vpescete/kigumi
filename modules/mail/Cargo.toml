@@ -2,7 +2,7 @@
 name = "kigumi-mod-mail"
 description = "Kigumi mail module: headless chatter — messages, tracking, followers, activities"
 # MODULE version, independent of the framework (see docs/VERSIONING.md).
-version = "1.0.0"
+version = "2.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -10,7 +10,7 @@ repository.workspace = true
 [dependencies]
 kigumi = { workspace = true }
 # Depends on base for res.users (message author / activity assignee).
-kigumi-mod-base = { path = "../base", version = "1.0.0" }
+kigumi-mod-base = { path = "../base", version = "2.0.0" }
 
 [dev-dependencies]
 kigumi-db = { workspace = true }

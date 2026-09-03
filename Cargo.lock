@@ -1788,7 +1788,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "kigumi-core",
  "kigumi-db",
@@ -1798,7 +1798,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-auth"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "jsonwebtoken",
@@ -1809,7 +1809,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-cli"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "axum",
  "clap",
@@ -1835,7 +1835,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-config"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "figment",
  "serde",
@@ -1845,7 +1845,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "inventory",
  "rust_decimal",
@@ -1855,7 +1855,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-db"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "ammonia",
  "futures-util",
@@ -1873,7 +1873,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-macros"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1882,7 +1882,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-mcp"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "axum",
  "http",
@@ -1901,7 +1901,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-mod-account"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "kigumi",
  "kigumi-db",
@@ -1916,7 +1916,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-mod-base"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "kigumi",
  "kigumi-auth",
@@ -1928,7 +1928,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-mod-mail"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "kigumi",
  "kigumi-auth",
@@ -1941,7 +1941,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-mod-sales"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "kigumi",
  "kigumi-db",
@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-mod-stock"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "kigumi",
  "kigumi-db",
@@ -1973,7 +1973,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-renderer-demo"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "axum",
  "kigumi",
@@ -1986,7 +1986,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-runtime"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "axum",
  "kigumi-auth",
@@ -2000,7 +2000,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-schema"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "kigumi-core",
  "serde_json",
@@ -2008,7 +2008,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-server"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -2037,7 +2037,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-storage"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "hex",
@@ -2049,7 +2049,7 @@ dependencies = [
 
 [[package]]
 name = "kigumi-test"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "kigumi-core",
  "kigumi-db",

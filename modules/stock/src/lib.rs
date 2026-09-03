@@ -12,12 +12,12 @@ pub mod seed;
 /// Module manifest: own version + framework compatibility range + module dependencies.
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "stock",
-    version: "1.0.0",
-    framework: ">=0.1, <0.2",
+    version: "2.0.0",
+    framework: ">=0.2, <0.3",
     depends: &[
-        ModuleDep { name: "base", req: "^1.0" },
-        ModuleDep { name: "sales", req: "^1.0" },
-        ModuleDep { name: "mail", req: "^1.0" },
+        ModuleDep { name: "base", req: "^2.0" },
+        ModuleDep { name: "sales", req: "^2.0" },
+        ModuleDep { name: "mail", req: "^2.0" },
     ],
     summary: "Inventory — locations, quants, pickings and moves",
 };

@@ -1,7 +1,7 @@
 [package]
 name = "kigumi-cli"
 description = "Kigumi instance CLI: serve, migrate, config, user management"
-version = "0.1.2"
+version = "0.2.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -22,11 +22,11 @@ kigumi-mcp = { workspace = true }
 # the features below. Each is linked only when its feature is on, so their models/ACLs/rules/services
 # self-register into the catalog (inventory) only then. `--no-default-features` builds a bare framework
 # server (a metamodel engine with no ERP), the artifact-level proof of "framework first, ERP optional".
-kigumi-mod-base = { path = "../../modules/base", version = "1.0.0", optional = true }
-kigumi-mod-mail = { path = "../../modules/mail", version = "1.0.0", optional = true }
-kigumi-mod-sales = { path = "../../modules/sales", version = "1.0.0", optional = true }
-kigumi-mod-account = { path = "../../modules/account", version = "1.0.0", optional = true }
-kigumi-mod-stock = { path = "../../modules/stock", version = "1.0.0", optional = true }
+kigumi-mod-base = { path = "../../modules/base", version = "2.0.0", optional = true }
+kigumi-mod-mail = { path = "../../modules/mail", version = "2.0.0", optional = true }
+kigumi-mod-sales = { path = "../../modules/sales", version = "2.0.0", optional = true }
+kigumi-mod-account = { path = "../../modules/account", version = "2.0.0", optional = true }
+kigumi-mod-stock = { path = "../../modules/stock", version = "2.0.0", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 axum = "0.7"
 clap = { version = "4", features = ["derive"] }

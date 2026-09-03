@@ -77,7 +77,7 @@ pub fn validate_extras(extras: &[String]) -> Result<(), String> {
 }
 
 /// One dependency line for a kigumi crate, in the chosen source form. `version` is the crates.io
-/// requirement (framework crates "0.1", modules "1.0").
+/// requirement (framework crates "0.2", modules "2.0").
 fn dep(framework: &FrameworkSource, crate_name: &str, subdir: &str, version: &str) -> String {
     match framework {
         FrameworkSource::CratesIo => format!("{crate_name} = \"{version}\""),
@@ -226,7 +226,7 @@ use kigumi::prelude::*;
 pub static MANIFEST: ModuleManifest = ModuleManifest {
     name: "__APP__",
     version: "1.0.0",
-    framework: ">=0.1, <0.2",
+    framework: ">=0.2, <0.3",
     depends: &[ModuleDep { name: "base", req: "^1.0" }, ModuleDep { name: "mail", req: "^1.0" }],
     summary: "__APP__ application",
 };
@@ -431,16 +431,16 @@ The server binary (`app/src/main.rs`) is four runtime calls; it should rarely ch
 
 fn render(template: &str, opts: &ScaffoldOptions) -> String {
     let (kigumi_dep, runtime_dep, mcp_dep, base_dep, mail_dep) = (
-        dep(&opts.framework, "kigumi", "crates/kigumi", "0.1"),
-        dep(&opts.framework, "kigumi-runtime", "crates/kigumi-runtime", "0.1"),
-        dep(&opts.framework, "kigumi-mcp", "crates/kigumi-mcp", "0.1"),
-        dep(&opts.framework, "kigumi-mod-base", "modules/base", "1.0"),
-        dep(&opts.framework, "kigumi-mod-mail", "modules/mail", "1.0"),
+        dep(&opts.framework, "kigumi", "crates/kigumi", "0.2"),
+        dep(&opts.framework, "kigumi-runtime", "crates/kigumi-runtime", "0.2"),
+        dep(&opts.framework, "kigumi-mcp", "crates/kigumi-mcp", "0.2"),
+        dep(&opts.framework, "kigumi-mod-base", "modules/base", "2.0"),
+        dep(&opts.framework, "kigumi-mod-mail", "modules/mail", "2.0"),
     );
     let extra_deps: String = opts
         .extra_modules
         .iter()
-        .map(|m| dep(&opts.framework, &format!("kigumi-mod-{m}"), &format!("modules/{m}"), "1.0") + "\n")
+        .map(|m| dep(&opts.framework, &format!("kigumi-mod-{m}"), &format!("modules/{m}"), "2.0") + "\n")
         .collect();
     let extra_links: String = opts
         .extra_modules
@@ -556,8 +556,8 @@ mod tests {
         };
         scaffold(&dest, &o).unwrap();
         let toml = std::fs::read_to_string(dest.join("app/Cargo.toml")).unwrap();
-        assert!(toml.contains("kigumi = \"0.1\""), "framework crates pinned to 0.1: {toml}");
-        assert!(toml.contains("kigumi-mod-sales = \"1.0\""), "modules pinned to 1.0");
+        assert!(toml.contains("kigumi = \"0.2\""), "framework crates pinned to 0.2: {toml}");
+        assert!(toml.contains("kigumi-mod-sales = \"2.0\""), "modules pinned to 2.0");
         std::fs::remove_dir_all(&dest).unwrap();
     }
 
