@@ -96,7 +96,10 @@ pub fn compute_tax_lines(line_net: Decimal, qty: Decimal, specs: &[TaxSpec], dp:
     for s in ordered.iter().copied().filter(|s| !is_included(s)) {
         let tax_amount = match s.amount_type.as_str() {
             "fixed" => (s.amount * qty).round_dp(dp),
-            _ => (running_base * s.amount / hundred).round_dp(dp), // percent (division can't be exclusive)
+            // percent (division can't be exclusive). Reaching this arm with anything OTHER than
+            // "percent"/"division" is impossible by construction: resolve_tax_specs rejects unknown
+            // kinds before a spec is built. Keep the two in step.
+            _ => (running_base * s.amount / hundred).round_dp(dp),
         };
         results.push(TaxResult {
             tax_id: s.tax_id,

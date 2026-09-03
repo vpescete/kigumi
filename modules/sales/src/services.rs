@@ -294,6 +294,11 @@ async fn apply_taxes_to(
     Ok(applied)
 }
 
+/// The `amount_type` values the engine actually implements. Kept here, at the resolution boundary,
+/// rather than inside the engine: F3 replaces this constant with a module-local registry when
+/// localization modules need to contribute kinds, and the check moves with it.
+const KNOWN_AMOUNT_TYPES: [&str; 3] = ["percent", "fixed", "division"];
+
 /// Resolves account.tax ids into engine specs, preserving the given order and dropping inactive taxes.
 /// Module-owned reference reads on the pool ServiceCtx hands out (relocated from `Db::resolve_tax_specs`).
 async fn resolve_tax_specs(pool: &sqlx::PgPool, tax_ids: &[i64]) -> Result<Vec<crate::tax::TaxSpec>, DbError> {
@@ -310,10 +315,23 @@ async fn resolve_tax_specs(pool: &sqlx::PgPool, tax_ids: &[i64]) -> Result<Vec<c
         if !row.try_get::<Option<bool>, _>("active").ok().flatten().unwrap_or(true) {
             continue;
         }
+        // Validate BEFORE building the spec: the engine's match has a percent catch-all, so an
+        // unknown kind that gets this far is not a crash, it is a silently wrong number on a money
+        // path. Refuse instead, and name the offending value.
+        let amount_type = row.try_get::<Option<String>, _>("amount_type").ok().flatten().unwrap_or_default();
+        if !KNOWN_AMOUNT_TYPES.contains(&amount_type.as_str()) {
+            return Err(DbError::Invalid {
+                message: format!(
+                    "tax {tid} has an unsupported amount_type {amount_type:?} (expected one of {})",
+                    KNOWN_AMOUNT_TYPES.join(", ")
+                ),
+                fields: vec![("amount_type".to_string(), "unsupported tax computation".to_string())],
+            });
+        }
         specs.push(crate::tax::TaxSpec {
             tax_id: tid,
             group_id: row.try_get::<Option<i64>, _>("tax_group_id").ok().flatten(),
-            amount_type: row.try_get::<Option<String>, _>("amount_type").ok().flatten().unwrap_or_else(|| "percent".to_string()),
+            amount_type,
             amount: row.try_get::<Option<Decimal>, _>("amount").ok().flatten().unwrap_or_default(),
             price_include: row.try_get::<Option<bool>, _>("price_include").ok().flatten().unwrap_or(false),
             include_base_amount: row.try_get::<Option<bool>, _>("include_base_amount").ok().flatten().unwrap_or(false),
