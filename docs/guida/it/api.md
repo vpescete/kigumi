@@ -155,6 +155,8 @@ Tutte le route sotto `/api/:name` richiedono un access token e applicano il moto
 - una richiesta **con credenziali che non verificano** riceve `401`, mai una degradazione silenziosa a guest: a un client con token scaduto va detto, invece di fargli vedere un catalogo misteriosamente vuoto;
 - un modello che il chiamante non può leggere risponde esattamente come uno inesistente (`404`), così il gate non fa trapelare nomi di modelli.
 
+**Nota per chi scrive client:** una richiesta senza token non viene respinta, *riesce come guest*. `GET /api/models` restituisce quindi `200 []` invece di `401` quando non c'è nulla di pubblico — e restituisce lo stesso `200 []` a un utente autenticato senza permessi. Un client che decide "fai il login" guardando un `401` mostrerà una schermata vuota. Il segnale è il catalogo vuoto, non lo status code.
+
 Il router metadata-only `router(models)` è l'eccezione: senza database non c'è né anagrafica utenti né righe ACL da consultare, quindi serve esattamente i modelli che gli sono stati passati. Non montarlo su un'interfaccia pubblica.
 
 | Route | Metodo | Cosa fa |

@@ -155,6 +155,8 @@ All routes under `/api/:name` require an access token and apply the ACL + record
 - a request **with credentials that do not verify** gets `401`, never a silent downgrade to guest: a client holding an expired token is told so instead of watching the catalog turn up empty;
 - a model the caller cannot read is answered exactly like one that does not exist (`404`), so the gate leaks no model names.
 
+**Client authors, note the shape of this:** a request with no token is not rejected, it *succeeds as the guest*. `GET /api/models` therefore returns `200 []` rather than `401` when nothing is public — and it returns the same `200 []` to an authenticated user with no grants. A client that keys "please log in" off a `401` will show an empty screen instead. Treat an empty catalog, not an error status, as the signal.
+
 The metadata-only `router(models)` is the exception: with no database there is no user store and no ACL rows to consult, so it serves exactly the models it was handed. Do not mount it on a public interface.
 
 | Route | Method | What it does |

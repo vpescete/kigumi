@@ -222,6 +222,13 @@ async function loadModel(name) {
 async function init() {
   try {
     const models = await api("GET", "/api/models");
+    // The catalog follows the ACLs, so a tokenless request is NOT a 401 any more: it succeeds as
+    // the guest and returns whatever the `public` group may read — usually nothing. An empty list
+    // is therefore both the tokenless case and the no-grants case, and neither reaches the catch.
+    if (!models.length) {
+      status("No models visible — log in, or paste a valid access token.", true);
+      return;
+    }
     const sel = $("#model");
     sel.innerHTML = models.map((m) => `<option>${m}</option>`).join("");
     sel.onchange = () => loadModel(sel.value);

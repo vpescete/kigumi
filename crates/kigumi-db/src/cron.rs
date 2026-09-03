@@ -133,6 +133,9 @@ impl Db {
             format!(
                 "DELETE FROM event_outbox e WHERE NOT e.dispatched AND e.occurred_at < now() - interval '{RETAIN_OUTBOX_UNDISPATCHED}'                  AND NOT EXISTS (SELECT 1 FROM webhook_delivery d WHERE d.outbox_id = e.id)"
             ),
+            // Keyed on created_at, not completion: kigumi_job has no completed_at column, so a job
+            // that queued for a week and finished today is collectable at once. Cosmetic — a done
+            // job is history — but it is why the table is not a reliable "recently ran" view.
             format!("DELETE FROM kigumi_job WHERE state = 'done' AND created_at < now() - interval '{RETAIN_JOB_DONE}'"),
             format!("DELETE FROM kigumi_job WHERE state = 'dead' AND created_at < now() - interval '{RETAIN_JOB_DEAD}'"),
             // Safe by construction: `refresh_user` requires the row to be PRESENT, so a pruned token
